@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Ka-myii - Gallery{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2 class="mb-4">
+            <i class="fas fa-images"></i> Model Gallery
+        </h2>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-6">
+        <div class="input-group">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input type="text" class="form-control" id="searchInput" placeholder="Search models...">
+        </div>
+    </div>
+    <div class="col-md-6 text-end">
+        <button class="btn btn-primary" id="refreshBtn">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Stats Card -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <h5 class="text-muted">Total Models</h5>
+                        <h3 id="totalModels">-</h3>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-muted">Completed</h5>
+                        <h3 id="completedModels">-</h3>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-muted">Total Size</h5>
+                        <h3 id="totalSize">-</h3>
+                    </div>
+                    <div class="col-md-3">
+                        <h5 class="text-muted">Status</h5>
+                        <h3 id="systemStatus">-</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Loading State -->
+<div id="loadingGallery" class="text-center py-5">
+    <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <p class="text-muted mt-3">Loading gallery...</p>
+</div>
+
+<!-- Empty State -->
+<div id="emptyGallery" class="text-center py-5" style="display: none;">
+    <i class="fas fa-image fa-5x text-muted mb-3"></i>
+    <h4>No models yet</h4>
+    <p class="text-muted">Start creating your first VTuber model!</p>
+    <a href="/generator" class="btn btn-primary">
+        <i class="fas fa-wand-magic-sparkles"></i> Create Model
+    </a>
+</div>
+
+<!-- Gallery Grid -->
+<div id="galleryGrid" class="row g-4" style="display: none;">
+    <!-- Model cards will be inserted here by JavaScript -->
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/gallery.js') }}"></script>
+{% endblock %}

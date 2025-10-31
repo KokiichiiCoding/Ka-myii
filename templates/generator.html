@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Ka-myii - Generator{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h2 class="mb-4">
+            <i class="fas fa-wand-magic-sparkles"></i> VTuber Model Generator
+        </h2>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Generation Form -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-edit"></i> Generation Settings</h5>
+            </div>
+            <div class="card-body">
+                <form id="generationForm">
+                    <!-- Prompt -->
+                    <div class="mb-3">
+                        <label for="prompt" class="form-label">Character Description *</label>
+                        <textarea
+                            class="form-control"
+                            id="prompt"
+                            rows="3"
+                            placeholder="e.g., anime girl with blue hair and green eyes, wearing a school uniform"
+                            required
+                        ></textarea>
+                        <small class="form-text text-muted">
+                            Describe the character you want to generate
+                        </small>
+                    </div>
+
+                    <!-- Negative Prompt -->
+                    <div class="mb-3">
+                        <label for="negativePrompt" class="form-label">Negative Prompt (Optional)</label>
+                        <textarea
+                            class="form-control"
+                            id="negativePrompt"
+                            rows="2"
+                            placeholder="e.g., low quality, blurry, deformed"
+                        ></textarea>
+                        <small class="form-text text-muted">
+                            Things to avoid in the generation
+                        </small>
+                    </div>
+
+                    <!-- Style -->
+                    <div class="mb-3">
+                        <label for="style" class="form-label">Art Style</label>
+                        <select class="form-select" id="style">
+                            <option value="anime">Anime</option>
+                            <option value="live2d" selected>Live2D</option>
+                            <option value="vtuber">VTuber</option>
+                            <option value="realistic">Realistic</option>
+                        </select>
+                    </div>
+
+                    <!-- Advanced Settings Toggle -->
+                    <div class="mb-3">
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-outline-secondary"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#advancedSettings"
+                        >
+                            <i class="fas fa-cog"></i> Advanced Settings
+                        </button>
+                    </div>
+
+                    <!-- Advanced Settings (Collapsed) -->
+                    <div class="collapse" id="advancedSettings">
+                        <div class="card card-body mb-3">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="width" class="form-label">Width</label>
+                                    <input type="number" class="form-control" id="width" value="512" min="256" max="1024" step="64">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="height" class="form-label">Height</label>
+                                    <input type="number" class="form-control" id="height" value="512" min="256" max="1024" step="64">
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="steps" class="form-label">Steps: <span id="stepsValue">30</span></label>
+                                <input type="range" class="form-range" id="steps" min="10" max="100" value="30" step="5">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="guidanceScale" class="form-label">Guidance Scale: <span id="guidanceScaleValue">7.5</span></label>
+                                <input type="range" class="form-range" id="guidanceScale" min="1" max="20" value="7.5" step="0.5">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="seed" class="form-label">Seed (Optional)</label>
+                                <input type="number" class="form-control" id="seed" placeholder="Random">
+                                <small class="form-text text-muted">Leave empty for random</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="includeRigging" disabled>
+                                    <label class="form-check-label" for="includeRigging">
+                                        Include Auto-Rigging (Coming Soon)
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
+                            <i class="fas fa-magic"></i> Generate Model
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Panel -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-image"></i> Generation Result</h5>
+            </div>
+            <div class="card-body">
+                <!-- Initial State -->
+                <div id="initialState" class="text-center py-5">
+                    <i class="fas fa-image fa-5x text-muted mb-3"></i>
+                    <p class="text-muted">Your generated model will appear here</p>
+                </div>
+
+                <!-- Loading State -->
+                <div id="loadingState" class="text-center py-5" style="display: none;">
+                    <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h5 id="loadingMessage">Generating model...</h5>
+                    <div class="progress mt-3">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Result State -->
+                <div id="resultState" style="display: none;">
+                    <img id="previewImage" src="" alt="Generated Model" class="img-fluid rounded mb-3">
+
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h6>Model Information</h6>
+                            <p class="mb-1"><strong>Model ID:</strong> <span id="modelId"></span></p>
+                            <p class="mb-1"><strong>Status:</strong> <span id="modelStatus" class="badge bg-success"></span></p>
+                            <p class="mb-1"><strong>Generation Time:</strong> <span id="generationTime"></span></p>
+                            <p class="mb-0"><strong>Assets:</strong> <span id="assetCount"></span></p>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-success" id="downloadBtn">
+                            <i class="fas fa-download"></i> Download Model
+                        </button>
+                        <button class="btn btn-outline-primary" id="viewDetailsBtn">
+                            <i class="fas fa-info-circle"></i> View Details
+                        </button>
+                        <button class="btn btn-outline-secondary" id="generateAnotherBtn">
+                            <i class="fas fa-redo"></i> Generate Another
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Error State -->
+                <div id="errorState" class="alert alert-danger" style="display: none;">
+                    <h5><i class="fas fa-exclamation-triangle"></i> Error</h5>
+                    <p id="errorMessage"></p>
+                    <button class="btn btn-outline-danger" id="retryBtn">
+                        <i class="fas fa-redo"></i> Try Again
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/generator.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}Ka-myii - Home{% endblock %}
+
+{% block content %}
+<div class="hero-section text-center py-5">
+    <h1 class="display-3 mb-4">
+        <i class="fas fa-magic text-primary"></i>
+        Welcome to Ka-myii
+    </h1>
+    <p class="lead mb-4">
+        Automated VTuber Model Generation System
+    </p>
+    <p class="text-muted mb-5">
+        Create high-quality Live2D style VTuber models using AI-powered generation,
+        asset separation, and automated assembly - all in one streamlined pipeline.
+    </p>
+
+    <a href="/generator" class="btn btn-primary btn-lg me-3">
+        <i class="fas fa-wand-magic-sparkles"></i> Start Creating
+    </a>
+    <a href="/gallery" class="btn btn-outline-primary btn-lg">
+        <i class="fas fa-images"></i> View Gallery
+    </a>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-12">
+        <h2 class="text-center mb-4">How It Works</h2>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-3">
+        <div class="card h-100 text-center">
+            <div class="card-body">
+                <div class="feature-icon mb-3">
+                    <i class="fas fa-image fa-3x text-primary"></i>
+                </div>
+                <h5 class="card-title">1. Image Generation</h5>
+                <p class="card-text">
+                    AI-powered character image generation using Stable Diffusion models.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card h-100 text-center">
+            <div class="card-body">
+                <div class="feature-icon mb-3">
+                    <i class="fas fa-layer-group fa-3x text-success"></i>
+                </div>
+                <h5 class="card-title">2. Asset Separation</h5>
+                <p class="card-text">
+                    Automatically separate the character into layered components.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card h-100 text-center">
+            <div class="card-body">
+                <div class="feature-icon mb-3">
+                    <i class="fas fa-cube fa-3x text-info"></i>
+                </div>
+                <h5 class="card-title">3. Model Assembly</h5>
+                <p class="card-text">
+                    Combine assets into a Live2D compatible model format.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card h-100 text-center">
+            <div class="card-body">
+                <div class="feature-icon mb-3">
+                    <i class="fas fa-check-circle fa-3x text-warning"></i>
+                </div>
+                <h5 class="card-title">4. Export & Use</h5>
+                <p class="card-text">
+                    Download your model and use it in your favorite VTuber software.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-12">
+        <h2 class="text-center mb-4">Features</h2>
+    </div>
+</div>
+
+<div class="row g-4 mb-5">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-bolt text-warning"></i> AI-Powered Generation
+                </h5>
+                <p class="card-text">
+                    Leverages state-of-the-art Stable Diffusion models for high-quality character generation.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-palette text-primary"></i> Customizable Styles
+                </h5>
+                <p class="card-text">
+                    Multiple art styles including anime, Live2D, and realistic options.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-cogs text-info"></i> Automated Pipeline
+                </h5>
+                <p class="card-text">
+                    Complete automation from image generation to model assembly.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-download text-success"></i> Easy Export
+                </h5>
+                <p class="card-text">
+                    Download models in Live2D compatible formats ready for use.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5 mb-5">
+    <div class="col-md-12 text-center">
+        <div class="alert alert-info" role="alert">
+            <h5><i class="fas fa-info-circle"></i> Getting Started</h5>
+            <p class="mb-0">
+                Click "Start Creating" above to begin generating your first VTuber model!
+                You can customize the character description, art style, and various generation parameters.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
