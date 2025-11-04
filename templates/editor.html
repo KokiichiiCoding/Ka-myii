@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}Ka-myii - Expression Editor{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <h2 class="mb-3">
+            <i class="fas fa-smile"></i> Expression & Accessory Editor
+        </h2>
+        <p class="text-muted">
+            Model ID: <code id="modelIdDisplay">{{ model_id }}</code>
+        </p>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Left Panel - Controls -->
+    <div class="col-md-4">
+        <!-- Expression Generator Card -->
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-theater-masks"></i> Generate Expressions</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Select expressions to generate for your model:</p>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="checkAll">
+                    <label class="form-check-label fw-bold" for="checkAll">
+                        Select All
+                    </label>
+                </div>
+
+                <hr>
+
+                <div id="expressionCheckboxes" class="expression-list">
+                    <!-- Basic Expressions -->
+                    <div class="mb-3">
+                        <strong class="small">Basic:</strong>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="neutral" id="expr-neutral">
+                            <label class="form-check-label" for="expr-neutral">😐 Neutral</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="happy" id="expr-happy" checked>
+                            <label class="form-check-label" for="expr-happy">😊 Happy</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="sad" id="expr-sad" checked>
+                            <label class="form-check-label" for="expr-sad">😢 Sad</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="angry" id="expr-angry" checked>
+                            <label class="form-check-label" for="expr-angry">😠 Angry</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="surprised" id="expr-surprised" checked>
+                            <label class="form-check-label" for="expr-surprised">😲 Surprised</label>
+                        </div>
+                    </div>
+
+                    <!-- VTuber Specific -->
+                    <div class="mb-3">
+                        <strong class="small">VTuber Favorites:</strong>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="cry" id="expr-cry" checked>
+                            <label class="form-check-label" for="expr-cry">😭 Cry</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="frustrated" id="expr-frustrated" checked>
+                            <label class="form-check-label" for="expr-frustrated">😤 Frustrated</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="smug" id="expr-smug" checked>
+                            <label class="form-check-label" for="expr-smug">😏 Smug</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="heart_eyes" id="expr-heart_eyes" checked>
+                            <label class="form-check-label" for="expr-heart_eyes">😍 Heart Eyes</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="blush" id="expr-blush">
+                            <label class="form-check-label" for="expr-blush">😊 Blush</label>
+                        </div>
+                    </div>
+
+                    <!-- Special Expressions -->
+                    <div class="mb-3">
+                        <strong class="small">Special:</strong>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="shocked" id="expr-shocked">
+                            <label class="form-check-label" for="expr-shocked">😱 Shocked</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="sleepy" id="expr-sleepy">
+                            <label class="form-check-label" for="expr-sleepy">😴 Sleepy</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="embarrassed" id="expr-embarrassed">
+                            <label class="form-check-label" for="expr-embarrassed">😳 Embarrassed</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="pouty" id="expr-pouty">
+                            <label class="form-check-label" for="expr-pouty">😾 Pouty</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="wink" id="expr-wink">
+                            <label class="form-check-label" for="expr-wink">😉 Wink</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input expr-checkbox" type="checkbox" value="excited" id="expr-excited">
+                            <label class="form-check-label" for="expr-excited">🤩 Excited</label>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="generateExpressionsBtn" class="btn btn-primary w-100 mt-3">
+                    <i class="fas fa-magic"></i> Generate Expressions
+                </button>
+            </div>
+        </div>
+
+        <!-- Accessory Generator Card -->
+        <div class="card mb-3">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-crown"></i> Add Accessories</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Preset Theme:</label>
+                    <select class="form-select" id="accessoryPreset">
+                        <option value="">Custom Selection</option>
+                        <option value="cute">🎀 Cute (Cat Ears, Bow, Hearts)</option>
+                        <option value="cool">😎 Cool (Glasses, Choker)</option>
+                        <option value="elegant">👑 Elegant (Crown, Sparkles)</option>
+                        <option value="fantasy">✨ Fantasy (Halo, Horns, Stars)</option>
+                        <option value="casual">👔 Casual (Headband, Bow Tie)</option>
+                    </select>
+                </div>
+
+                <button id="generateAccessoriesBtn" class="btn btn-success w-100">
+                    <i class="fas fa-plus"></i> Add Accessories
+                </button>
+            </div>
+        </div>
+
+        <!-- Image Adjustments Card -->
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-sliders-h"></i> Image Adjustments</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="brightness" class="form-label">Brightness: <span id="brightnessValue">1.0</span></label>
+                    <input type="range" class="form-range" id="brightness" min="0.5" max="2" value="1" step="0.1">
+                </div>
+
+                <div class="mb-3">
+                    <label for="contrast" class="form-label">Contrast: <span id="contrastValue">1.0</span></label>
+                    <input type="range" class="form-range" id="contrast" min="0.5" max="2" value="1" step="0.1">
+                </div>
+
+                <div class="mb-3">
+                    <label for="saturation" class="form-label">Saturation: <span id="saturationValue">1.0</span></label>
+                    <input type="range" class="form-range" id="saturation" min="0" max="2" value="1" step="0.1">
+                </div>
+
+                <button id="applyAdjustmentsBtn" class="btn btn-info w-100">
+                    <i class="fas fa-check"></i> Apply Adjustments
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Middle Panel - Preview -->
+    <div class="col-md-5">
+        <div class="card sticky-top" style="top: 20px;">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-eye"></i> Live Preview</h5>
+            </div>
+            <div class="card-body p-0">
+                <div id="previewContainer" class="text-center bg-light" style="min-height: 500px; position: relative;">
+                    <img id="previewImage" src="/api/generation/preview/{{ model_id }}"
+                         alt="Model Preview"
+                         class="img-fluid"
+                         style="max-height: 600px; object-fit: contain;">
+
+                    <!-- Loading overlay -->
+                    <div id="previewLoading" class="preview-loading" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Processing...</p>
+                    </div>
+                </div>
+
+                <!-- Expression Toggle Bar -->
+                <div class="p-3 border-top" id="expressionToggleBar" style="display: none;">
+                    <h6 class="mb-2">Quick Expression Toggle:</h6>
+                    <div class="btn-group-vertical w-100" role="group" id="expressionToggles">
+                        <!-- Expression buttons will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel - Generated Items -->
+    <div class="col-md-3">
+        <!-- Expression List -->
+        <div class="card mb-3">
+            <div class="card-header bg-warning">
+                <h6 class="mb-0"><i class="fas fa-list"></i> Generated Expressions</h6>
+            </div>
+            <div class="card-body p-2">
+                <div id="expressionList" class="list-group">
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-info-circle"></i>
+                        <p class="small mb-0">No expressions generated yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Accessory List -->
+        <div class="card mb-3">
+            <div class="card-header bg-success">
+                <h6 class="mb-0"><i class="fas fa-list"></i> Added Accessories</h6>
+            </div>
+            <div class="card-body p-2">
+                <div id="accessoryList" class="list-group">
+                    <div class="text-center text-muted py-3">
+                        <i class="fas fa-info-circle"></i>
+                        <p class="small mb-0">No accessories added yet</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Options -->
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <h6 class="mb-0"><i class="fas fa-download"></i> Export</h6>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-outline-primary w-100 mb-2" id="exportAllBtn">
+                    <i class="fas fa-file-archive"></i> Download All
+                </button>
+                <button class="btn btn-outline-secondary w-100" id="exportLive2DBtn">
+                    <i class="fas fa-cube"></i> Export for Live2D
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="statusToast" class="toast hide" role="alert">
+        <div class="toast-header">
+            <strong class="me-auto">Ka-myii</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastBody">
+            <!-- Toast message will be inserted here -->
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.expression-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.preview-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.expression-toggle-btn {
+    margin-bottom: 5px;
+}
+
+.expression-toggle-btn.active {
+    background-color: #0d6efd !important;
+    color: white !important;
+}
+
+#previewImage {
+    transition: opacity 0.3s ease;
+}
+
+.list-group-item {
+    font-size: 0.9rem;
+    padding: 0.5rem;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+<script>
+// Pass model ID to JavaScript
+window.MODEL_ID = "{{ model_id }}";
+</script>
+{% endblock %}

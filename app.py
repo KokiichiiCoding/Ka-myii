@@ -16,6 +16,7 @@ import config
 from src.utils.helpers import setup_logging
 from src.api.generation import generation_bp, init_assembly_line
 from src.api.models import models_bp
+from src.api.expression import expression_bp
 
 # Setup logging
 setup_logging(
@@ -49,6 +50,7 @@ def create_app(use_dummy_generators: bool = False):
     # Register blueprints
     app.register_blueprint(generation_bp)
     app.register_blueprint(models_bp)
+    app.register_blueprint(expression_bp)
 
     # Routes
     @app.route('/')
@@ -65,6 +67,11 @@ def create_app(use_dummy_generators: bool = False):
     def gallery():
         """Model gallery page"""
         return render_template('gallery.html')
+
+    @app.route('/editor/<model_id>')
+    def editor(model_id):
+        """Expression editor page"""
+        return render_template('editor.html', model_id=model_id)
 
     @app.route('/health')
     def health():

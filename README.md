@@ -10,13 +10,37 @@ Ka-myii is a Python-based web application that automates the creation of high-qu
 
 ## 🌟 Features
 
+### Core Generation
 - **AI-Powered Image Generation**: Uses Stable Diffusion models to generate high-quality character images
 - **Intelligent Asset Separation**: Automatically separates characters into layered components (body, head, eyes, mouth, hair, etc.)
 - **Live2D Model Assembly**: Combines separated assets into Live2D-compatible model formats
-- **Web-Based Interface**: Beautiful, intuitive web UI built with Flask and Bootstrap
 - **Assembly Line Pipeline**: Streamlined workflow from prompt to finished model
-- **Batch Processing**: Generate multiple models in sequence
+
+### Expression & Emotion System 😊😢😠
+- **15+ VTuber Expressions**: Happy, sad, angry, surprised, cry, frustrated, smug, heart eyes, blush, shocked, sleepy, embarrassed, determined, pouty, wink, worried, excited, and more!
+- **Live Expression Toggle**: Switch between expressions in real-time to preview your character
+- **Automatic Expression Generation**: AI-generated eyes, mouth, eyebrows, blush, and tears for each emotion
+- **Expression Preview**: See exactly how each expression looks before exporting
+
+### Accessory System 👑🎀
+- **20+ Accessory Types**: Cat ears, bunny ears, glasses, bows, halos, horns, crowns, headbands, chokers, and more
+- **Preset Themes**: Cute, Cool, Elegant, Fantasy, and Casual accessory sets
+- **Special Effects**: Sparkles, hearts, stars, and other decorative elements
+- **Customizable**: Adjust colors, sizes, and positions
+
+### Image Editing Tools 🎨
+- **Brightness/Contrast/Saturation**: Fine-tune image appearance
+- **Filters**: Blur, sharpen, smooth, edge enhance, emboss, and more
+- **Transformations**: Rotate, flip, crop, and resize
+- **Background Removal**: AI-powered background removal
+- **Auto-Enhance**: Automatic quality improvement
+
+### Interface & Management
+- **Web-Based Interface**: Beautiful, intuitive web UI built with Flask and Bootstrap
+- **Expression Editor**: Dedicated interface for managing expressions and accessories
 - **Gallery Management**: View, download, and manage all your generated models
+- **Batch Processing**: Generate multiple models in sequence
+- **Live Preview**: Real-time preview of all changes
 
 ## 🚀 Quick Start
 
@@ -107,11 +131,35 @@ http://localhost:5000
 
 6. **Download your model** when generation is complete!
 
+### Adding Expressions & Accessories
+
+After generating a model, click **"Edit Expressions & Accessories"** to:
+
+1. **Generate Expressions**:
+   - Select from 15+ emotions (happy, sad, angry, cry, smug, heart eyes, etc.)
+   - Click "Generate Expressions" to create all selected emotions
+   - Use the live toggle to preview each expression
+
+2. **Add Accessories**:
+   - Choose a preset theme (Cute, Cool, Elegant, Fantasy, Casual)
+   - Or select individual accessories (cat ears, glasses, bows, etc.)
+   - Click "Add Accessories" to apply them to your model
+
+3. **Adjust Image Settings**:
+   - Fine-tune brightness, contrast, and saturation
+   - Apply filters and effects
+   - See changes in real-time preview
+
+4. **Export**:
+   - Download all expressions and accessories as a package
+   - Export for Live2D integration
+
 ### Viewing Your Models
 
 Visit the **Gallery** page to:
 - View all generated models
 - Search and filter models
+- **Edit expressions and accessories** for any model
 - Download models as ZIP files
 - View detailed model information
 - Delete unwanted models
@@ -267,6 +315,59 @@ GET /api/generation/download/{model_id}
 
 ```http
 GET /api/models/stats
+```
+
+### Generate Expressions
+
+```http
+POST /api/expression/generate
+Content-Type: application/json
+
+{
+  "model_id": "uuid",
+  "expressions": ["happy", "sad", "angry", "cry", "smug", "heart_eyes"]
+}
+```
+
+### List Available Expressions
+
+```http
+GET /api/expression/list
+```
+
+### Get Expression Preview
+
+```http
+GET /api/expression/preview/{model_id}/{expression_name}
+```
+
+### Generate Accessories
+
+```http
+POST /api/expression/accessories/generate
+Content-Type: application/json
+
+{
+  "model_id": "uuid",
+  "preset": "cute"  // or "cool", "elegant", "fantasy", "casual"
+}
+```
+
+### Edit Image
+
+```http
+POST /api/expression/edit
+Content-Type: application/json
+
+{
+  "model_id": "uuid",
+  "image_path": "base_image.png",
+  "operations": [
+    {"type": "brightness", "factor": 1.2},
+    {"type": "contrast", "factor": 1.1},
+    {"type": "saturation", "factor": 1.0}
+  ]
+}
 ```
 
 ## 🛠️ Development
