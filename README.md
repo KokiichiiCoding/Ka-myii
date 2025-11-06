@@ -35,12 +35,31 @@ Ka-myii is a Python-based web application that automates the creation of high-qu
 - **Background Removal**: AI-powered background removal
 - **Auto-Enhance**: Automatic quality improvement
 
+### Advanced AI Features 🤖
+- **ControlNet Expression Generation**: Enhanced expression generation using ControlNet for better control
+- **Segment Anything (SAM)**: Superior automatic segmentation for cleaner, more precise layers
+- **Expression Variations**: Generate multiple variations of each expression automatically
+- **AI-Powered Segmentation**: Intelligent layer detection and classification
+
+### Professional Export & Integration 📦
+- **Live2D Cubism Export**: Generate complete Live2D packages with proper model3.json structure
+- **Auto Physics Setup**: Automatically generate physics3.json based on detected hair/clothing parts
+- **Expression Animations**: Create GIF/WebM previews of blink, talking, and expression transitions
+- **VRM Support**: Framework for VRM conversion (coming soon)
+
+### Workflow & History 📊
+- **Prompt History System**: Store all generations with thumbnails, seeds, and parameters for easy re-use
+- **Model Versioning**: Auto-versioning with full reproducibility tracking (config.json, seed, hash)
+- **Favorites & Search**: Save and search through your prompt history
+- **Statistics Dashboard**: Track usage patterns and popular prompts
+
 ### Interface & Management
 - **Web-Based Interface**: Beautiful, intuitive web UI built with Flask and Bootstrap
 - **Expression Editor**: Dedicated interface for managing expressions and accessories
 - **Gallery Management**: View, download, and manage all your generated models
 - **Batch Processing**: Generate multiple models in sequence
 - **Live Preview**: Real-time preview of all changes
+- **Animation Previews**: View expression transitions and blink/talk animations
 
 ## 🚀 Quick Start
 
@@ -181,16 +200,26 @@ Ka-myii/
 │   │   └── models.py       # Model management endpoints
 │   │
 │   ├── core/           # Core functionality
-│   │   ├── image_generator.py    # Stable Diffusion integration
-│   │   ├── asset_separator.py    # Asset layer separation
-│   │   ├── model_assembler.py    # Live2D model assembly
-│   │   └── rigging.py            # Auto-rigging (placeholder)
+│   │   ├── image_generator.py         # Stable Diffusion integration
+│   │   ├── asset_separator.py         # Asset layer separation
+│   │   ├── model_assembler.py         # Live2D model assembly
+│   │   ├── expression_generator.py    # Expression generation ⭐
+│   │   ├── accessory_generator.py     # Accessory creation ⭐
+│   │   ├── image_editor.py            # Image editing tools ⭐
+│   │   ├── controlnet_expression.py   # ControlNet integration ⭐
+│   │   ├── sam_segmentation.py        # Segment Anything integration ⭐
+│   │   ├── auto_physics.py            # Auto physics generation ⭐
+│   │   ├── live2d_exporter.py         # Live2D export helper ⭐
+│   │   ├── expression_animator.py     # GIF/animation creator ⭐
+│   │   └── rigging.py                 # Auto-rigging (placeholder)
 │   │
 │   ├── models/         # Data models
-│   │   └── vtuber_model.py       # VTuber model data structures
+│   │   └── vtuber_model.py            # VTuber model data structures
 │   │
 │   ├── utils/          # Utilities
-│   │   └── helpers.py            # Helper functions
+│   │   ├── helpers.py                 # Helper functions
+│   │   ├── prompt_history.py          # Prompt history system ⭐
+│   │   └── model_versioning.py        # Model versioning ⭐
 │   │
 │   └── pipeline/       # Pipeline orchestration
 │       └── assembly_line.py      # Main generation pipeline

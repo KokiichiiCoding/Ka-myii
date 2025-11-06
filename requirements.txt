@@ -20,6 +20,17 @@ numpy>=1.24.0
 # Background Removal (optional but recommended)
 rembg>=2.0.50
 
+# Advanced Features (Optional)
+# Segment Anything Model for better segmentation
+# segment-anything>=1.0  # Install separately: pip install git+https://github.com/facebookresearch/segment-anything.git
+
+# ControlNet for advanced expression generation
+# controlnet-aux>=0.0.6  # Uncomment for ControlNet support
+
+# WebSocket for real-time progress (optional)
+# flask-socketio>=5.3.0
+# python-socketio>=5.10.0
+
 # Utilities
 pydantic>=2.5.0
 python-dotenv>=1.0.0
