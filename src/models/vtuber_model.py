@@ -49,6 +49,15 @@ class GenerationRequest:
     include_rigging: bool = False
     custom_layers: Optional[List[str]] = None
     reference_image: Optional[str] = None
+    pipeline_profile: str = "standard"
+    segmentation_mode: str = "auto"
+    use_controlnet: Optional[bool] = None
+    generate_expressions: Optional[bool] = None
+    expression_list: Optional[List[str]] = None
+    expression_variations: int = 0
+    generate_accessories: Optional[bool] = None
+    accessory_list: Optional[List[str]] = None
+    enable_auto_physics: Optional[bool] = None
 
 
 @dataclass

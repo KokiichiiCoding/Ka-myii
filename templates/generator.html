@@ -98,6 +98,27 @@
                     <!-- Advanced Settings (Collapsed) -->
                     <div class="collapse" id="advancedSettings">
                         <div class="card card-body mb-3">
+                            <div class="mb-3">
+                                <label for="pipelineProfile" class="form-label">Pipeline Preset</label>
+                                <select class="form-select" id="pipelineProfile">
+                                    <option value="standard" selected>Standard Diffusion</option>
+                                    <option value="enhanced">Ultimate VTuber (SAM + ControlNet)</option>
+                                    <option value="lightweight">Lightweight (Dummy)</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    Presets bundle segmentation, ControlNet, accessories, and physics helpers inspired by Gemini's creative workflow.
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="segmentationMode" class="form-label">Segmentation Mode</label>
+                                <select class="form-select" id="segmentationMode">
+                                    <option value="auto" selected>Auto (follow preset)</option>
+                                    <option value="basic">Rule-based layers</option>
+                                    <option value="sam">Segment Anything (SAM)</option>
+                                </select>
+                            </div>
+
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="width" class="form-label">Width</label>
@@ -125,6 +146,47 @@
                                 <small class="form-text text-muted">Leave empty for random</small>
                             </div>
 
+                            <hr>
+
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="generateExpressions" checked>
+                                <label class="form-check-label" for="generateExpressions">
+                                    Generate expression pack
+                                </label>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-8 mb-3">
+                                    <label for="expressionList" class="form-label">Expression overrides</label>
+                                    <input type="text" class="form-control" id="expressionList" placeholder="happy, sad, smug">
+                                    <small class="form-text text-muted">Comma-separated list. Blank = preset bundle.</small>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="expressionVariations" class="form-label">AI variations</label>
+                                    <input type="number" class="form-control" id="expressionVariations" value="0" min="0" max="6">
+                                </div>
+                            </div>
+
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="enableControlNet">
+                                <label class="form-check-label" for="enableControlNet">
+                                    Use ControlNet for extra expression renders
+                                </label>
+                            </div>
+
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="generateAccessories">
+                                <label class="form-check-label" for="generateAccessories">
+                                    Generate accessory overlays
+                                </label>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="accessoryList" class="form-label">Accessory overrides</label>
+                                <input type="text" class="form-control" id="accessoryList" placeholder="cat_ears, halo, glasses">
+                                <small class="form-text text-muted">Comma-separated list. Leave blank to follow preset.</small>
+                            </div>
+
                             <div class="mb-3">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="includeRigging" disabled>
@@ -133,6 +195,13 @@
                                     </label>
                                 </div>
                             </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="enableAutoPhysics" checked>
+                                <label class="form-check-label" for="enableAutoPhysics">
+                                    Auto-generate Live2D physics presets
+                                </label>
+                            </div>
+
                         </div>
                     </div>
 
@@ -182,6 +251,13 @@
                             <p class="mb-1"><strong>Status:</strong> <span id="modelStatus" class="badge bg-success"></span></p>
                             <p class="mb-1"><strong>Generation Time:</strong> <span id="generationTime"></span></p>
                             <p class="mb-0"><strong>Assets:</strong> <span id="assetCount"></span></p>
+                        </div>
+                    </div>
+
+                    <div class="card mb-3" id="pipelineSummaryCard" style="display: none;">
+                        <div class="card-body">
+                            <h6>Pipeline Summary</h6>
+                            <ul class="list-unstyled mb-0" id="pipelineSummary"></ul>
                         </div>
                     </div>
 

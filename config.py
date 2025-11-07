@@ -62,6 +62,64 @@ PIPELINE = {
     "cleanup_temp_files": False,  # Keep for debugging
 }
 
+# Available pipeline presets that combine optional modules together.
+# The UI exposes these so users can switch between a lightweight dummy
+# flow, the default diffusers pipeline, and the new "ultimate" preset that
+# layers SAM segmentation, ControlNet assisted expressions, and automatic
+# physics helpers.
+PIPELINE_PROFILES = {
+    "lightweight": {
+        "label": "Lightweight (Dummy)",
+        "description": "Uses all dummy components for rapid UI previews without GPU dependencies.",
+        "use_dummy": True,
+        "segmentation": "basic",
+        "controlnet": False,
+        "auto_physics": False,
+        "generate_expressions": False,
+        "generate_accessories": False,
+    },
+    "standard": {
+        "label": "Standard Diffusion",
+        "description": "Stable Diffusion for the base image with rule-based layer separation and Live2D assembly.",
+        "use_dummy": False,
+        "segmentation": "basic",
+        "controlnet": False,
+        "auto_physics": True,
+        "generate_expressions": True,
+        "generate_accessories": False,
+    },
+    "enhanced": {
+        "label": "Ultimate VTuber (SAM + ControlNet)",
+        "description": (
+            "High fidelity preset that fuses SAM segmentation, accessory generation, "
+            "ControlNet expressions, and automatic physics."
+        ),
+        "use_dummy": False,
+        "segmentation": "sam",
+        "controlnet": True,
+        "auto_physics": True,
+        "generate_expressions": True,
+        "generate_accessories": True,
+    },
+}
+
+# Default expression and accessory shortcuts used when the UI requests
+# automatic batches without providing explicit selections.
+DEFAULT_EXPRESSIONS = [
+    "neutral",
+    "happy",
+    "sad",
+    "angry",
+    "surprised",
+    "smug",
+]
+
+DEFAULT_ACCESSORIES = [
+    "cat_ears",
+    "halo",
+    "glasses",
+]
+
 # API settings
 API = {
     "max_concurrent_generations": 3,

@@ -34,6 +34,9 @@ def get_info():
             ],
             "default_settings": config.IMAGE_GENERATION,
             "asset_layers": config.ASSET_SEPARATION["layers"],
+            "pipeline_profiles": config.PIPELINE_PROFILES,
+            "default_expressions": config.DEFAULT_EXPRESSIONS,
+            "default_accessories": config.DEFAULT_ACCESSORIES,
             "max_concurrent": config.API["max_concurrent_generations"],
             "features": {
                 "image_generation": True,

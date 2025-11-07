@@ -60,6 +60,25 @@ def generate_model():
     try:
         data = request.json
 
+        # Normalise list inputs
+        def _normalise_list(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return [item.strip() for item in value.split(',') if item.strip()]
+            if isinstance(value, list):
+                cleaned = []
+                for item in value:
+                    if isinstance(item, str):
+                        stripped = item.strip()
+                        if stripped:
+                            cleaned.append(stripped)
+                return cleaned or None
+            return None
+
+        expressions = _normalise_list(data.get('expressions'))
+        accessories = _normalise_list(data.get('accessories'))
+
         # Create generation request
         gen_request = GenerationRequest(
             prompt=data.get('prompt', ''),
@@ -71,7 +90,16 @@ def generate_model():
             guidance_scale=data.get('guidance_scale', 7.5),
             seed=data.get('seed'),
             include_rigging=data.get('include_rigging', False),
-            custom_layers=data.get('custom_layers')
+            custom_layers=data.get('custom_layers'),
+            pipeline_profile=data.get('pipeline_profile', 'standard'),
+            segmentation_mode=data.get('segmentation_mode', 'auto'),
+            use_controlnet=data.get('use_controlnet'),
+            generate_expressions=data.get('generate_expressions'),
+            expression_list=expressions,
+            expression_variations=int(data.get('expression_variations', 0) or 0),
+            generate_accessories=data.get('generate_accessories'),
+            accessory_list=accessories,
+            enable_auto_physics=data.get('enable_auto_physics'),
         )
 
         if not gen_request.prompt:

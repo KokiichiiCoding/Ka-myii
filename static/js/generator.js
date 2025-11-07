@@ -53,6 +53,17 @@ const stepsInput = document.getElementById('steps');
 const guidanceScaleInput = document.getElementById('guidanceScale');
 const seedInput = document.getElementById('seed');
 const includeRiggingInput = document.getElementById('includeRigging');
+const pipelineProfileSelect = document.getElementById('pipelineProfile');
+const segmentationModeSelect = document.getElementById('segmentationMode');
+const generateExpressionsInput = document.getElementById('generateExpressions');
+const expressionListInput = document.getElementById('expressionList');
+const expressionVariationsInput = document.getElementById('expressionVariations');
+const enableControlNetInput = document.getElementById('enableControlNet');
+const generateAccessoriesInput = document.getElementById('generateAccessories');
+const accessoryListInput = document.getElementById('accessoryList');
+const enableAutoPhysicsInput = document.getElementById('enableAutoPhysics');
+const pipelineSummaryCard = document.getElementById('pipelineSummaryCard');
+const pipelineSummaryList = document.getElementById('pipelineSummary');
 
 // Range value displays
 const stepsValue = document.getElementById('stepsValue');
@@ -86,6 +97,17 @@ form.addEventListener('submit', async function(e) {
     await generateModel();
 });
 
+function parseCommaList(value) {
+    if (!value) {
+        return [];
+    }
+
+    return value
+        .split(',')
+        .map(item => item.trim())
+        .filter(item => item.length > 0);
+}
+
 // Generate model
 async function generateModel() {
     // Get form values
@@ -98,8 +120,25 @@ async function generateModel() {
         steps: parseInt(stepsInput.value),
         guidance_scale: parseFloat(guidanceScaleInput.value),
         seed: seedInput.value ? parseInt(seedInput.value) : null,
-        include_rigging: includeRiggingInput.checked
+        include_rigging: includeRiggingInput.checked,
+        pipeline_profile: pipelineProfileSelect.value,
+        segmentation_mode: segmentationModeSelect.value,
+        generate_expressions: generateExpressionsInput.checked,
+        expression_variations: parseInt(expressionVariationsInput.value || '0', 10) || 0,
+        use_controlnet: enableControlNetInput.checked,
+        generate_accessories: generateAccessoriesInput.checked,
+        enable_auto_physics: enableAutoPhysicsInput.checked
     };
+
+    const expressionOverrides = parseCommaList(expressionListInput.value);
+    if (expressionOverrides.length > 0) {
+        params.expressions = expressionOverrides;
+    }
+
+    const accessoryOverrides = parseCommaList(accessoryListInput.value);
+    if (accessoryOverrides.length > 0) {
+        params.accessories = accessoryOverrides;
+    }
 
     // Validate
     if (!params.prompt) {
@@ -253,6 +292,8 @@ function showResultState(model) {
     generationTimeSpan.textContent = utils.formatDuration(model.generation_time);
     assetCountSpan.textContent = model.assets?.length || 0;
 
+    updatePipelineSummary(model);
+
     // Set up download button
     downloadBtn.onclick = function() {
         window.location.href = api.getDownloadUrl(model.id);
@@ -271,6 +312,68 @@ function showResultState(model) {
     };
 }
 
+function updatePipelineSummary(model) {
+    if (!pipelineSummaryCard || !pipelineSummaryList) {
+        return;
+    }
+
+    const meta = model.metadata || {};
+    const rows = [];
+
+    if (meta.pipeline_profile_label || meta.pipeline_profile) {
+        rows.push({ label: 'Profile', value: meta.pipeline_profile_label || meta.pipeline_profile });
+    }
+
+    if (meta.segmentation_mode) {
+        rows.push({ label: 'Segmentation', value: meta.segmentation_mode });
+    }
+
+    const controlnetStatus = meta.controlnet_active
+        ? 'Generated'
+        : (meta.controlnet_enabled ? 'Requested' : 'Disabled');
+    rows.push({ label: 'ControlNet', value: controlnetStatus });
+    rows.push({ label: 'Auto Physics', value: meta.auto_physics_enabled ? 'Enabled' : 'Disabled' });
+
+    if (meta.expressions && typeof meta.expressions.count !== 'undefined') {
+        rows.push({ label: 'Expressions', value: `${meta.expressions.count} presets` });
+    }
+
+    if (meta.accessories && Array.isArray(meta.accessories)) {
+        rows.push({ label: 'Accessories', value: `${meta.accessories.length} layers` });
+    }
+
+    if (meta.segmentation_report) {
+        const report = meta.segmentation_report;
+        rows.push({
+            label: 'Segmentation detail',
+            value: `${report.base_layers} base + ${report.advanced_layers} advanced (${(report.methods || []).join(', ')})`
+        });
+    }
+
+    if (meta.summary_path) {
+        rows.push({ label: 'Summary file', value: meta.summary_path });
+    }
+
+    if (meta.physics_path) {
+        rows.push({ label: 'Physics file', value: meta.physics_path });
+    }
+
+    pipelineSummaryList.innerHTML = '';
+    let rendered = 0;
+
+    rows.forEach(row => {
+        if (row.value === undefined || row.value === null || row.value === '') {
+            return;
+        }
+        const li = document.createElement('li');
+        li.innerHTML = `<strong>${row.label}:</strong> ${row.value}`;
+        pipelineSummaryList.appendChild(li);
+        rendered += 1;
+    });
+
+    pipelineSummaryCard.style.display = rendered > 0 ? 'block' : 'none';
+}
+
 // Show error state
 function showErrorState(errorMessage) {
     initialState.style.display = 'none';
@@ -285,6 +388,10 @@ function showErrorState(errorMessage) {
 
 // Show model details
 function showModelDetails(model) {
+    const meta = model.metadata || {};
+    const expressions = meta.expressions?.names?.join(', ') || 'None';
+    const accessories = meta.accessories?.length || 0;
+
     let details = `
 Model Details:
 --------------
@@ -293,6 +400,14 @@ Name: ${model.name || 'N/A'}
 Status: ${model.status}
 Created: ${model.created_at}
 Generation Time: ${utils.formatDuration(model.generation_time)}
+
+Pipeline:
+- Profile: ${meta.pipeline_profile_label || meta.pipeline_profile || 'standard'}
+- Segmentation: ${meta.segmentation_mode || 'basic'}
+- ControlNet: ${meta.controlnet_active ? 'generated' : (meta.controlnet_enabled ? 'requested' : 'disabled')}
+- Auto Physics: ${meta.auto_physics_enabled ? (meta.physics_path ? 'generated' : 'requested') : 'disabled'}
+- Expressions: ${expressions}
+- Accessories generated: ${accessories}
 
 Assets (${model.assets?.length || 0}):
 ${model.assets?.map(a => `- ${a.layer_type}: ${a.file_path}`).join('\n') || 'None'}
@@ -318,7 +433,66 @@ generateAnotherBtn.addEventListener('click', function() {
     // Reset range displays
     stepsValue.textContent = stepsInput.value;
     guidanceScaleValue.textContent = guidanceScaleInput.value;
+
+    // Reset advanced toggles
+    if (pipelineProfileSelect) {
+        pipelineProfileSelect.value = 'standard';
+    }
+    if (segmentationModeSelect) {
+        segmentationModeSelect.value = 'auto';
+    }
+    if (generateExpressionsInput) {
+        generateExpressionsInput.checked = true;
+    }
+    if (enableAutoPhysicsInput) {
+        enableAutoPhysicsInput.checked = true;
+    }
+    if (enableControlNetInput) {
+        enableControlNetInput.checked = false;
+    }
+    if (generateAccessoriesInput) {
+        generateAccessoriesInput.checked = false;
+    }
+    if (expressionVariationsInput) {
+        expressionVariationsInput.value = '0';
+    }
+    if (pipelineSummaryCard) {
+        pipelineSummaryCard.style.display = 'none';
+    }
 });
+
+if (pipelineProfileSelect) {
+    pipelineProfileSelect.addEventListener('change', handlePipelinePresetChange);
+    handlePipelinePresetChange();
+}
+
+function handlePipelinePresetChange() {
+    if (!pipelineProfileSelect) {
+        return;
+    }
+
+    const preset = pipelineProfileSelect.value;
+
+    if (preset === 'lightweight') {
+        if (segmentationModeSelect) segmentationModeSelect.value = 'basic';
+        if (generateExpressionsInput) generateExpressionsInput.checked = false;
+        if (enableControlNetInput) enableControlNetInput.checked = false;
+        if (generateAccessoriesInput) generateAccessoriesInput.checked = false;
+        if (enableAutoPhysicsInput) enableAutoPhysicsInput.checked = false;
+    } else if (preset === 'enhanced') {
+        if (segmentationModeSelect) segmentationModeSelect.value = 'auto';
+        if (generateExpressionsInput) generateExpressionsInput.checked = true;
+        if (enableControlNetInput) enableControlNetInput.checked = true;
+        if (generateAccessoriesInput) generateAccessoriesInput.checked = true;
+        if (enableAutoPhysicsInput) enableAutoPhysicsInput.checked = true;
+    } else {
+        if (segmentationModeSelect) segmentationModeSelect.value = 'auto';
+        if (generateExpressionsInput) generateExpressionsInput.checked = true;
+        if (enableControlNetInput) enableControlNetInput.checked = false;
+        if (generateAccessoriesInput) generateAccessoriesInput.checked = false;
+        if (enableAutoPhysicsInput) enableAutoPhysicsInput.checked = true;
+    }
+}
 
 // Retry on error
 retryBtn.addEventListener('click', function() {
