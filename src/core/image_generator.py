@@ -5,6 +5,7 @@ import torch
 from pathlib import Path
 from typing import Optional, Dict
 import logging
+import uuid
 
 try:
     from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
@@ -13,6 +14,13 @@ except ImportError:
     DIFFUSERS_AVAILABLE = False
 
 from src.models.vtuber_model import GenerationRequest
+
+# Import progress tracking
+try:
+    from src.utils.progress_tracker import get_progress_manager, DiffusionProgressCallback
+    PROGRESS_AVAILABLE = True
+except ImportError:
+    PROGRESS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +86,7 @@ class ImageGenerator:
         self,
         request: GenerationRequest,
         output_path: Path,
+        task_id: Optional[str] = None,
     ) -> Path:
         """
         Generate an image based on the request
@@ -85,6 +94,7 @@ class ImageGenerator:
         Args:
             request: Generation request with parameters
             output_path: Path to save the generated image
+            task_id: Optional task ID for progress tracking
 
         Returns:
             Path to the generated image
@@ -97,6 +107,21 @@ class ImageGenerator:
         # Enhance prompt for VTuber/anime style
         enhanced_prompt = self._enhance_prompt(request.prompt, request.style)
 
+        # Create progress tracker if available
+        tracker = None
+        callback = None
+        if PROGRESS_AVAILABLE:
+            try:
+                manager = get_progress_manager()
+                if manager:
+                    if not task_id:
+                        task_id = f"gen_{uuid.uuid4().hex[:8]}"
+                    tracker = manager.create_tracker(task_id, request.steps)
+                    callback = DiffusionProgressCallback(tracker, request.steps)
+                    logger.info(f"Progress tracking enabled for task: {task_id}")
+            except Exception as e:
+                logger.warning(f"Could not initialize progress tracking: {e}")
+
         try:
             # Generate image
             result = self.pipeline(
@@ -107,6 +132,8 @@ class ImageGenerator:
                 num_inference_steps=request.steps,
                 guidance_scale=request.guidance_scale,
                 generator=torch.Generator(device=self.device).manual_seed(request.seed) if request.seed else None,
+                callback=callback if callback else None,
+                callback_steps=1 if callback else None,
             )
 
             image = result.images[0]
@@ -115,10 +142,23 @@ class ImageGenerator:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             image.save(output_path)
 
+            # Mark as complete
+            if tracker:
+                tracker.complete("Image generated successfully")
+
             logger.info(f"Image generated successfully: {output_path}")
             return output_path
 
+        except InterruptedError:
+            # User cancelled generation
+            if tracker:
+                tracker.complete("Generation cancelled", status="cancelled")
+            logger.info("Image generation cancelled by user")
+            raise
         except Exception as e:
+            # Mark as failed
+            if tracker:
+                tracker.complete(f"Generation failed: {str(e)}", status="failed")
             logger.error(f"Image generation failed: {e}")
             raise
 

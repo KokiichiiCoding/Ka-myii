@@ -5,6 +5,33 @@ const utils = window.KamyiiUtils;
 
 // State
 let currentModelId = null;
+let socket = null;
+let currentTaskId = null;
+
+// Initialize WebSocket connection for progress updates
+try {
+    if (typeof io !== 'undefined') {
+        socket = io('/progress');
+
+        socket.on('connect', function() {
+            console.log('Connected to progress tracking');
+        });
+
+        socket.on('disconnect', function() {
+            console.log('Disconnected from progress tracking');
+        });
+
+        socket.on('progress_update', function(data) {
+            updateProgress(data);
+        });
+
+        console.log('WebSocket progress tracking initialized');
+    } else {
+        console.warn('Socket.IO not available - progress tracking disabled');
+    }
+} catch (error) {
+    console.warn('Failed to initialize WebSocket:', error);
+}
 
 // UI Elements
 const form = document.getElementById('generationForm');
@@ -89,12 +116,19 @@ async function generateModel() {
 
         if (result.success) {
             currentModelId = result.model_id;
+            // Store task_id for progress tracking
+            if (result.task_id) {
+                currentTaskId = result.task_id;
+                console.log('Tracking progress for task:', currentTaskId);
+            }
             showResultState(result.model);
         } else {
             throw new Error(result.error || 'Generation failed');
         }
     } catch (error) {
         showErrorState(error.toString());
+        // Clear task ID on error
+        currentTaskId = null;
     }
 }
 
@@ -107,12 +141,76 @@ function showLoadingState() {
 
     generateBtn.disabled = true;
 
-    // Simulate progress (in real implementation, use WebSocket or polling)
+    // Reset progress bar
+    const progressBar = document.getElementById('progressBar');
+    const loadingMessage = document.getElementById('loadingMessage');
+    progressBar.style.width = '0%';
+    loadingMessage.textContent = 'Starting generation...';
+
+    // Use real-time progress tracking if available, otherwise simulate
     simulateProgress();
 }
 
-// Simulate progress
+// Update progress from WebSocket
+function updateProgress(data) {
+    // Check if this update is for the current task
+    if (currentTaskId && data.task_id !== currentTaskId) {
+        return; // Ignore updates for other tasks
+    }
+
+    const progressBar = document.getElementById('progressBar');
+    const loadingMessage = document.getElementById('loadingMessage');
+
+    // Update progress bar
+    if (data.progress !== undefined) {
+        progressBar.style.width = data.progress + '%';
+        progressBar.setAttribute('aria-valuenow', data.progress);
+    }
+
+    // Update message
+    if (data.message) {
+        let displayMessage = data.message;
+
+        // Add ETA if available
+        if (data.eta && data.eta > 1) {
+            const etaSeconds = Math.round(data.eta);
+            const etaMinutes = Math.floor(etaSeconds / 60);
+            const remainingSeconds = etaSeconds % 60;
+
+            if (etaMinutes > 0) {
+                displayMessage += ` (ETA: ${etaMinutes}m ${remainingSeconds}s)`;
+            } else {
+                displayMessage += ` (ETA: ${etaSeconds}s)`;
+            }
+        }
+
+        loadingMessage.textContent = displayMessage;
+    }
+
+    // Handle completion states
+    if (data.status === 'completed' || data.status === 'complete') {
+        console.log('Generation completed');
+        progressBar.style.width = '100%';
+        loadingMessage.textContent = data.message || 'Generation complete!';
+    } else if (data.status === 'failed') {
+        console.error('Generation failed:', data.message);
+        showErrorState(data.message || 'Generation failed');
+    } else if (data.status === 'cancelled') {
+        console.log('Generation cancelled');
+        showErrorState('Generation was cancelled');
+    }
+}
+
+// Fallback: Simulate progress if WebSocket is not available
 function simulateProgress() {
+    if (socket && socket.connected) {
+        // WebSocket available, don't simulate
+        console.log('Using real-time progress tracking');
+        return;
+    }
+
+    console.log('WebSocket not available, simulating progress');
+
     const progressBar = document.getElementById('progressBar');
     const loadingMessage = document.getElementById('loadingMessage');
 
@@ -214,6 +312,7 @@ generateAnotherBtn.addEventListener('click', function() {
     errorState.style.display = 'none';
 
     currentModelId = null;
+    currentTaskId = null;  // Clear task ID
     form.reset();
 
     // Reset range displays
@@ -226,5 +325,80 @@ retryBtn.addEventListener('click', function() {
     generateModel();
 });
 
+// Model Status Checking
+async function checkModelStatus() {
+    const statusAlert = document.getElementById('modelStatusAlert');
+    const statusMessage = document.getElementById('modelStatusMessage');
+    const preloadBtn = document.getElementById('preloadModelBtn');
+
+    try {
+        const response = await axios.get('/api/generation/model-status');
+
+        if (response.data.success) {
+            const { model_loaded, device, is_dummy, message } = response.data;
+
+            statusAlert.style.display = 'block';
+
+            if (is_dummy) {
+                statusAlert.className = 'alert alert-warning';
+                statusMessage.textContent = message;
+                preloadBtn.style.display = 'none';
+            } else if (model_loaded) {
+                statusAlert.className = 'alert alert-success';
+                statusMessage.textContent = `${message} (${device.toUpperCase()})`;
+                preloadBtn.style.display = 'none';
+            } else {
+                statusAlert.className = 'alert alert-warning';
+                statusMessage.textContent = message + '. Click the button to download it now (4-5 GB, takes 10-30 min).';
+                preloadBtn.style.display = 'inline-block';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check model status:', error);
+        statusAlert.style.display = 'block';
+        statusAlert.className = 'alert alert-danger';
+        statusMessage.textContent = 'Could not check model status';
+    }
+}
+
+// Preload Model
+async function preloadModel() {
+    const preloadBtn = document.getElementById('preloadModelBtn');
+    const preloadProgress = document.getElementById('preloadProgress');
+    const statusMessage = document.getElementById('modelStatusMessage');
+
+    preloadBtn.disabled = true;
+    preloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
+    preloadProgress.style.display = 'block';
+
+    try {
+        statusMessage.textContent = 'Downloading Stable Diffusion model... Please wait (this may take 10-30 minutes)';
+
+        const response = await axios.post('/api/generation/preload-model');
+
+        if (response.data.success) {
+            preloadProgress.style.display = 'none';
+            statusMessage.textContent = 'Model loaded successfully! You can now generate models.';
+            document.getElementById('modelStatusAlert').className = 'alert alert-success';
+            preloadBtn.style.display = 'none';
+        } else {
+            throw new Error(response.data.message || 'Model loading failed');
+        }
+    } catch (error) {
+        preloadProgress.style.display = 'none';
+        statusMessage.textContent = 'Model download failed: ' + error.message;
+        document.getElementById('modelStatusAlert').className = 'alert alert-danger';
+        preloadBtn.disabled = false;
+        preloadBtn.innerHTML = '<i class="fas fa-download"></i> Try Again';
+        preloadBtn.style.display = 'inline-block';
+    }
+}
+
+// Attach preload button click
+document.getElementById('preloadModelBtn').addEventListener('click', preloadModel);
+
 // Initialize
 console.log('Generator page initialized');
+
+// Check model status on page load
+checkModelStatus();

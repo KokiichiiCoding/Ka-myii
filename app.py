@@ -18,6 +18,15 @@ from src.api.generation import generation_bp, init_assembly_line
 from src.api.models import models_bp
 from src.api.expression import expression_bp
 
+# Try to import SocketIO for real-time progress
+try:
+    from flask_socketio import SocketIO
+    from src.utils.progress_tracker import init_progress_manager
+    SOCKETIO_AVAILABLE = True
+except ImportError:
+    SOCKETIO_AVAILABLE = False
+    logger.warning("flask-socketio not installed - real-time progress updates disabled")
+
 # Setup logging
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -35,7 +44,7 @@ def create_app(use_dummy_generators: bool = False):
         use_dummy_generators: Use dummy generators for testing (no GPU required)
 
     Returns:
-        Flask application
+        Flask application (and SocketIO if available)
     """
     app = Flask(__name__)
     app.config['SECRET_KEY'] = config.SECRET_KEY
@@ -43,6 +52,25 @@ def create_app(use_dummy_generators: bool = False):
 
     # Enable CORS
     CORS(app)
+
+    # Initialize SocketIO for real-time progress
+    socketio = None
+    if SOCKETIO_AVAILABLE:
+        socketio = SocketIO(app, cors_allowed_origins="*")
+        init_progress_manager(socketio)
+        logger.info("SocketIO initialized for real-time progress updates")
+
+        # SocketIO event handlers
+        @socketio.on('connect', namespace='/progress')
+        def handle_connect():
+            logger.info("Client connected to progress namespace")
+
+        @socketio.on('disconnect', namespace='/progress')
+        def handle_disconnect():
+            logger.info("Client disconnected from progress namespace")
+
+    # Store socketio in app config
+    app.socketio = socketio
 
     # Initialize assembly line
     init_assembly_line(use_dummy=use_dummy_generators)
@@ -142,13 +170,24 @@ def main():
         logger.warning("⚠️  Running in DUMMY mode - no actual AI generation")
         logger.warning("   This mode is for testing the pipeline without GPU")
 
-    # Run server
-    app.run(
-        host=args.host,
-        port=args.port,
-        debug=args.debug,
-        threaded=True
-    )
+    # Run server with SocketIO if available
+    if SOCKETIO_AVAILABLE and hasattr(app, 'socketio') and app.socketio:
+        logger.info("Starting server with SocketIO support")
+        app.socketio.run(
+            app,
+            host=args.host,
+            port=args.port,
+            debug=args.debug,
+            allow_unsafe_werkzeug=True
+        )
+    else:
+        logger.info("Starting server without SocketIO")
+        app.run(
+            host=args.host,
+            port=args.port,
+            debug=args.debug,
+            threaded=True
+        )
 
 
 if __name__ == '__main__':
