@@ -55,6 +55,8 @@ Ka-myii is a Python-based web application that automates the creation of high-qu
 
 ### Interface & Management
 - **Web-Based Interface**: Beautiful, intuitive web UI built with Flask and Bootstrap
+- **Real-Time Progress Tracking**: Live progress bar with ETA for generation tasks (like Stable Diffusion UI)
+- **WebSocket Updates**: See exactly what step is running and how long until completion
 - **Expression Editor**: Dedicated interface for managing expressions and accessories
 - **Gallery Management**: View, download, and manage all your generated models
 - **Batch Processing**: Generate multiple models in sequence

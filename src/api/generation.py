@@ -4,6 +4,7 @@ API routes for model generation
 from flask import Blueprint, request, jsonify, send_file
 from pathlib import Path
 import logging
+import uuid
 from typing import Dict, Any
 
 from src.models.vtuber_model import GenerationRequest, VTuberModel
@@ -81,8 +82,12 @@ def generate_model():
 
         logger.info(f"Generation request received: {gen_request.prompt}")
 
-        # Generate model
-        model = assembly_line.generate_model(gen_request)
+        # Generate task ID for progress tracking
+        task_id = f"gen_{uuid.uuid4().hex[:8]}"
+        logger.info(f"Created task: {task_id}")
+
+        # Generate model with task ID for progress tracking
+        model = assembly_line.generate_model(gen_request, task_id=task_id)
 
         # Save model metadata
         model_metadata_path = config.OUTPUT_DIR / model.id / "metadata.json"
@@ -91,6 +96,7 @@ def generate_model():
         return jsonify({
             'success': True,
             'model_id': model.id,
+            'task_id': task_id,
             'model': model.to_dict(),
             'message': 'Model generated successfully'
         })

@@ -66,12 +66,13 @@ class AssemblyLine:
 
         logger.info("AssemblyLine initialized")
 
-    def generate_model(self, request: GenerationRequest) -> VTuberModel:
+    def generate_model(self, request: GenerationRequest, task_id: Optional[str] = None) -> VTuberModel:
         """
         Generate a complete VTuber model from a request
 
         Args:
             request: Generation request
+            task_id: Optional task ID for progress tracking
 
         Returns:
             Generated VTuber model
@@ -84,17 +85,24 @@ class AssemblyLine:
             request=request
         )
 
+        # Use task_id or model_id for progress tracking
+        if not task_id:
+            task_id = f"gen_{model.id[:8]}"
+
+        # Store task_id in model metadata
+        model.metadata["task_id"] = task_id
+
         # Create output directory for this model
         model_output_dir = self.output_base_dir / model.id
         model_output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Starting generation for model: {model.id}")
+        logger.info(f"Starting generation for model: {model.id} (task: {task_id})")
 
         try:
             # Stage 1: Image Generation
             self._update_progress("Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            base_image_path = self._generate_image(request, model_output_dir)
+            base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
             logger.info(f"Base image generated: {base_image_path}")
 
@@ -139,10 +147,10 @@ class AssemblyLine:
             logger.error(f"Model generation failed: {e}", exc_info=True)
             raise
 
-    def _generate_image(self, request: GenerationRequest, output_dir: Path) -> Path:
+    def _generate_image(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str] = None) -> Path:
         """Stage 1: Generate base image"""
         image_path = output_dir / "base_image.png"
-        return self.image_generator.generate(request, image_path)
+        return self.image_generator.generate(request, image_path, task_id=task_id)
 
     def _separate_assets(
         self,

@@ -27,9 +27,9 @@ rembg>=2.0.50
 # ControlNet for advanced expression generation
 # controlnet-aux>=0.0.6  # Uncomment for ControlNet support
 
-# WebSocket for real-time progress (optional)
-# flask-socketio>=5.3.0
-# python-socketio>=5.10.0
+# WebSocket for real-time progress
+flask-socketio>=5.3.0
+python-socketio>=5.10.0
 
 # Utilities
 pydantic>=2.5.0
