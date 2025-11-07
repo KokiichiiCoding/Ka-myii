@@ -160,6 +160,13 @@ function showResultState(model) {
         window.location.href = api.getDownloadUrl(model.id);
     };
 
+    // Set up edit expressions button
+    const editExpressionsBtn = document.getElementById('editExpressionsBtn');
+    if (editExpressionsBtn) {
+        editExpressionsBtn.href = `/editor/${model.id}`;
+        editExpressionsBtn.style.display = 'block';
+    }
+
     // Set up view details button
     viewDetailsBtn.onclick = function() {
         showModelDetails(model);

@@ -143,17 +143,20 @@ function createModelCard(model) {
                 </p>
             </div>
             <div class="card-footer bg-white border-0">
-                <div class="btn-group w-100" role="group">
+                <div class="btn-group w-100 mb-2" role="group">
                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewModel('${model.id}')">
                         <i class="fas fa-eye"></i> View
                     </button>
-                    <a href="${downloadUrl}" class="btn btn-sm btn-outline-success">
-                        <i class="fas fa-download"></i> Download
+                    <a href="/editor/${model.id}" class="btn btn-sm btn-outline-info">
+                        <i class="fas fa-edit"></i> Edit
                     </a>
                     <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteModel('${model.id}')">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
+                <a href="${downloadUrl}" class="btn btn-sm btn-success w-100">
+                    <i class="fas fa-download"></i> Download Model
+                </a>
             </div>
         </div>
     `;
