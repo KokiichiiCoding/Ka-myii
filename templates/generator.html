@@ -11,6 +11,29 @@
     </div>
 </div>
 
+<!-- Model Status Alert -->
+<div class="row mb-3">
+    <div class="col-md-12">
+        <div id="modelStatusAlert" class="alert alert-info" role="alert" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Model Status:</strong> <span id="modelStatusMessage">Checking...</span>
+                </div>
+                <button id="preloadModelBtn" class="btn btn-sm btn-primary" style="display: none;">
+                    <i class="fas fa-download"></i> Download Model Now
+                </button>
+            </div>
+            <div id="preloadProgress" style="display: none;" class="mt-2">
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+                </div>
+                <small class="text-muted">Downloading model... This may take 10-30 minutes (4-5 GB)</small>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row">
     <!-- Generation Form -->
     <div class="col-md-6">

@@ -325,5 +325,80 @@ retryBtn.addEventListener('click', function() {
     generateModel();
 });
 
+// Model Status Checking
+async function checkModelStatus() {
+    const statusAlert = document.getElementById('modelStatusAlert');
+    const statusMessage = document.getElementById('modelStatusMessage');
+    const preloadBtn = document.getElementById('preloadModelBtn');
+
+    try {
+        const response = await axios.get('/api/generation/model-status');
+
+        if (response.data.success) {
+            const { model_loaded, device, is_dummy, message } = response.data;
+
+            statusAlert.style.display = 'block';
+
+            if (is_dummy) {
+                statusAlert.className = 'alert alert-warning';
+                statusMessage.textContent = message;
+                preloadBtn.style.display = 'none';
+            } else if (model_loaded) {
+                statusAlert.className = 'alert alert-success';
+                statusMessage.textContent = `${message} (${device.toUpperCase()})`;
+                preloadBtn.style.display = 'none';
+            } else {
+                statusAlert.className = 'alert alert-warning';
+                statusMessage.textContent = message + '. Click the button to download it now (4-5 GB, takes 10-30 min).';
+                preloadBtn.style.display = 'inline-block';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check model status:', error);
+        statusAlert.style.display = 'block';
+        statusAlert.className = 'alert alert-danger';
+        statusMessage.textContent = 'Could not check model status';
+    }
+}
+
+// Preload Model
+async function preloadModel() {
+    const preloadBtn = document.getElementById('preloadModelBtn');
+    const preloadProgress = document.getElementById('preloadProgress');
+    const statusMessage = document.getElementById('modelStatusMessage');
+
+    preloadBtn.disabled = true;
+    preloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
+    preloadProgress.style.display = 'block';
+
+    try {
+        statusMessage.textContent = 'Downloading Stable Diffusion model... Please wait (this may take 10-30 minutes)';
+
+        const response = await axios.post('/api/generation/preload-model');
+
+        if (response.data.success) {
+            preloadProgress.style.display = 'none';
+            statusMessage.textContent = 'Model loaded successfully! You can now generate models.';
+            document.getElementById('modelStatusAlert').className = 'alert alert-success';
+            preloadBtn.style.display = 'none';
+        } else {
+            throw new Error(response.data.message || 'Model loading failed');
+        }
+    } catch (error) {
+        preloadProgress.style.display = 'none';
+        statusMessage.textContent = 'Model download failed: ' + error.message;
+        document.getElementById('modelStatusAlert').className = 'alert alert-danger';
+        preloadBtn.disabled = false;
+        preloadBtn.innerHTML = '<i class="fas fa-download"></i> Try Again';
+        preloadBtn.style.display = 'inline-block';
+    }
+}
+
+// Attach preload button click
+document.getElementById('preloadModelBtn').addEventListener('click', preloadModel);
+
 // Initialize
 console.log('Generator page initialized');
+
+// Check model status on page load
+checkModelStatus();

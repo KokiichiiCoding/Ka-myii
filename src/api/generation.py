@@ -275,3 +275,110 @@ def delete_model(model_id: str):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@generation_bp.route('/model-status', methods=['GET'])
+def get_model_status():
+    """
+    Check if the AI model is loaded and ready
+
+    Response:
+    {
+        "success": true,
+        "model_loaded": true/false,
+        "device": "cuda"/"cpu",
+        "model_name": "...",
+        "is_dummy": false
+    }
+    """
+    try:
+        if assembly_line is None:
+            return jsonify({
+                'success': False,
+                'error': 'Assembly line not initialized'
+            }), 500
+
+        # Check if it's a dummy generator
+        from src.core.image_generator import DummyImageGenerator
+        is_dummy = isinstance(assembly_line.image_generator, DummyImageGenerator)
+
+        if is_dummy:
+            return jsonify({
+                'success': True,
+                'model_loaded': True,
+                'device': 'dummy',
+                'model_name': 'Dummy Generator (Testing Mode)',
+                'is_dummy': True,
+                'message': 'Running in dummy mode - no actual AI generation'
+            })
+
+        # Check real model
+        model_loaded = assembly_line.image_generator.pipeline is not None
+
+        return jsonify({
+            'success': True,
+            'model_loaded': model_loaded,
+            'device': assembly_line.image_generator.device,
+            'model_name': assembly_line.image_generator.model_name,
+            'is_dummy': False,
+            'message': 'Model loaded and ready' if model_loaded else 'Model not loaded yet - will load on first generation'
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to get model status: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@generation_bp.route('/preload-model', methods=['POST'])
+def preload_model():
+    """
+    Preload the AI model before generation
+    This downloads and loads the Stable Diffusion model
+    Can take 10-30 minutes on first run (downloads ~4-5GB)
+
+    Response:
+    {
+        "success": true,
+        "message": "Model loaded successfully"
+    }
+    """
+    try:
+        if assembly_line is None:
+            return jsonify({
+                'success': False,
+                'error': 'Assembly line not initialized'
+            }), 500
+
+        # Check if dummy mode
+        from src.core.image_generator import DummyImageGenerator
+        if isinstance(assembly_line.image_generator, DummyImageGenerator):
+            return jsonify({
+                'success': True,
+                'message': 'Running in dummy mode - no model to load',
+                'is_dummy': True
+            })
+
+        logger.info("Preloading AI model...")
+
+        # This will download the model if not cached
+        assembly_line.image_generator.load_model()
+
+        logger.info("Model preloaded successfully")
+
+        return jsonify({
+            'success': True,
+            'message': 'Model loaded successfully',
+            'device': assembly_line.image_generator.device,
+            'model_name': assembly_line.image_generator.model_name
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to preload model: {e}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'message': 'Model loading failed. Check logs for details.'
+        }), 500
