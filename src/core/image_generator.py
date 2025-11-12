@@ -7,10 +7,17 @@ from typing import Optional, Dict
 import logging
 import uuid
 
+import config
+
 try:
     from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
+    from diffusers import StableDiffusionXLPipeline, AutoencoderKL
     DIFFUSERS_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional dependency
+    StableDiffusionPipeline = None  # type: ignore[assignment]
+    StableDiffusionXLPipeline = None  # type: ignore[assignment]
+    AutoencoderKL = None  # type: ignore[assignment]
+    DPMSolverMultistepScheduler = None  # type: ignore[assignment]
     DIFFUSERS_AVAILABLE = False
 
 from src.models.vtuber_model import GenerationRequest
@@ -30,7 +37,15 @@ class ImageGenerator:
     Handles image generation using Stable Diffusion models
     """
 
-    def __init__(self, model_name: str = "runwayml/stable-diffusion-v1-5", device: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        device: Optional[str] = None,
+        pipeline: Optional[str] = None,
+        custom_model_path: Optional[str] = None,
+        vae_path: Optional[str] = None,
+        original_config_file: Optional[str] = None,
+    ):
         """
         Initialize the image generator
 
@@ -38,11 +53,33 @@ class ImageGenerator:
             model_name: Hugging Face model identifier
             device: Device to run on (cuda/cpu). Auto-detected if None
         """
-        self.model_name = model_name
+        settings = getattr(config, "IMAGE_GENERATION", {})
+
+        self.model_name = model_name or settings.get("model_name", "runwayml/stable-diffusion-v1-5")
+        self.pipeline_type = (pipeline or settings.get("pipeline", "auto") or "auto").lower()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        custom_path = custom_model_path or settings.get("custom_model_path")
+        self.custom_model_path = Path(custom_path).expanduser() if custom_path else None
+        vae_override = vae_path or settings.get("vae_path")
+        self.vae_path = Path(vae_override).expanduser() if vae_override else None
+        self.original_config_file = (
+            Path(original_config_file).expanduser()
+            if original_config_file
+            else (
+                Path(settings.get("original_config_file")).expanduser()
+                if settings.get("original_config_file")
+                else None
+            )
+        )
         self.pipeline = None
 
-        logger.info(f"ImageGenerator initialized with model: {model_name}, device: {self.device}")
+        logger.info(
+            "ImageGenerator initialized with model: %s (pipeline=%s, custom=%s), device: %s",
+            self.model_name,
+            self.pipeline_type,
+            self.custom_model_path if self.custom_model_path else "<huggingface>",
+            self.device,
+        )
 
     def load_model(self):
         """Load the Stable Diffusion model"""
@@ -51,19 +88,53 @@ class ImageGenerator:
                 "diffusers library not found. Install with: pip install diffusers transformers accelerate"
             )
 
-        logger.info(f"Loading model: {self.model_name}")
+        pipeline_cls = self._determine_pipeline_class()
+
+        dtype = torch.float16 if self.device == "cuda" else torch.float32
+
+        if self.custom_model_path and not self.custom_model_path.exists():
+            raise FileNotFoundError(f"Custom model not found at {self.custom_model_path}")
+
+        if self.vae_path and not self.vae_path.exists():
+            raise FileNotFoundError(f"Custom VAE not found at {self.vae_path}")
+
+        if self.original_config_file and not self.original_config_file.exists():
+            raise FileNotFoundError(
+                f"Original config file not found at {self.original_config_file}"
+            )
+
+        logger.info(
+            "Loading model using %s from %s",
+            pipeline_cls.__name__,
+            self.custom_model_path if self.custom_model_path else self.model_name,
+        )
 
         try:
-            self.pipeline = StableDiffusionPipeline.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-                safety_checker=None,  # Disable safety checker for speed
-            )
+            load_kwargs: Dict[str, object] = {"torch_dtype": dtype}
+            if pipeline_cls is StableDiffusionPipeline:
+                load_kwargs["safety_checker"] = None  # type: ignore[index]
 
-            # Use DPM++ scheduler for better quality
-            self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
-                self.pipeline.scheduler.config
-            )
+            if self.custom_model_path:
+                load_kwargs["original_config_file"] = (
+                    str(self.original_config_file) if self.original_config_file else None
+                )
+                # Remove None values to avoid diffusers complaining
+                load_kwargs = {k: v for k, v in load_kwargs.items() if v is not None}
+                self.pipeline = pipeline_cls.from_single_file(
+                    str(self.custom_model_path),
+                    **load_kwargs,  # type: ignore[arg-type]
+                )
+            else:
+                load_kwargs = {k: v for k, v in load_kwargs.items() if v is not None}
+                self.pipeline = pipeline_cls.from_pretrained(
+                    self.model_name,
+                    **load_kwargs,  # type: ignore[arg-type]
+                )
+
+            if DPMSolverMultistepScheduler and hasattr(self.pipeline, "scheduler"):
+                self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(  # type: ignore[assignment]
+                    self.pipeline.scheduler.config
+                )
 
             self.pipeline = self.pipeline.to(self.device)
 
@@ -76,7 +147,21 @@ class ImageGenerator:
                 except Exception as e:
                     logger.warning(f"Could not enable xformers: {e}")
 
-            logger.info("Model loaded successfully")
+            if self.vae_path:
+                if AutoencoderKL is None:
+                    raise ImportError(
+                        "diffusers AutoencoderKL not available. Update diffusers to load custom VAE."
+                    )
+                logger.info("Loading custom VAE from %s", self.vae_path)
+                vae = AutoencoderKL.from_pretrained(
+                    str(self.vae_path), torch_dtype=dtype
+                )
+                self.pipeline.vae = vae.to(self.device)
+
+            logger.info(
+                "Model loaded successfully (%s)",
+                self.custom_model_path if self.custom_model_path else self.model_name,
+            )
 
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
@@ -201,6 +286,34 @@ class ImageGenerator:
                 torch.cuda.empty_cache()
             logger.info("Model unloaded")
 
+    def _determine_pipeline_class(self):
+        """Determine the diffusers pipeline class to use"""
+        pipeline_choice = self.pipeline_type
+
+        # Auto-detect XL models from paths/names if pipeline not explicitly set
+        if pipeline_choice == "auto":
+            source_name = (
+                self.custom_model_path.name if self.custom_model_path else self.model_name
+            )
+            if source_name and "xl" in source_name.lower():
+                pipeline_choice = "sdxl"
+            else:
+                pipeline_choice = "sd15"
+
+        if pipeline_choice == "sdxl":
+            if StableDiffusionXLPipeline is None:
+                raise ImportError(
+                    "StableDiffusionXLPipeline not available. Install diffusers>=0.19.0 for SDXL support."
+                )
+            return StableDiffusionXLPipeline
+
+        # Default to SD 1.5 style pipeline
+        if StableDiffusionPipeline is None:
+            raise ImportError(
+                "StableDiffusionPipeline not available. Install diffusers for Stable Diffusion support."
+            )
+        return StableDiffusionPipeline
+
 
 # For systems without GPU or for testing
 class DummyImageGenerator(ImageGenerator):
@@ -213,7 +326,9 @@ class DummyImageGenerator(ImageGenerator):
     def load_model(self):
         logger.info("DummyImageGenerator: Model 'loaded' (no-op)")
 
-    def generate(self, request: GenerationRequest, output_path: Path) -> Path:
+    def generate(
+        self, request: GenerationRequest, output_path: Path, task_id: Optional[str] = None
+    ) -> Path:
         """Create a placeholder image"""
         from PIL import Image, ImageDraw, ImageFont
 
