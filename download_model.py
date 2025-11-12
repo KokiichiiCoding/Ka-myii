@@ -7,6 +7,8 @@ import sys
 import torch
 from pathlib import Path
 
+import config
+
 def download_model():
     """Download the Stable Diffusion model"""
     print("=" * 60)
@@ -38,13 +40,23 @@ def download_model():
     print()
 
     # Download model
+    settings = config.IMAGE_GENERATION
+    custom_checkpoint = settings.get("custom_model_path")
+    model_name = settings.get("model_name", "runwayml/stable-diffusion-v1-5")
+
+    if custom_checkpoint:
+        print("3. Custom checkpoint configured")
+        print(f"   Path: {custom_checkpoint}")
+        print("   Skipping automatic download. Place the file at the path above.")
+        print()
+        return Path(custom_checkpoint).exists()
+
     print("3. Downloading Stable Diffusion model...")
-    print("   Model: runwayml/stable-diffusion-v1-5")
+    print(f"   Model: {model_name}")
     print("   Size: ~4-5 GB")
     print("   This may take 10-30 minutes depending on your internet speed...")
     print()
 
-    model_name = "runwayml/stable-diffusion-v1-5"
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     try:

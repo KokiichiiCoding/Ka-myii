@@ -121,6 +121,33 @@ python app.py
 python app.py --host 0.0.0.0 --port 8080 --debug
 ```
 
+#### Using a custom Stable Diffusion checkpoint (e.g., CivitAI models)
+
+You can point Ka-myii at a locally downloaded checkpoint or switch to SDXL-compatible
+pipelines without modifying the source code. Configure the model by setting the
+following environment variables (add them to `.env` or export them before launching the app):
+
+```bash
+# Path to a .safetensors or .ckpt file converted for diffusers (will be loaded with from_single_file)
+export KAMYII_CUSTOM_MODEL_PATH="/path/to/your/model.safetensors"
+
+# Optional: "sd15", "sdxl", or "auto" to let Ka-myii auto-detect based on file name
+export KAMYII_MODEL_PIPELINE="sdxl"
+
+# Optional: override the default model name used when no custom checkpoint is supplied
+export KAMYII_MODEL_NAME="stabilityai/stable-diffusion-xl-base-1.0"
+
+# Optional extras for advanced checkpoints
+export KAMYII_CUSTOM_VAE_PATH="/path/to/diffusers/vae"
+export KAMYII_ORIGINAL_CONFIG="/path/to/original/config.json"
+```
+
+When `KAMYII_CUSTOM_MODEL_PATH` is provided the built-in download script skips any
+Hugging Face downloads; simply place your checkpoint at the configured location and
+start the app. Width/height, steps, and guidance defaults will also respect the values
+defined in `config.py`, so you can increase SDXL defaults (e.g., 1024×1024) without
+changing the UI each time.
+
 ### Accessing the Web UI
 
 Once the server is running, open your browser and navigate to:

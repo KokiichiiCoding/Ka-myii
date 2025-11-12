@@ -30,7 +30,15 @@ IMAGE_GENERATION = {
     "default_height": 512,
     "default_steps": 30,
     "default_guidance_scale": 7.5,
-    "model_name": "runwayml/stable-diffusion-v1-5",  # Can be changed to other models
+    "model_name": os.getenv("KAMYII_MODEL_NAME", "runwayml/stable-diffusion-v1-5"),
+    # Supported values: "auto", "sd15", "sdxl"
+    "pipeline": os.getenv("KAMYII_MODEL_PIPELINE", "auto"),
+    # Optional path to a local .safetensors or .ckpt checkpoint downloaded from CivitAI, etc.
+    "custom_model_path": os.getenv("KAMYII_CUSTOM_MODEL_PATH"),
+    # Optional path to a custom VAE (diffusers format). Only used when provided.
+    "vae_path": os.getenv("KAMYII_CUSTOM_VAE_PATH"),
+    # Optional original Stable Diffusion config file for legacy checkpoints
+    "original_config_file": os.getenv("KAMYII_ORIGINAL_CONFIG"),
 }
 
 # Asset Separation settings

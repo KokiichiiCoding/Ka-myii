@@ -61,14 +61,16 @@ def generate_model():
         data = request.json
 
         # Create generation request
+        image_settings = config.IMAGE_GENERATION
+
         gen_request = GenerationRequest(
             prompt=data.get('prompt', ''),
             negative_prompt=data.get('negative_prompt', ''),
             style=data.get('style', 'anime'),
-            width=data.get('width', 512),
-            height=data.get('height', 512),
-            steps=data.get('steps', 30),
-            guidance_scale=data.get('guidance_scale', 7.5),
+            width=data.get('width', image_settings.get('default_width', 512)),
+            height=data.get('height', image_settings.get('default_height', 512)),
+            steps=data.get('steps', image_settings.get('default_steps', 30)),
+            guidance_scale=data.get('guidance_scale', image_settings.get('default_guidance_scale', 7.5)),
             seed=data.get('seed'),
             include_rigging=data.get('include_rigging', False),
             custom_layers=data.get('custom_layers')
