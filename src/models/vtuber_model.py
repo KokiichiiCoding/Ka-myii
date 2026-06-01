@@ -38,12 +38,19 @@ class GenerationRequest:
     """Request for generating a VTuber model"""
     prompt: str
     negative_prompt: str = ""
-    style: str = "anime"
-    width: int = 512
-    height: int = 512
-    steps: int = 30
-    guidance_scale: float = 7.5
+    style: str = "vtuber"
+    width: int = 832
+    height: int = 1216
+    steps: int = 28
+    guidance_scale: float = 6.5
     seed: Optional[int] = None
+
+    # Modern generation controls (Stable-Diffusion-WebUI style)
+    model_id: Optional[str] = None      # checkpoint id / path; None = config default
+    sampler: Optional[str] = None       # e.g. "DPM++ 2M Karras"
+    clip_skip: Optional[int] = None
+    loras: Optional[List[Dict]] = None  # [{"path"/"id": str, "weight": float}]
+    batch_size: int = 1
 
     # Advanced options
     include_rigging: bool = False

@@ -1,217 +1,162 @@
 {% extends "base.html" %}
-
-{% block title %}Ka-myii - Generator{% endblock %}
+{% block title %}Ka-myii — Studio{% endblock %}
+{% block tab_studio %}active{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-12">
-        <h2 class="mb-4">
-            <i class="fas fa-wand-magic-sparkles"></i> VTuber Model Generator
-        </h2>
-    </div>
-</div>
+<div class="km-wrap">
+  <div class="studio">
 
-<!-- Model Status Alert -->
-<div class="row mb-3">
-    <div class="col-md-12">
-        <div id="modelStatusAlert" class="alert alert-info" role="alert" style="display: none;">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <i class="fas fa-info-circle me-2"></i>
-                    <strong>Model Status:</strong> <span id="modelStatusMessage">Checking...</span>
-                </div>
-                <button id="preloadModelBtn" class="btn btn-sm btn-primary" style="display: none;">
-                    <i class="fas fa-download"></i> Download Model Now
-                </button>
-            </div>
-            <div id="preloadProgress" style="display: none;" class="mt-2">
-                <div class="progress">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
-                </div>
-                <small class="text-muted">Downloading model... This may take 10-30 minutes (4-5 GB)</small>
-            </div>
+    <!-- ============ LEFT: controls ============ -->
+    <form id="genForm" class="panel panel-pad sticky">
+      <h3><i class="fas fa-sliders ico"></i> Generation</h3>
+
+      <div class="field">
+        <label for="prompt">Prompt</label>
+        <textarea id="prompt" placeholder="1girl, silver hair, long twin tails, blue eyes, sailor uniform, gentle smile"></textarea>
+        <div class="hint">Danbooru-style tags work best with modern anime models.</div>
+      </div>
+
+      <div class="field">
+        <label for="negative">Negative prompt</label>
+        <textarea id="negative" class="neg" placeholder="(defaults applied automatically)"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Style preset</label>
+        <div class="chips" id="styleChips"></div>
+      </div>
+
+      <div class="field">
+        <label for="model">Checkpoint</label>
+        <select id="model"></select>
+        <div class="hint" id="modelHint"></div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="sampler">Sampler</label>
+          <select id="sampler"></select>
         </div>
-    </div>
-</div>
-
-<div class="row">
-    <!-- Generation Form -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="fas fa-edit"></i> Generation Settings</h5>
-            </div>
-            <div class="card-body">
-                <form id="generationForm">
-                    <!-- Prompt -->
-                    <div class="mb-3">
-                        <label for="prompt" class="form-label">Character Description *</label>
-                        <textarea
-                            class="form-control"
-                            id="prompt"
-                            rows="3"
-                            placeholder="e.g., anime girl with blue hair and green eyes, wearing a school uniform"
-                            required
-                        ></textarea>
-                        <small class="form-text text-muted">
-                            Describe the character you want to generate
-                        </small>
-                    </div>
-
-                    <!-- Negative Prompt -->
-                    <div class="mb-3">
-                        <label for="negativePrompt" class="form-label">Negative Prompt (Optional)</label>
-                        <textarea
-                            class="form-control"
-                            id="negativePrompt"
-                            rows="2"
-                            placeholder="e.g., low quality, blurry, deformed"
-                        ></textarea>
-                        <small class="form-text text-muted">
-                            Things to avoid in the generation
-                        </small>
-                    </div>
-
-                    <!-- Style -->
-                    <div class="mb-3">
-                        <label for="style" class="form-label">Art Style</label>
-                        <select class="form-select" id="style">
-                            <option value="anime">Anime</option>
-                            <option value="live2d" selected>Live2D</option>
-                            <option value="vtuber">VTuber</option>
-                            <option value="realistic">Realistic</option>
-                        </select>
-                    </div>
-
-                    <!-- Advanced Settings Toggle -->
-                    <div class="mb-3">
-                        <button
-                            type="button"
-                            class="btn btn-sm btn-outline-secondary"
-                            data-bs-toggle="collapse"
-                            data-bs-target="#advancedSettings"
-                        >
-                            <i class="fas fa-cog"></i> Advanced Settings
-                        </button>
-                    </div>
-
-                    <!-- Advanced Settings (Collapsed) -->
-                    <div class="collapse" id="advancedSettings">
-                        <div class="card card-body mb-3">
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="width" class="form-label">Width</label>
-                                    <input type="number" class="form-control" id="width" value="512" min="256" max="1024" step="64">
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="height" class="form-label">Height</label>
-                                    <input type="number" class="form-control" id="height" value="512" min="256" max="1024" step="64">
-                                </div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="steps" class="form-label">Steps: <span id="stepsValue">30</span></label>
-                                <input type="range" class="form-range" id="steps" min="10" max="100" value="30" step="5">
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="guidanceScale" class="form-label">Guidance Scale: <span id="guidanceScaleValue">7.5</span></label>
-                                <input type="range" class="form-range" id="guidanceScale" min="1" max="20" value="7.5" step="0.5">
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="seed" class="form-label">Seed (Optional)</label>
-                                <input type="number" class="form-control" id="seed" placeholder="Random">
-                                <small class="form-text text-muted">Leave empty for random</small>
-                            </div>
-
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="includeRigging" disabled>
-                                    <label class="form-check-label" for="includeRigging">
-                                        Include Auto-Rigging (Coming Soon)
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Generate Button -->
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
-                            <i class="fas fa-magic"></i> Generate Model
-                        </button>
-                    </div>
-                </form>
-            </div>
+        <div class="field">
+          <label for="resolution">Resolution</label>
+          <select id="resolution"></select>
         </div>
-    </div>
+      </div>
 
-    <!-- Results Panel -->
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="fas fa-image"></i> Generation Result</h5>
-            </div>
-            <div class="card-body">
-                <!-- Initial State -->
-                <div id="initialState" class="text-center py-5">
-                    <i class="fas fa-image fa-5x text-muted mb-3"></i>
-                    <p class="text-muted">Your generated model will appear here</p>
-                </div>
+      <div class="field">
+        <div class="slider-head"><label for="steps">Steps</label><span class="val" id="stepsVal">28</span></div>
+        <input type="range" id="steps" min="8" max="60" value="28" step="1">
+      </div>
 
-                <!-- Loading State -->
-                <div id="loadingState" class="text-center py-5" style="display: none;">
-                    <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <h5 id="loadingMessage">Generating model...</h5>
-                    <div class="progress mt-3">
-                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-                    </div>
-                </div>
+      <div class="field">
+        <div class="slider-head"><label for="cfg">CFG scale</label><span class="val" id="cfgVal">6.5</span></div>
+        <input type="range" id="cfg" min="1" max="15" value="6.5" step="0.5">
+      </div>
 
-                <!-- Result State -->
-                <div id="resultState" style="display: none;">
-                    <img id="previewImage" src="" alt="Generated Model" class="img-fluid rounded mb-3">
-
-                    <div class="card mb-3">
-                        <div class="card-body">
-                            <h6>Model Information</h6>
-                            <p class="mb-1"><strong>Model ID:</strong> <span id="modelId"></span></p>
-                            <p class="mb-1"><strong>Status:</strong> <span id="modelStatus" class="badge bg-success"></span></p>
-                            <p class="mb-1"><strong>Generation Time:</strong> <span id="generationTime"></span></p>
-                            <p class="mb-0"><strong>Assets:</strong> <span id="assetCount"></span></p>
-                        </div>
-                    </div>
-
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-success" id="downloadBtn">
-                            <i class="fas fa-download"></i> Download Model
-                        </button>
-                        <a class="btn btn-primary" id="editExpressionsBtn" href="#" style="display: none;">
-                            <i class="fas fa-smile"></i> Edit Expressions & Accessories
-                        </a>
-                        <button class="btn btn-outline-primary" id="viewDetailsBtn">
-                            <i class="fas fa-info-circle"></i> View Details
-                        </button>
-                        <button class="btn btn-outline-secondary" id="generateAnotherBtn">
-                            <i class="fas fa-redo"></i> Generate Another
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Error State -->
-                <div id="errorState" class="alert alert-danger" style="display: none;">
-                    <h5><i class="fas fa-exclamation-triangle"></i> Error</h5>
-                    <p id="errorMessage"></p>
-                    <button class="btn btn-outline-danger" id="retryBtn">
-                        <i class="fas fa-redo"></i> Try Again
-                    </button>
-                </div>
-            </div>
+      <div class="field">
+        <label for="seed">Seed</label>
+        <div class="seed-row">
+          <input type="number" id="seed" placeholder="-1 (random)" value="-1">
+          <button type="button" class="btn btn-icon" id="randSeed" title="Randomize"><i class="fas fa-dice"></i></button>
+          <button type="button" class="btn btn-icon" id="reuseSeed" title="Reuse last seed"><i class="fas fa-recycle"></i></button>
         </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="collapse-head" id="advToggle">
+        <span><i class="fas fa-gear"></i> Advanced</span>
+        <i class="fas fa-chevron-down" id="advChevron"></i>
+      </div>
+      <div class="collapse-body hidden" id="advBody">
+        <div class="row">
+          <div class="field">
+            <div class="slider-head"><label for="clipSkip">Clip skip</label><span class="val" id="clipSkipVal">2</span></div>
+            <input type="range" id="clipSkip" min="1" max="4" value="2" step="1">
+          </div>
+          <div class="field">
+            <div class="slider-head"><label for="width">Width</label><span class="val" id="widthVal">832</span></div>
+            <input type="range" id="width" min="384" max="1280" value="832" step="64">
+          </div>
+        </div>
+        <div class="field">
+          <div class="slider-head"><label for="height">Height</label><span class="val" id="heightVal">1216</span></div>
+          <input type="range" id="height" min="384" max="1280" value="1216" step="64">
+        </div>
+        <div class="field">
+          <label for="lora">LoRA</label>
+          <select id="lora"></select>
+          <div class="hint">Drop <code>.safetensors</code> LoRAs into <code>models/loras</code>.</div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
+        <i class="fas fa-wand-magic-sparkles"></i> Generate Model
+      </button>
+      <button type="button" class="btn btn-lg hidden" id="cancelBtn" style="margin-top:10px;">
+        <i class="fas fa-stop"></i> Cancel
+      </button>
+    </form>
+
+    <!-- ============ RIGHT: canvas + results ============ -->
+    <div>
+      <!-- Demo / model notice -->
+      <div id="modelNotice" class="alert-km alert-warn hidden" style="margin-bottom:16px;">
+        <i class="fas fa-circle-info"></i>
+        <div style="flex:1;">
+          <strong>Demo mode.</strong> Showing a procedurally rendered character so you can explore the
+          full decomposition → PSD → Live2D pipeline. Install the AI extras and a checkpoint for real generation.
+        </div>
+      </div>
+
+      <div class="panel panel-pad" style="margin-bottom:16px;">
+        <div class="canvas-wrap" id="canvasWrap">
+          <div class="canvas-empty" id="canvasEmpty">
+            <div class="big"><i class="fas fa-image"></i></div>
+            <div>Your generated character will appear here</div>
+          </div>
+          <img id="resultImg" class="hidden" alt="Generated character">
+          <div class="progress-overlay hidden" id="progressOverlay">
+            <div class="spinner-ring"></div>
+            <div class="progress-label" id="progressLabel">Starting…</div>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-eta" id="progressEta"></div>
+          </div>
+        </div>
+
+        <div id="resultMeta" class="hidden">
+          <div class="meta-grid">
+            <div class="meta-card"><div class="k">Status</div><div class="v"><span class="badge-km badge-good" id="metaStatus">done</span></div></div>
+            <div class="meta-card"><div class="k">Layers</div><div class="v" id="metaLayers">—</div></div>
+            <div class="meta-card"><div class="k">Time</div><div class="v" id="metaTime">—</div></div>
+            <div class="meta-card"><div class="k">Seed</div><div class="v" id="metaSeed">—</div></div>
+          </div>
+          <div class="result-actions">
+            <a class="btn btn-primary" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
+            <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>
+            <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
+            <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Layer studio -->
+      <div class="panel panel-pad hidden" id="layerPanel">
+        <h3><i class="fas fa-layer-group ico"></i> Decomposed layers <span class="badge-km badge-info" id="layerCount" style="margin-left:8px;"></span></h3>
+        <div class="hint" style="margin-bottom:10px;">Each layer is exported aligned and transparent — ready to rig in Live2D Cubism.</div>
+        <div class="layer-grid" id="layerGrid"></div>
+      </div>
+
+      <!-- Error -->
+      <div class="panel panel-pad hidden" id="errorPanel">
+        <div class="alert-km alert-bad">
+          <i class="fas fa-triangle-exclamation"></i>
+          <div style="flex:1;"><strong>Generation failed.</strong> <span id="errorMsg"></span></div>
+        </div>
+      </div>
     </div>
+
+  </div>
 </div>
 {% endblock %}
 

@@ -63,8 +63,38 @@ class AssemblyLine:
             self.model_assembler = ModelAssembler()
 
         self.auto_rigger = AutoRigger()
+        self.use_dummy_generators = use_dummy_generators
+        self._generator_signature = None
 
         logger.info("AssemblyLine initialized")
+
+    def _ensure_generator(self, request: GenerationRequest):
+        """Rebuild the image generator if the request selects a different
+        checkpoint / sampler / LoRA stack (real mode only)."""
+        if self.use_dummy_generators:
+            return
+        signature = (
+            request.model_id,
+            request.sampler,
+            request.clip_skip,
+            tuple((lora.get("path") or lora.get("id"), lora.get("weight", 1.0)) for lora in (request.loras or [])),
+        )
+        if signature == self._generator_signature and self.image_generator.pipeline is not None:
+            return
+
+        from src.utils.model_scanner import resolve_checkpoint
+
+        resolved = resolve_checkpoint(request.model_id) if request.model_id else {}
+        logger.info("Configuring generator: %s", resolved.get("model_name") or "<default>")
+        self.image_generator = ImageGenerator(
+            model_name=resolved.get("model_name"),
+            pipeline=resolved.get("pipeline"),
+            custom_model_path=resolved.get("custom_model_path"),
+            sampler=request.sampler,
+            clip_skip=request.clip_skip,
+            loras=request.loras,
+        )
+        self._generator_signature = signature
 
     def generate_model(self, request: GenerationRequest, task_id: Optional[str] = None) -> VTuberModel:
         """
@@ -102,6 +132,7 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._update_progress("Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
+            self._ensure_generator(request)
             base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
             logger.info(f"Base image generated: {base_image_path}")
