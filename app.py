@@ -106,8 +106,8 @@ def create_app(use_dummy_generators: bool = False):
         """Health check endpoint"""
         return jsonify({
             'status': 'healthy',
-            'version': '0.1.0',
-            'service': 'Ka-myii'
+            'version': getattr(config, 'APP_VERSION', '2.0.0'),
+            'service': getattr(config, 'APP_NAME', 'Ka-myii')
         })
 
     # Error handlers
