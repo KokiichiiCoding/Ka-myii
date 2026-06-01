@@ -1,44 +1,56 @@
-# Ka-myii - Automated VTuber Model Generation System
-# Python Dependencies
+# Ka-myii — Automated VTuber Model Studio
+# ---------------------------------------------------------------------------
+# Install everything:           pip install -r requirements.txt
+# Minimum to run the WebUI in demo mode (no GPU):
+#   pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six
+# ---------------------------------------------------------------------------
 
-# Core Framework
-Flask==3.0.0
-flask-cors==4.0.0
-
-# AI/ML - Image Generation
-torch>=2.0.0
-diffusers>=0.25.0
-transformers>=4.35.0
-accelerate>=0.25.0
-safetensors>=0.4.0
-
-# Image Processing
-Pillow>=10.0.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-
-# Background Removal (optional but recommended)
-rembg>=2.0.50
-
-# Advanced Features (Optional)
-# Segment Anything Model for better segmentation
-# segment-anything>=1.0  # Install separately: pip install git+https://github.com/facebookresearch/segment-anything.git
-
-# ControlNet for advanced expression generation
-# controlnet-aux>=0.0.6  # Uncomment for ControlNet support
-
-# WebSocket for real-time progress
+# --- Core web framework (required) ---
+Flask>=3.0.0
+flask-cors>=4.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.10.0
 
-# Utilities
-pydantic>=2.5.0
+# --- Image + numerics (required) ---
+Pillow>=10.2.0
+numpy>=1.24.0
+
+# --- Layered document export (required for rig-ready PSD/ORA output) ---
+psd-tools>=1.9.0      # read/inspect PSDs
+pytoshop>=1.2.0       # write layered PSDs
+six>=1.16.0           # pytoshop runtime dependency
+
+# --- Utilities ---
 python-dotenv>=1.0.0
+pydantic>=2.5.0
 
-# Development
+# ===========================================================================
+# AI image generation (heavy — install for real, high-quality generation).
+# A CUDA GPU is strongly recommended. On Windows, run.bat installs the correct
+# CUDA build of PyTorch automatically.
+# ===========================================================================
+torch>=2.1.0
+diffusers>=0.27.0
+transformers>=4.38.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+peft>=0.9.0           # LoRA support
+
+# --- Background removal / segmentation (optional but recommended) ---
+rembg>=2.0.50
+opencv-python>=4.8.0
+onnxruntime>=1.17.0
+
+# ===========================================================================
+# Optional advanced backends (install manually when needed):
+#
+#   Segment Anything 2 (best automatic decomposition):
+#     pip install sam2
+#     # then set KAMYII_SAM2_CHECKPOINT to a downloaded .pt checkpoint
+#
+#   xformers (extra VRAM savings on compatible GPUs):
+#     pip install xformers
+# ===========================================================================
+
+# --- Development ---
 pytest>=7.4.0
-black>=23.12.0
-flake8>=6.1.0
-
-# Optional: GPU acceleration
-# xformers>=0.0.22  # Uncomment if you have a compatible GPU

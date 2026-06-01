@@ -1,273 +1,229 @@
 """
-Model assembly module for creating Live2D compatible model files
+Model assembler — packages separated layers into a Live2D Cubism-ready project.
+
+The output is everything an artist needs to open the character in **Live2D
+Cubism 5** and finish rigging with its AI auto-rig feature:
+
+* ``<name>.psd``        layered artwork (primary import target)
+* ``<name>.ora``        open layered fallback
+* ``<name>.model3.json`` model definition scaffold (groups, hit areas)
+* ``<name>.physics3.json`` auto-generated hair/cloth physics
+* ``<name>.cdi3.json``  display info: the standard Cubism parameter + part set
+* ``textures/``         flattened texture placeholder
+* ``RIGGING_GUIDE.md``  step-by-step finishing instructions
+
+A genuine ``.moc3`` can only be produced by the proprietary Cubism Editor, so
+Ka-myii prepares a complete, correctly-structured project right up to that step.
 """
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional
-import shutil
+from typing import Dict, List
 
+import config
+from src.core import psd_exporter
+from src.core.auto_physics import AutoPhysicsGenerator
 from src.models.vtuber_model import Asset
 
 logger = logging.getLogger(__name__)
 
 
+def _part_id(layer_type: str) -> str:
+    return "Part" + "".join(part.capitalize() for part in layer_type.split("_"))
+
+
 class ModelAssembler:
-    """
-    Assembles separated assets into a Live2D compatible model
-    """
+    """Assembles separated assets into a Cubism-import-ready project folder."""
 
-    def __init__(self, texture_size: int = 2048):
-        """
-        Initialize the model assembler
+    def __init__(self, texture_size: int = None):
+        self.texture_size = texture_size or config.MODEL_ASSEMBLY.get("texture_size", 4096)
+        self.physics = AutoPhysicsGenerator()
+        logger.info("ModelAssembler ready (texture size: %s)", self.texture_size)
 
-        Args:
-            texture_size: Size of the texture atlas
-        """
-        self.texture_size = texture_size
-        logger.info(f"ModelAssembler initialized (texture size: {texture_size})")
-
-    def assemble(
-        self,
-        assets: List[Asset],
-        output_dir: Path,
-        model_name: str = "vtuber_model"
-    ) -> Path:
-        """
-        Assemble assets into a Live2D model
-
-        Args:
-            assets: List of assets to assemble
-            output_dir: Output directory for the model
-            model_name: Name of the model
-
-        Returns:
-            Path to the assembled model directory
-        """
-        logger.info(f"Assembling model: {model_name}")
-
-        model_dir = output_dir / model_name
+    # ------------------------------------------------------------------
+    def assemble(self, assets: List[Asset], output_dir: Path, model_name: str = "vtuber_model") -> Path:
+        model_dir = Path(output_dir) / model_name
         model_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Assembling Cubism project: %s", model_name)
 
-        # Create model structure
+        # 1. Layered art (PSD / ORA / flat) — the rig-ready deliverable.
+        produced = psd_exporter.export_layered_documents(assets, model_dir, model_name)
+
+        # 2. Texture placeholder from the flattened composite.
         textures_dir = model_dir / "textures"
         textures_dir.mkdir(exist_ok=True)
+        texture_files: List[str] = []
+        flat = psd_exporter.compose_flat(assets)
+        if flat is not None:
+            tex_path = textures_dir / "texture_00.png"
+            flat.convert("RGBA").save(tex_path)
+            texture_files.append("textures/texture_00.png")
 
-        # Copy assets to textures directory
-        texture_mapping = {}
-        for i, asset in enumerate(assets):
-            texture_name = f"{asset.layer_type}.png"
-            texture_path = textures_dir / texture_name
-            shutil.copy(asset.file_path, texture_path)
-            texture_mapping[asset.layer_type] = texture_name
-            logger.info(f"Copied asset: {asset.layer_type}")
+        # 3. Physics from hair / cloth layers.
+        physics_path = model_dir / f"{model_name}.physics3.json"
+        try:
+            self.physics.generate_physics_json(assets, model_name, physics_path)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Physics generation failed: %s", exc)
 
-        # Generate model metadata
-        model_json = self._generate_model_json(model_name, texture_mapping, assets)
+        # 4. Display info (parameters + parts) and 5. model definition.
+        rig_layers = [a.layer_type for a in assets if a.layer_type != "character"]
+        self._write_json(model_dir / f"{model_name}.cdi3.json", self._build_cdi3(rig_layers))
+        self._write_json(
+            model_dir / f"{model_name}.model3.json",
+            self._build_model3(model_name, texture_files, rig_layers),
+        )
 
-        # Save model JSON
-        model_json_path = model_dir / f"{model_name}.model3.json"
-        with open(model_json_path, 'w') as f:
-            json.dump(model_json, f, indent=2)
-
-        logger.info(f"Model assembled: {model_dir}")
-
-        # Generate physics if needed
-        physics_json = self._generate_physics_json(model_name, assets)
-        physics_json_path = model_dir / f"{model_name}.physics3.json"
-        with open(physics_json_path, 'w') as f:
-            json.dump(physics_json, f, indent=2)
-
-        # Generate motion definitions
-        self._generate_motion_definitions(model_dir, model_name)
-
-        return model_dir
-
-    def _generate_model_json(
-        self,
-        model_name: str,
-        texture_mapping: Dict[str, str],
-        assets: List[Asset]
-    ) -> Dict:
-        """
-        Generate Live2D model3.json file
-
-        Args:
-            model_name: Model name
-            texture_mapping: Mapping of layer types to texture files
-            assets: List of assets
-
-        Returns:
-            Model JSON dictionary
-        """
-        # This is a simplified Live2D model3.json structure
-        # A full implementation would need more detailed configuration
-
-        model_json = {
-            "Version": 3,
-            "FileReferences": {
-                "Moc": f"{model_name}.moc3",
-                "Textures": [f"textures/{tex}" for tex in texture_mapping.values()],
-                "Physics": f"{model_name}.physics3.json",
-                "DisplayInfo": f"{model_name}.cdi3.json"
-            },
-            "Groups": self._generate_layer_groups(assets),
-            "HitAreas": [
-                {"Name": "Head", "Id": "HitAreaHead"},
-                {"Name": "Body", "Id": "HitAreaBody"}
-            ]
-        }
-
-        return model_json
-
-    def _generate_layer_groups(self, assets: List[Asset]) -> List[Dict]:
-        """Generate layer groupings"""
-        groups = []
-
-        # Group by layer type
-        layer_groups = {}
-        for asset in assets:
-            layer_type = asset.layer_type
-            if layer_type not in layer_groups:
-                layer_groups[layer_type] = []
-            layer_groups[layer_type].append(asset)
-
-        # Create group definitions
-        for group_name, group_assets in layer_groups.items():
-            groups.append({
-                "Target": "Parameter",
-                "Name": group_name,
-                "Ids": [f"Part{group_name.capitalize()}"]
-            })
-
-        return groups
-
-    def _generate_physics_json(self, model_name: str, assets: List[Asset]) -> Dict:
-        """
-        Generate Live2D physics3.json file
-
-        Args:
-            model_name: Model name
-            assets: List of assets
-
-        Returns:
-            Physics JSON dictionary
-        """
-        # Simplified physics configuration
-        physics_json = {
-            "Version": 3,
-            "Meta": {
-                "PhysicsSettingCount": 2,
-                "TotalInputCount": 4,
-                "TotalOutputCount": 4,
-                "VertexCount": 8
-            },
-            "PhysicsSettings": [
-                {
-                    "Id": "PhysicsSetting1",
-                    "Input": [
-                        {"Source": {"Target": "Parameter", "Id": "ParamAngleX"}, "Weight": 60, "Type": "X"}
-                    ],
-                    "Output": [
-                        {"Destination": {"Target": "Parameter", "Id": "ParamHairFront"}, "VertexIndex": 1, "Scale": 10, "Weight": 100, "Type": "Angle"}
-                    ],
-                    "Vertices": [
-                        {"Position": {"X": 0, "Y": 0}, "Mobility": 1, "Delay": 1, "Acceleration": 1, "Radius": 0}
-                    ],
-                    "Normalization": {
-                        "Position": {"Minimum": -10, "Default": 0, "Maximum": 10},
-                        "Angle": {"Minimum": -10, "Default": 0, "Maximum": 10}
-                    }
-                }
-            ]
-        }
-
-        return physics_json
-
-    def _generate_motion_definitions(self, model_dir: Path, model_name: str):
-        """
-        Generate motion definition files
-
-        Args:
-            model_dir: Model directory
-            model_name: Model name
-        """
+        # 6. Minimal idle motion so the model3.json reference resolves.
         motions_dir = model_dir / "motions"
         motions_dir.mkdir(exist_ok=True)
-
-        # Create idle motion placeholder
-        idle_motion = {
-            "Version": 3,
-            "Meta": {
-                "Duration": 2.0,
-                "Fps": 30.0,
-                "Loop": True,
-                "CurveCount": 2,
-                "TotalSegmentCount": 4,
-                "TotalPointCount": 8
+        self._write_json(
+            motions_dir / "idle.motion3.json",
+            {
+                "Version": 3,
+                "Meta": {
+                    "Duration": 4.0,
+                    "Fps": 30.0,
+                    "Loop": True,
+                    "AreBeziersRestricted": True,
+                    "CurveCount": 1,
+                    "TotalSegmentCount": 2,
+                    "TotalPointCount": 3,
+                    "UserDataCount": 0,
+                    "TotalUserDataSize": 0,
+                },
+                "Curves": [
+                    {
+                        "Target": "Parameter",
+                        "Id": "ParamBreath",
+                        "Segments": [0, 0, 1, 2.0, 1, 1, 4.0, 0],
+                    }
+                ],
             },
-            "Curves": []
+        )
+
+        # 7. Helper manifest + rigging guide.
+        self._write_json(
+            model_dir / "kamyii_manifest.json",
+            {
+                "model_name": model_name,
+                "layers": rig_layers,
+                "artifacts": produced,
+                "parameters": [p["Id"] for p in config.MODEL_ASSEMBLY["standard_parameters"]],
+            },
+        )
+        (model_dir / "RIGGING_GUIDE.md").write_text(self._rigging_guide(model_name, rig_layers), encoding="utf-8")
+
+        logger.info("Cubism project assembled at %s", model_dir)
+        return model_dir
+
+    # ------------------------------------------------------------------
+    def _build_model3(self, model_name: str, textures: List[str], layers: List[str]) -> Dict:
+        return {
+            "Version": 3,
+            "FileReferences": {
+                "Moc": f"{model_name}.moc3",  # produced by Cubism Editor on export
+                "Textures": textures or ["textures/texture_00.png"],
+                "Physics": f"{model_name}.physics3.json",
+                "DisplayInfo": f"{model_name}.cdi3.json",
+                "Motions": {
+                    "Idle": [{"File": "motions/idle.motion3.json"}],
+                },
+            },
+            "Groups": [
+                {"Target": "Parameter", "Name": "EyeBlink", "Ids": ["ParamEyeLOpen", "ParamEyeROpen"]},
+                {"Target": "Parameter", "Name": "LipSync", "Ids": ["ParamMouthOpenY"]},
+            ],
+            "HitAreas": [
+                {"Id": "HitAreaHead", "Name": "Head"},
+                {"Id": "HitAreaBody", "Name": "Body"},
+            ],
         }
 
-        idle_motion_path = motions_dir / "idle.motion3.json"
-        with open(idle_motion_path, 'w') as f:
-            json.dump(idle_motion, f, indent=2)
+    def _build_cdi3(self, layers: List[str]) -> Dict:
+        parameters = [
+            {"Id": p["Id"], "GroupId": "", "Name": p["Name"]}
+            for p in config.MODEL_ASSEMBLY["standard_parameters"]
+        ]
+        parameter_groups = [
+            {"Id": "Position", "GroupId": "", "Name": "Position"},
+            {"Id": "Eyes", "GroupId": "", "Name": "Eyes"},
+            {"Id": "Mouth", "GroupId": "", "Name": "Mouth"},
+            {"Id": "Hair", "GroupId": "", "Name": "Hair"},
+        ]
+        parts = [{"Id": _part_id(layer), "Name": layer.replace("_", " ").title()} for layer in layers]
+        return {
+            "Version": 3,
+            "Parameters": parameters,
+            "ParameterGroups": parameter_groups,
+            "Parts": parts,
+        }
 
-        logger.info("Generated motion definitions")
+    @staticmethod
+    def _write_json(path: Path, data: Dict):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
 
-    def create_preview_image(
-        self,
-        assets: List[Asset],
-        output_path: Path,
-        size: tuple = (512, 512)
-    ):
-        """
-        Create a preview image of the model
+    def _rigging_guide(self, model_name: str, layers: List[str]) -> str:
+        layer_lines = "\n".join(f"- `{layer}` → part `{_part_id(layer)}`" for layer in layers)
+        return f"""# Rigging Guide — {model_name}
 
-        Args:
-            assets: List of assets
-            output_path: Path to save preview
-            size: Size of preview image
-        """
-        from PIL import Image
+This folder is a **Live2D Cubism-ready project**. Ka-myii has decomposed your
+character into separated, named layers and generated the supporting Cubism
+files. Follow these steps to finish a fully rigged model.
 
-        # Create composite image
-        preview = Image.new('RGBA', size, (0, 0, 0, 0))
+## 1. Open the artwork
+1. Install **Live2D Cubism 5** (the free version is fine for learning).
+2. `File → Open` and select **`{model_name}.psd`**.
+   - If your tool prefers OpenRaster, `{model_name}.ora` is also provided.
+3. Cubism imports each layer as a separate **ArtMesh**.
 
-        # Layer assets in order
-        layer_order = ["background", "body", "hair_back", "head", "eyes", "mouth", "hair_front", "accessories"]
+## 2. Layers → Parts
+The following layers were exported (back to front):
 
-        for layer_name in layer_order:
-            for asset in assets:
-                if asset.layer_type == layer_name or asset.layer_type.startswith(layer_name):
-                    try:
-                        layer_img = Image.open(asset.file_path)
-                        layer_img = layer_img.resize(size, Image.Resampling.LANCZOS)
-                        preview = Image.alpha_composite(preview, layer_img.convert('RGBA'))
-                    except Exception as e:
-                        logger.warning(f"Failed to add layer {asset.layer_type} to preview: {e}")
+{layer_lines}
 
-        preview.save(output_path)
-        logger.info(f"Preview image created: {output_path}")
+## 3. Auto-rig (Cubism 5 AI)
+1. Select the model in the editor.
+2. Open **Modeling → Auto-Rig (AI)** — Cubism analyses the layers and creates
+   deformers for the eyes, eyebrows, mouth and head angle automatically.
+3. Ka-myii has pre-defined the standard parameter set in
+   **`{model_name}.cdi3.json`** (ParamAngleX/Y/Z, ParamEyeLOpen/ROpen,
+   ParamMouthOpenY/Form, ParamBrowLY/RY, ParamBody*, ParamBreath …) so the
+   auto-rig has the right targets to bind to.
+
+## 4. Physics
+`{model_name}.physics3.json` contains starter physics for hair and clothing.
+Load it via **`Modeling → Physics/Style Sheet Settings → Import`** and tweak
+the pendulum strengths to taste.
+
+## 5. Export
+`File → Export for Runtime → moc3` produces the binary `.moc3` plus updated
+`.model3.json`. That package drops straight into VTube Studio, the Cubism Web
+SDK, Unity, etc.
+
+---
+*Generated by Ka-myii — Automated VTuber Model Studio.*
+"""
+
+    # ------------------------------------------------------------------
+    def create_preview_image(self, assets: List[Asset], output_path: Path, size: tuple = None):
+        """Composite all layers into a single transparent preview image."""
+        flat = psd_exporter.compose_flat(assets)
+        if flat is None:
+            from PIL import Image
+
+            flat = Image.new("RGBA", size or (512, 768), (0, 0, 0, 0))
+        if size:
+            flat.thumbnail(size, __import__("PIL").Image.Resampling.LANCZOS)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        flat.save(output_path)
+        logger.info("Preview image created: %s", output_path)
 
 
 class DummyModelAssembler(ModelAssembler):
-    """Dummy assembler for testing"""
+    """Demo mode uses the same real assembler — no GPU required for packaging."""
 
-    def assemble(
-        self,
-        assets: List[Asset],
-        output_dir: Path,
-        model_name: str = "vtuber_model"
-    ) -> Path:
-        """Create dummy model structure"""
-        logger.info("DummyModelAssembler: Creating placeholder model")
-
-        model_dir = output_dir / model_name
-        model_dir.mkdir(parents=True, exist_ok=True)
-
-        # Just create a simple marker file
-        marker = model_dir / "model.json"
-        marker.write_text(json.dumps({"name": model_name, "assets": len(assets)}))
-
-        return model_dir
+    pass

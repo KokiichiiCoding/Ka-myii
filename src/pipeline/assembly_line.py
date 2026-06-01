@@ -120,6 +120,19 @@ class AssemblyLine:
             model.final_model_path = final_model_path
             logger.info(f"Model assembled: {final_model_path}")
 
+            # Surface the rig-ready artifacts (PSD/ORA/flat) on the model.
+            manifest_path = final_model_path / "kamyii_manifest.json"
+            if manifest_path.exists():
+                try:
+                    import json as _json
+
+                    manifest = _json.loads(manifest_path.read_text())
+                    model.metadata["artifacts"] = manifest.get("artifacts", {})
+                    model.metadata["layers"] = manifest.get("layers", [])
+                    model.metadata["parameters"] = manifest.get("parameters", [])
+                except Exception as exc:  # pragma: no cover
+                    logger.warning("Could not read model manifest: %s", exc)
+
             # Stage 4: Auto-Rigging (optional)
             if request.include_rigging:
                 self._update_progress("Applying auto-rigging...", 0.9)
