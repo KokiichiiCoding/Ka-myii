@@ -1,404 +1,372 @@
-// Generator Page JavaScript
+// Ka-myii Studio — generation controls, live progress, layer studio, downloads.
+(function () {
+  'use strict';
 
-const api = window.KamyiiAPI;
-const utils = window.KamyiiUtils;
+  const $ = (id) => document.getElementById(id);
+  let socket = null;
+  let currentTaskId = null;
+  let lastSeed = null;
+  let busy = false;
 
-// State
-let currentModelId = null;
-let socket = null;
-let currentTaskId = null;
+  // ---- element refs ----
+  const els = {
+    form: $('genForm'), prompt: $('prompt'), negative: $('negative'),
+    styleChips: $('styleChips'), model: $('model'), modelHint: $('modelHint'),
+    sampler: $('sampler'), resolution: $('resolution'),
+    steps: $('steps'), stepsVal: $('stepsVal'), cfg: $('cfg'), cfgVal: $('cfgVal'),
+    seed: $('seed'), randSeed: $('randSeed'), reuseSeed: $('reuseSeed'),
+    clipSkip: $('clipSkip'), clipSkipVal: $('clipSkipVal'),
+    width: $('width'), widthVal: $('widthVal'), height: $('height'), heightVal: $('heightVal'),
+    lora: $('lora'), advToggle: $('advToggle'), advBody: $('advBody'), advChevron: $('advChevron'),
+    generateBtn: $('generateBtn'),
+    canvasEmpty: $('canvasEmpty'), resultImg: $('resultImg'),
+    overlay: $('progressOverlay'), pLabel: $('progressLabel'), pFill: $('progressFill'), pEta: $('progressEta'),
+    resultMeta: $('resultMeta'), metaStatus: $('metaStatus'), metaLayers: $('metaLayers'),
+    metaTime: $('metaTime'), metaSeed: $('metaSeed'),
+    dlPackage: $('dlPackage'), dlPsd: $('dlPsd'), dlOra: $('dlOra'), regenBtn: $('regenBtn'),
+    layerPanel: $('layerPanel'), layerGrid: $('layerGrid'), layerCount: $('layerCount'),
+    errorPanel: $('errorPanel'), errorMsg: $('errorMsg'),
+    modelNotice: $('modelNotice'),
+  };
 
-// Initialize WebSocket connection for progress updates
-try {
-    if (typeof io !== 'undefined') {
-        socket = io('/progress');
+  let selectedStyle = 'vtuber';
 
-        socket.on('connect', function() {
-            console.log('Connected to progress tracking');
-        });
+  // ---- init ----
+  document.addEventListener('DOMContentLoaded', async () => {
+    bindControls();
+    connectSocket();
+    await loadOptions();
+    await refreshModelNotice();
+    addUIEnhancements();
+  });
 
-        socket.on('disconnect', function() {
-            console.log('Disconnected from progress tracking');
-        });
+  function bindControls() {
+    els.steps.oninput = () => (els.stepsVal.textContent = els.steps.value);
+    els.cfg.oninput = () => (els.cfgVal.textContent = els.cfg.value);
+    els.clipSkip.oninput = () => (els.clipSkipVal.textContent = els.clipSkip.value);
+    els.width.oninput = () => (els.widthVal.textContent = els.width.value);
+    els.height.oninput = () => (els.heightVal.textContent = els.height.value);
+    els.randSeed.onclick = () => (els.seed.value = Math.floor(Math.random() * 2147483647));
+    els.reuseSeed.onclick = () => { if (lastSeed != null) els.seed.value = lastSeed; };
+    els.advToggle.onclick = () => {
+      els.advBody.classList.toggle('hidden');
+      els.advChevron.classList.toggle('fa-chevron-down');
+      els.advChevron.classList.toggle('fa-chevron-up');
+    };
+    els.resolution.onchange = () => {
+      const opt = els.resolution.selectedOptions[0];
+      if (opt && opt.dataset.w) {
+        els.width.value = opt.dataset.w; els.widthVal.textContent = opt.dataset.w;
+        els.height.value = opt.dataset.h; els.heightVal.textContent = opt.dataset.h;
+      }
+    };
+    els.model.onchange = updateModelHint;
+    els.form.onsubmit = onGenerate;
+    els.regenBtn.onclick = resetToForm;
+  }
 
-        socket.on('progress_update', function(data) {
-            updateProgress(data);
-        });
+  async function loadOptions() {
+    try {
+      const { data } = await axios.get('/api/generation/options');
+      if (!data.success) return;
 
-        console.log('WebSocket progress tracking initialized');
-    } else {
-        console.warn('Socket.IO not available - progress tracking disabled');
+      // styles
+      els.styleChips.innerHTML = '';
+      data.styles.forEach((s) => {
+        const chip = document.createElement('div');
+        chip.className = 'chip' + (s === selectedStyle ? ' active' : '');
+        chip.textContent = s;
+        chip.onclick = () => {
+          selectedStyle = s;
+          [...els.styleChips.children].forEach((c) => c.classList.remove('active'));
+          chip.classList.add('active');
+        };
+        els.styleChips.appendChild(chip);
+      });
+
+      // checkpoints
+      els.model.innerHTML = '';
+      data.checkpoints.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id; o.textContent = c.name + (c.available === false ? ' (missing)' : '');
+        o.dataset.note = c.note || ''; o.dataset.source = c.source || '';
+        if (c.available === false) o.disabled = false; // selectable as a hint
+        els.model.appendChild(o);
+      });
+      if (data.defaults.model) els.model.value = data.defaults.model;
+      updateModelHint();
+
+      // samplers
+      els.sampler.innerHTML = '';
+      data.samplers.forEach((s) => {
+        const o = document.createElement('option'); o.value = s; o.textContent = s;
+        els.sampler.appendChild(o);
+      });
+      els.sampler.value = data.defaults.sampler;
+
+      // resolutions
+      els.resolution.innerHTML = '';
+      data.resolutions.forEach((r) => {
+        const o = document.createElement('option');
+        o.value = r.label; o.textContent = r.label; o.dataset.w = r.width; o.dataset.h = r.height;
+        els.resolution.appendChild(o);
+      });
+
+      // loras
+      els.lora.innerHTML = '<option value="">None</option>';
+      (data.loras || []).forEach((l) => {
+        const o = document.createElement('option'); o.value = l.id; o.textContent = l.name;
+        els.lora.appendChild(o);
+      });
+
+      // defaults
+      els.steps.value = data.defaults.steps; els.stepsVal.textContent = data.defaults.steps;
+      els.cfg.value = data.defaults.guidance_scale; els.cfgVal.textContent = data.defaults.guidance_scale;
+      els.width.value = data.defaults.width; els.widthVal.textContent = data.defaults.width;
+      els.height.value = data.defaults.height; els.heightVal.textContent = data.defaults.height;
+      els.clipSkip.value = data.defaults.clip_skip; els.clipSkipVal.textContent = data.defaults.clip_skip;
+      els.negative.placeholder = (data.defaults.negative_prompt || '').slice(0, 90) + '…';
+    } catch (e) {
+      console.error('Failed to load options', e);
     }
-} catch (error) {
-    console.warn('Failed to initialize WebSocket:', error);
-}
+  }
 
-// UI Elements
-const form = document.getElementById('generationForm');
-const generateBtn = document.getElementById('generateBtn');
+  function updateModelHint() {
+    const opt = els.model.selectedOptions[0];
+    els.modelHint.textContent = opt ? (opt.dataset.note || '') : '';
+  }
 
-// State containers
-const initialState = document.getElementById('initialState');
-const loadingState = document.getElementById('loadingState');
-const resultState = document.getElementById('resultState');
-const errorState = document.getElementById('errorState');
+  async function refreshModelNotice() {
+    try {
+      const { data } = await axios.get('/api/generation/model-status');
+      els.modelNotice.classList.toggle('hidden', !data.is_dummy);
+    } catch (e) { /* ignore */ }
+  }
 
-// Form inputs
-const promptInput = document.getElementById('prompt');
-const negativePromptInput = document.getElementById('negativePrompt');
-const styleSelect = document.getElementById('style');
-const widthInput = document.getElementById('width');
-const heightInput = document.getElementById('height');
-const stepsInput = document.getElementById('steps');
-const guidanceScaleInput = document.getElementById('guidanceScale');
-const seedInput = document.getElementById('seed');
-const includeRiggingInput = document.getElementById('includeRigging');
+  // ---- websocket progress ----
+  function connectSocket() {
+    if (typeof io === 'undefined') return;
+    try {
+      socket = io('/progress');
+      socket.on('progress_update', (d) => {
+        if (currentTaskId && d.task_id && d.task_id !== currentTaskId) return;
+        if (typeof d.progress === 'number') els.pFill.style.width = d.progress + '%';
+        if (d.message) els.pLabel.textContent = d.message;
+        if (d.eta && d.eta > 1) {
+          const s = Math.round(d.eta);
+          els.pEta.textContent = s >= 60 ? `ETA ${Math.floor(s / 60)}m ${s % 60}s` : `ETA ${s}s`;
+        } else { els.pEta.textContent = ''; }
+      });
+    } catch (e) { console.warn('socket init failed', e); }
+  }
 
-// Range value displays
-const stepsValue = document.getElementById('stepsValue');
-const guidanceScaleValue = document.getElementById('guidanceScaleValue');
-
-// Result elements
-const previewImage = document.getElementById('previewImage');
-const modelIdSpan = document.getElementById('modelId');
-const modelStatusSpan = document.getElementById('modelStatus');
-const generationTimeSpan = document.getElementById('generationTime');
-const assetCountSpan = document.getElementById('assetCount');
-
-// Buttons
-const downloadBtn = document.getElementById('downloadBtn');
-const viewDetailsBtn = document.getElementById('viewDetailsBtn');
-const generateAnotherBtn = document.getElementById('generateAnotherBtn');
-const retryBtn = document.getElementById('retryBtn');
-
-// Update range value displays
-stepsInput.addEventListener('input', function() {
-    stepsValue.textContent = this.value;
-});
-
-guidanceScaleInput.addEventListener('input', function() {
-    guidanceScaleValue.textContent = this.value;
-});
-
-// Form submission
-form.addEventListener('submit', async function(e) {
+  // ---- generate ----
+  async function onGenerate(e) {
     e.preventDefault();
-    await generateModel();
-});
+    if (busy) return;
+    const prompt = els.prompt.value.trim();
+    if (!prompt) { els.prompt.focus(); return; }
 
-// Generate model
-async function generateModel() {
-    // Get form values
-    const params = {
-        prompt: promptInput.value.trim(),
-        negative_prompt: negativePromptInput.value.trim(),
-        style: styleSelect.value,
-        width: parseInt(widthInput.value),
-        height: parseInt(heightInput.value),
-        steps: parseInt(stepsInput.value),
-        guidance_scale: parseFloat(guidanceScaleInput.value),
-        seed: seedInput.value ? parseInt(seedInput.value) : null,
-        include_rigging: includeRiggingInput.checked
+    busy = true;
+    showProgress();
+
+    const seedRaw = parseInt(els.seed.value, 10);
+    const payload = {
+      prompt,
+      negative_prompt: els.negative.value.trim(),
+      style: selectedStyle,
+      model_id: els.model.value,
+      sampler: els.sampler.value,
+      steps: parseInt(els.steps.value, 10),
+      guidance_scale: parseFloat(els.cfg.value),
+      width: parseInt(els.width.value, 10),
+      height: parseInt(els.height.value, 10),
+      clip_skip: parseInt(els.clipSkip.value, 10),
+      seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
+      loras: els.lora.value ? [{ id: els.lora.value, weight: 1.0 }] : null,
     };
-
-    // Validate
-    if (!params.prompt) {
-        alert('Please enter a character description');
-        return;
-    }
-
-    // Show loading state
-    showLoadingState();
+    lastSeed = payload.seed;
 
     try {
-        // Call API
-        const result = await api.generateModel(params);
-
-        if (result.success) {
-            currentModelId = result.model_id;
-            // Store task_id for progress tracking
-            if (result.task_id) {
-                currentTaskId = result.task_id;
-                console.log('Tracking progress for task:', currentTaskId);
-            }
-            showResultState(result.model);
-        } else {
-            throw new Error(result.error || 'Generation failed');
-        }
-    } catch (error) {
-        showErrorState(error.toString());
-        // Clear task ID on error
-        currentTaskId = null;
+      const { data } = await axios.post('/api/generation/generate', payload);
+      if (!data.success) throw new Error(data.error || 'Generation failed');
+      currentTaskId = data.task_id;
+      els.pFill.style.width = '100%';
+      await showResult(data);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || String(err);
+      showError(msg);
+    } finally {
+      busy = false;
     }
-}
+  }
 
-// Show loading state
-function showLoadingState() {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'block';
-    resultState.style.display = 'none';
-    errorState.style.display = 'none';
+  function showProgress() {
+    els.errorPanel.classList.add('hidden');
+    els.resultMeta.classList.add('hidden');
+    els.layerPanel.classList.add('hidden');
+    els.canvasEmpty.classList.add('hidden');
+    els.resultImg.classList.add('hidden');
+    els.overlay.classList.remove('hidden');
+    els.pFill.style.width = '0%';
+    els.pLabel.textContent = 'Starting…';
+    els.pEta.textContent = '';
+    els.generateBtn.disabled = true;
+  }
 
-    generateBtn.disabled = true;
+  async function showResult(data) {
+    const model = data.model || {};
+    const meta = model.metadata || {};
+    const mid = data.model_id;
 
-    // Reset progress bar
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-    progressBar.style.width = '0%';
-    loadingMessage.textContent = 'Starting generation...';
-
-    // Use real-time progress tracking if available, otherwise simulate
-    simulateProgress();
-}
-
-// Update progress from WebSocket
-function updateProgress(data) {
-    // Check if this update is for the current task
-    if (currentTaskId && data.task_id !== currentTaskId) {
-        return; // Ignore updates for other tasks
-    }
-
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-
-    // Update progress bar
-    if (data.progress !== undefined) {
-        progressBar.style.width = data.progress + '%';
-        progressBar.setAttribute('aria-valuenow', data.progress);
-    }
-
-    // Update message
-    if (data.message) {
-        let displayMessage = data.message;
-
-        // Add ETA if available
-        if (data.eta && data.eta > 1) {
-            const etaSeconds = Math.round(data.eta);
-            const etaMinutes = Math.floor(etaSeconds / 60);
-            const remainingSeconds = etaSeconds % 60;
-
-            if (etaMinutes > 0) {
-                displayMessage += ` (ETA: ${etaMinutes}m ${remainingSeconds}s)`;
-            } else {
-                displayMessage += ` (ETA: ${etaSeconds}s)`;
-            }
-        }
-
-        loadingMessage.textContent = displayMessage;
-    }
-
-    // Handle completion states
-    if (data.status === 'completed' || data.status === 'complete') {
-        console.log('Generation completed');
-        progressBar.style.width = '100%';
-        loadingMessage.textContent = data.message || 'Generation complete!';
-    } else if (data.status === 'failed') {
-        console.error('Generation failed:', data.message);
-        showErrorState(data.message || 'Generation failed');
-    } else if (data.status === 'cancelled') {
-        console.log('Generation cancelled');
-        showErrorState('Generation was cancelled');
-    }
-}
-
-// Fallback: Simulate progress if WebSocket is not available
-function simulateProgress() {
-    if (socket && socket.connected) {
-        // WebSocket available, don't simulate
-        console.log('Using real-time progress tracking');
-        return;
-    }
-
-    console.log('WebSocket not available, simulating progress');
-
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-
-    const stages = [
-        { message: 'Initializing...', progress: 10 },
-        { message: 'Generating base image...', progress: 30 },
-        { message: 'Separating assets...', progress: 60 },
-        { message: 'Assembling model...', progress: 80 },
-        { message: 'Finalizing...', progress: 95 }
-    ];
-
-    let currentStage = 0;
-
-    const interval = setInterval(function() {
-        if (currentStage < stages.length) {
-            const stage = stages[currentStage];
-            loadingMessage.textContent = stage.message;
-            progressBar.style.width = stage.progress + '%';
-            currentStage++;
-        } else {
-            clearInterval(interval);
-        }
-    }, 3000);
-}
-
-// Show result state
-function showResultState(model) {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'block';
-    errorState.style.display = 'none';
-
-    generateBtn.disabled = false;
-
-    // Update UI with model data
-    previewImage.src = api.getPreviewUrl(model.id);
-    modelIdSpan.textContent = model.id;
-    modelStatusSpan.textContent = utils.getStatusName(model.status);
-    modelStatusSpan.className = 'badge ' + utils.getStatusBadge(model.status);
-    generationTimeSpan.textContent = utils.formatDuration(model.generation_time);
-    assetCountSpan.textContent = model.assets?.length || 0;
-
-    // Set up download button
-    downloadBtn.onclick = function() {
-        window.location.href = api.getDownloadUrl(model.id);
+    els.resultImg.src = `/api/generation/preview/${mid}?t=${Date.now()}`;
+    els.resultImg.onload = () => {
+      els.overlay.classList.add('hidden');
+      els.resultImg.classList.remove('hidden');
     };
+    els.resultImg.onerror = () => { els.overlay.classList.add('hidden'); };
 
-    // Set up edit expressions button
-    const editExpressionsBtn = document.getElementById('editExpressionsBtn');
-    if (editExpressionsBtn) {
-        editExpressionsBtn.href = `/editor/${model.id}`;
-        editExpressionsBtn.style.display = 'block';
-    }
+    els.metaStatus.textContent = model.status || 'completed';
+    els.metaLayers.textContent = (meta.layers || []).length || '—';
+    els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
+    els.metaSeed.textContent = lastSeed != null ? lastSeed : 'random';
+    els.resultMeta.classList.remove('hidden');
 
-    // Set up view details button
-    viewDetailsBtn.onclick = function() {
-        showModelDetails(model);
-    };
-}
+    els.dlPackage.href = `/api/generation/artifact/${mid}/package`;
+    els.dlPsd.href = `/api/generation/artifact/${mid}/psd`;
+    els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
 
-// Show error state
-function showErrorState(errorMessage) {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'none';
-    errorState.style.display = 'block';
+    els.generateBtn.disabled = false;
+    await loadLayers(mid);
+  }
 
-    generateBtn.disabled = false;
-
-    document.getElementById('errorMessage').textContent = errorMessage;
-}
-
-// Show model details
-function showModelDetails(model) {
-    let details = `
-Model Details:
---------------
-ID: ${model.id}
-Name: ${model.name || 'N/A'}
-Status: ${model.status}
-Created: ${model.created_at}
-Generation Time: ${utils.formatDuration(model.generation_time)}
-
-Assets (${model.assets?.length || 0}):
-${model.assets?.map(a => `- ${a.layer_type}: ${a.file_path}`).join('\n') || 'None'}
-
-Base Image: ${model.base_image_path || 'N/A'}
-Final Model: ${model.final_model_path || 'N/A'}
-    `.trim();
-
-    alert(details);
-}
-
-// Generate another model
-generateAnotherBtn.addEventListener('click', function() {
-    initialState.style.display = 'block';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'none';
-    errorState.style.display = 'none';
-
-    currentModelId = null;
-    currentTaskId = null;  // Clear task ID
-    form.reset();
-
-    // Reset range displays
-    stepsValue.textContent = stepsInput.value;
-    guidanceScaleValue.textContent = guidanceScaleInput.value;
-});
-
-// Retry on error
-retryBtn.addEventListener('click', function() {
-    generateModel();
-});
-
-// Model Status Checking
-async function checkModelStatus() {
-    const statusAlert = document.getElementById('modelStatusAlert');
-    const statusMessage = document.getElementById('modelStatusMessage');
-    const preloadBtn = document.getElementById('preloadModelBtn');
-
+  async function loadLayers(mid) {
     try {
-        const response = await axios.get('/api/generation/model-status');
+      const { data } = await axios.get(`/api/generation/layers/${mid}`);
+      if (!data.success || !data.count) return;
+      els.layerGrid.innerHTML = '';
+      data.layers.forEach((l) => {
+        const card = document.createElement('div');
+        card.className = 'layer-card';
+        card.innerHTML = `<div class="layer-thumb"><img loading="lazy" src="${l.url}" alt="${l.name}"></div>
+                          <div class="layer-name">${l.name}</div>`;
+        els.layerGrid.appendChild(card);
+      });
+      els.layerCount.textContent = data.count + ' parts';
+      els.layerPanel.classList.remove('hidden');
+    } catch (e) { console.warn('layers load failed', e); }
+  }
 
-        if (response.data.success) {
-            const { model_loaded, device, is_dummy, message } = response.data;
+  function showError(msg) {
+    els.overlay.classList.add('hidden');
+    els.canvasEmpty.classList.remove('hidden');
+    els.errorMsg.textContent = msg;
+    els.errorPanel.classList.remove('hidden');
+    els.generateBtn.disabled = false;
+  }
 
-            statusAlert.style.display = 'block';
+  function resetToForm() {
+    els.resultMeta.classList.add('hidden');
+    els.layerPanel.classList.add('hidden');
+    els.resultImg.classList.add('hidden');
+    els.canvasEmpty.classList.remove('hidden');
+  }
 
-            if (is_dummy) {
-                statusAlert.className = 'alert alert-warning';
-                statusMessage.textContent = message;
-                preloadBtn.style.display = 'none';
-            } else if (model_loaded) {
-                statusAlert.className = 'alert alert-success';
-                statusMessage.textContent = `${message} (${device.toUpperCase()})`;
-                preloadBtn.style.display = 'none';
-            } else {
-                statusAlert.className = 'alert alert-warning';
-                statusMessage.textContent = message + '. Click the button to download it now (4-5 GB, takes 10-30 min).';
-                preloadBtn.style.display = 'inline-block';
-            }
-        }
-    } catch (error) {
-        console.error('Failed to check model status:', error);
-        statusAlert.style.display = 'block';
-        statusAlert.className = 'alert alert-danger';
-        statusMessage.textContent = 'Could not check model status';
+  // ---- UI enhancements ----
+  function addUIEnhancements() {
+    // Add smooth scrolling for form controls
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const val = (e.target.value - e.target.min) / (e.target.max - e.target.min);
+        e.target.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+      });
+      // Initialize
+      const val = (slider.value - slider.min) / (slider.max - slider.min);
+      slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+    });
+
+    // Add ripple effect to buttons
+    document.querySelectorAll('.btn, .chip').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        const ripple = document.createElement('span');
+        ripple.style.cssText = `
+          position: absolute;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.3);
+          transform: scale(0);
+          animation: ripple 0.6s ease-out;
+          pointer-events: none;
+        `;
+        const rect = this.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = e.clientX - rect.left - size / 2 + 'px';
+        ripple.style.top = e.clientY - rect.top - size / 2 + 'px';
+
+        this.style.position = 'relative';
+        this.style.overflow = 'hidden';
+        this.appendChild(ripple);
+
+        setTimeout(() => ripple.remove(), 600);
+      });
+    });
+
+    // Add CSS animation for ripple if not exists
+    if (!document.getElementById('ripple-style')) {
+      const style = document.createElement('style');
+      style.id = 'ripple-style';
+      style.textContent = '@keyframes ripple { to { transform: scale(4); opacity: 0; } }';
+      document.head.appendChild(style);
     }
-}
 
-// Preload Model
-async function preloadModel() {
-    const preloadBtn = document.getElementById('preloadModelBtn');
-    const preloadProgress = document.getElementById('preloadProgress');
-    const statusMessage = document.getElementById('modelStatusMessage');
-
-    preloadBtn.disabled = true;
-    preloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
-    preloadProgress.style.display = 'block';
-
-    try {
-        statusMessage.textContent = 'Downloading Stable Diffusion model... Please wait (this may take 10-30 minutes)';
-
-        const response = await axios.post('/api/generation/preload-model');
-
-        if (response.data.success) {
-            preloadProgress.style.display = 'none';
-            statusMessage.textContent = 'Model loaded successfully! You can now generate models.';
-            document.getElementById('modelStatusAlert').className = 'alert alert-success';
-            preloadBtn.style.display = 'none';
-        } else {
-            throw new Error(response.data.message || 'Model loading failed');
+    // Smooth reveal for panels
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.animation = 'slideIn 0.6s ease-out forwards';
+          observer.unobserve(entry.target);
         }
-    } catch (error) {
-        preloadProgress.style.display = 'none';
-        statusMessage.textContent = 'Model download failed: ' + error.message;
-        document.getElementById('modelStatusAlert').className = 'alert alert-danger';
-        preloadBtn.disabled = false;
-        preloadBtn.innerHTML = '<i class="fas fa-download"></i> Try Again';
-        preloadBtn.style.display = 'inline-block';
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.panel, .feature').forEach(el => {
+      if (!el.classList.contains('sticky')) {
+        observer.observe(el);
+      }
+    });
+
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + Enter to generate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !busy) {
+        e.preventDefault();
+        els.generateBtn.click();
+      }
+      // Escape to reset
+      if (e.key === 'Escape' && !busy) {
+        resetToForm();
+      }
+    });
+
+    // Show keyboard shortcuts hint on first load
+    if (!localStorage.getItem('km_shortcuts_shown')) {
+      setTimeout(() => {
+        const hint = document.createElement('div');
+        hint.style.cssText = `
+          position: fixed; bottom: 20px; right: 20px;
+          background: linear-gradient(135deg, rgba(177, 108, 234, 0.95), rgba(92, 200, 255, 0.95));
+          color: white; padding: 12px 18px; border-radius: 10px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          font-size: 0.85rem; z-index: 1000;
+          animation: slideIn 0.4s ease-out;
+          cursor: pointer;
+        `;
+        hint.innerHTML = '💡 <strong>Tip:</strong> Ctrl+Enter to generate, Esc to reset';
+        document.body.appendChild(hint);
+        hint.onclick = () => hint.remove();
+        setTimeout(() => hint.remove(), 8000);
+        localStorage.setItem('km_shortcuts_shown', 'true');
+      }, 2000);
     }
-}
-
-// Attach preload button click
-document.getElementById('preloadModelBtn').addEventListener('click', preloadModel);
-
-// Initialize
-console.log('Generator page initialized');
-
-// Check model status on page load
-checkModelStatus();
+  }
+})();

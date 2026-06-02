@@ -1,242 +1,76 @@
 {% extends "base.html" %}
-
-{% block title %}Ka-myii - Home{% endblock %}
+{% block title %}Ka-myii — Automated VTuber Model Studio{% endblock %}
+{% block tab_home %}active{% endblock %}
 
 {% block content %}
-<div class="hero-section text-center py-5">
-    <h1 class="display-3 mb-4">
-        <i class="fas fa-magic text-primary"></i>
-        Welcome to Ka-myii
-    </h1>
-    <p class="lead mb-4">
-        Automated VTuber Model Generation System
-    </p>
-    <p class="text-muted mb-5">
-        Create high-quality Live2D style VTuber models using AI-powered generation,
-        asset separation, and automated assembly - all in one streamlined pipeline.
-    </p>
-
-    <a href="/generator" class="btn btn-primary btn-lg me-3">
-        <i class="fas fa-wand-magic-sparkles"></i> Start Creating
-    </a>
-    <a href="/gallery" class="btn btn-outline-primary btn-lg">
-        <i class="fas fa-images"></i> View Gallery
-    </a>
-</div>
-
-<div class="row mt-5">
-    <div class="col-md-12">
-        <h2 class="text-center mb-4">How It Works</h2>
-    </div>
-</div>
-
-<div class="row g-4">
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-image fa-3x text-primary"></i>
-                </div>
-                <h5 class="card-title">1. Image Generation</h5>
-                <p class="card-text">
-                    AI-powered character image generation using Stable Diffusion models.
-                </p>
-            </div>
+<div class="km-wrap">
+    <section class="hero">
+        <h1>Turn a prompt into a <span class="grad">rig-ready VTuber</span></h1>
+        <p>
+            Ka-myii is a local, Stable-Diffusion-style studio that generates high-quality
+            anime characters, automatically decomposes them into clean named layers, and
+            packages a complete <strong>Live2D Cubism</strong> project — layered PSD, physics,
+            parameters and all — ready for auto-rigging.
+        </p>
+        <div class="btn-row">
+            <a href="/generator" class="btn btn-primary btn-lg" style="width:auto;padding:15px 28px;">
+                <i class="fas fa-wand-magic-sparkles"></i> Open the Studio
+            </a>
+            <a href="/gallery" class="btn btn-lg" style="width:auto;padding:15px 28px;">
+                <i class="fas fa-images"></i> Browse Gallery
+            </a>
         </div>
-    </div>
 
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-layer-group fa-3x text-success"></i>
-                </div>
-                <h5 class="card-title">2. Asset Separation</h5>
-                <p class="card-text">
-                    Automatically separate the character into layered components.
-                </p>
-            </div>
+        <div class="pipeline">
+            <div class="pipe-step"><span class="num">1</span> Prompt</div>
+            <span class="pipe-arrow">→</span>
+            <div class="pipe-step"><span class="num">2</span> SDXL Generate</div>
+            <span class="pipe-arrow">→</span>
+            <div class="pipe-step"><span class="num">3</span> Decompose Layers</div>
+            <span class="pipe-arrow">→</span>
+            <div class="pipe-step"><span class="num">4</span> PSD + Live2D</div>
+            <span class="pipe-arrow">→</span>
+            <div class="pipe-step"><span class="num">5</span> Rig in Cubism</div>
         </div>
-    </div>
+    </section>
 
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-cube fa-3x text-info"></i>
-                </div>
-                <h5 class="card-title">3. Model Assembly</h5>
-                <p class="card-text">
-                    Combine assets into a Live2D compatible model format.
-                </p>
-            </div>
+    <section class="feature-grid">
+        <div class="panel feature">
+            <div class="fico">🎨</div>
+            <h4>Modern SDXL models</h4>
+            <p>Illustrious-XL, NoobAI-XL, Pony, Animagine and Holodayo-class checkpoints with
+               sampler, LoRA, clip-skip and VAE controls — the 2026 standard for anime art.</p>
         </div>
-    </div>
-
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-smile fa-3x text-warning"></i>
-                </div>
-                <h5 class="card-title">4. Expression Editor</h5>
-                <p class="card-text">
-                    Generate emotions like happy, sad, angry, smug, heart eyes, and more!
-                </p>
-            </div>
+        <div class="panel feature">
+            <div class="fico">✂️</div>
+            <h4>Automatic decomposition</h4>
+            <p>Characters are split into 15+ aligned, named layers — hair front/back, head,
+               eyes L/R, brows, mouth, body, clothing — with occluded regions filled in.</p>
         </div>
-    </div>
-
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-crown fa-3x text-danger"></i>
-                </div>
-                <h5 class="card-title">5. Accessories</h5>
-                <p class="card-text">
-                    Add cat ears, glasses, bows, halos, and custom accessories.
-                </p>
-            </div>
+        <div class="panel feature">
+            <div class="fico">🧩</div>
+            <h4>Layered PSD export</h4>
+            <p>True layered <strong>.psd</strong> (plus open <strong>.ora</strong>) with Live2D-friendly
+               naming and draw order — drop it straight into Cubism or Clip Studio.</p>
         </div>
-    </div>
-
-    <div class="col-md-3">
-        <div class="card h-100 text-center">
-            <div class="card-body">
-                <div class="feature-icon mb-3">
-                    <i class="fas fa-download fa-3x text-success"></i>
-                </div>
-                <h5 class="card-title">6. Export & Use</h5>
-                <p class="card-text">
-                    Download your model and use it in your favorite VTuber software.
-                </p>
-            </div>
+        <div class="panel feature">
+            <div class="fico">🦴</div>
+            <h4>Rig-ready Live2D</h4>
+            <p>A complete Cubism project scaffold: model3.json, physics3.json and a cdi3.json
+               pre-loaded with the standard parameter set for Cubism 5's AI auto-rig.</p>
         </div>
-    </div>
-</div>
-
-<div class="row mt-5">
-    <div class="col-md-12">
-        <h2 class="text-center mb-4">Features</h2>
-    </div>
-</div>
-
-<div class="row g-4 mb-5">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-bolt text-warning"></i> AI-Powered Generation
-                </h5>
-                <p class="card-text">
-                    Leverages state-of-the-art Stable Diffusion models for high-quality character generation.
-                </p>
-            </div>
+        <div class="panel feature">
+            <div class="fico">⚡</div>
+            <h4>Live progress</h4>
+            <p>Real-time WebSocket progress with step counts and ETA — watch the model build,
+               just like your favourite diffusion UI.</p>
         </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-palette text-primary"></i> Customizable Styles
-                </h5>
-                <p class="card-text">
-                    Multiple art styles including anime, Live2D, and realistic options.
-                </p>
-            </div>
+        <div class="panel feature">
+            <div class="fico">💻</div>
+            <h4>Runs locally</h4>
+            <p>Fully self-hosted Flask app. No GPU? A built-in demo mode exercises the entire
+               pipeline so you can explore every feature instantly.</p>
         </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-cogs text-info"></i> Automated Pipeline
-                </h5>
-                <p class="card-text">
-                    Complete automation from image generation to model assembly.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-download text-success"></i> Easy Export
-                </h5>
-                <p class="card-text">
-                    Download models in Live2D compatible formats ready for use.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-theater-masks text-danger"></i> VTuber Expressions
-                </h5>
-                <p class="card-text">
-                    15+ built-in expressions: happy, sad, angry, cry, smug, heart eyes, frustrated, and more!
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-crown text-warning"></i> Accessory System
-                </h5>
-                <p class="card-text">
-                    Add cat ears, bunny ears, glasses, bows, halos, horns, and more with preset themes!
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-sliders-h text-info"></i> Image Editor
-                </h5>
-                <p class="card-text">
-                    Fine-tune brightness, contrast, saturation, and apply filters to perfect your model.
-                </p>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-eye text-primary"></i> Live Preview
-                </h5>
-                <p class="card-text">
-                    Toggle between expressions in real-time to see how your character looks with different emotions.
-                </p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row mt-5 mb-5">
-    <div class="col-md-12 text-center">
-        <div class="alert alert-info" role="alert">
-            <h5><i class="fas fa-info-circle"></i> Getting Started</h5>
-            <p class="mb-0">
-                Click "Start Creating" above to begin generating your first VTuber model!
-                You can customize the character description, art style, and various generation parameters.
-            </p>
-        </div>
-    </div>
+    </section>
 </div>
 {% endblock %}

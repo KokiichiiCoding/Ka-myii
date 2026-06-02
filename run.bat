@@ -73,6 +73,13 @@ echo.
 REM Upgrade pip first
 echo [INFO] Upgrading pip...
 python -m pip install --upgrade pip
+if errorlevel 1 (
+    echo [WARNING] Pip upgrade failed, but continuing anyway...
+    echo If you see errors below, try running: python -m pip install --upgrade pip --user
+    echo.
+) else (
+    echo [OK] Pip upgraded successfully
+)
 echo.
 
 REM Check for CUDA/GPU support

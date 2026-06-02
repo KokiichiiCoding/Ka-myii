@@ -66,12 +66,17 @@ def generate_model():
         gen_request = GenerationRequest(
             prompt=data.get('prompt', ''),
             negative_prompt=data.get('negative_prompt', ''),
-            style=data.get('style', 'anime'),
-            width=data.get('width', image_settings.get('default_width', 512)),
-            height=data.get('height', image_settings.get('default_height', 512)),
-            steps=data.get('steps', image_settings.get('default_steps', 30)),
-            guidance_scale=data.get('guidance_scale', image_settings.get('default_guidance_scale', 7.5)),
+            style=data.get('style', 'vtuber'),
+            width=int(data.get('width', image_settings.get('default_width', 832))),
+            height=int(data.get('height', image_settings.get('default_height', 1216))),
+            steps=int(data.get('steps', image_settings.get('default_steps', 28))),
+            guidance_scale=float(data.get('guidance_scale', image_settings.get('default_guidance_scale', 6.5))),
             seed=data.get('seed'),
+            model_id=data.get('model_id'),
+            sampler=data.get('sampler', image_settings.get('default_sampler')),
+            clip_skip=data.get('clip_skip'),
+            loras=data.get('loras'),
+            batch_size=int(data.get('batch_size', 1)),
             include_rigging=data.get('include_rigging', False),
             custom_layers=data.get('custom_layers')
         )
@@ -384,3 +389,121 @@ def preload_model():
             'error': str(e),
             'message': 'Model loading failed. Check logs for details.'
         }), 500
+
+
+@generation_bp.route('/options', methods=['GET'])
+def get_options():
+    """Return everything needed to populate the generation UI controls:
+    checkpoints, LoRAs, VAEs, samplers, styles and defaults."""
+    try:
+        from src.utils import model_scanner
+
+        igen = config.IMAGE_GENERATION
+        return jsonify({
+            'success': True,
+            'checkpoints': model_scanner.list_checkpoints(),
+            'loras': model_scanner.list_loras(),
+            'vaes': model_scanner.list_vaes(),
+            'samplers': model_scanner.list_samplers(),
+            'styles': list(config.STYLE_PRESETS.keys()),
+            'defaults': {
+                'width': igen['default_width'],
+                'height': igen['default_height'],
+                'steps': igen['default_steps'],
+                'guidance_scale': igen['default_guidance_scale'],
+                'sampler': igen['default_sampler'],
+                'model': igen['model_name'],
+                'negative_prompt': config.DEFAULT_NEGATIVE_PROMPT,
+                'clip_skip': igen.get('clip_skip', 2),
+            },
+            'resolutions': [
+                {'label': 'Portrait 832×1216 (SDXL)', 'width': 832, 'height': 1216},
+                {'label': 'Portrait 768×1152', 'width': 768, 'height': 1152},
+                {'label': 'Square 1024×1024', 'width': 1024, 'height': 1024},
+                {'label': 'Tall 896×1152', 'width': 896, 'height': 1152},
+                {'label': 'Fast 512×768', 'width': 512, 'height': 768},
+            ],
+        })
+    except Exception as e:
+        logger.error(f"Failed to get options: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@generation_bp.route('/layers/<model_id>', methods=['GET'])
+def list_layers(model_id: str):
+    """List the decomposed layer images for a model (for the Layer Studio)."""
+    try:
+        assets_dir = config.OUTPUT_DIR / model_id / "assets"
+        if not assets_dir.exists():
+            return jsonify({'success': False, 'error': 'No layers found'}), 404
+        layers = []
+        for layer_file in sorted(assets_dir.glob("*.png")):
+            if layer_file.stem == "character":
+                continue
+            # filenames are like "09_eye_L.png"
+            parts = layer_file.stem.split("_", 1)
+            name = parts[1] if len(parts) == 2 and parts[0].isdigit() else layer_file.stem
+            layers.append({
+                'name': name,
+                'file': layer_file.name,
+                'url': f'/api/generation/layer/{model_id}/{layer_file.name}',
+            })
+        return jsonify({'success': True, 'count': len(layers), 'layers': layers})
+    except Exception as e:
+        logger.error(f"Failed to list layers: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@generation_bp.route('/layer/<model_id>/<path:filename>', methods=['GET'])
+def get_layer(model_id: str, filename: str):
+    """Serve a single decomposed layer PNG."""
+    try:
+        # Prevent path traversal.
+        safe_name = Path(filename).name
+        layer_path = config.OUTPUT_DIR / model_id / "assets" / safe_name
+        if not layer_path.exists():
+            return jsonify({'success': False, 'error': 'Layer not found'}), 404
+        return send_file(layer_path, mimetype='image/png')
+    except Exception as e:
+        logger.error(f"Failed to get layer: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@generation_bp.route('/artifact/<model_id>/<kind>', methods=['GET'])
+def get_artifact(model_id: str, kind: str):
+    """Download a rig-ready artifact: 'psd', 'ora', 'flat' or 'package' (zip)."""
+    try:
+        model_dir = config.OUTPUT_DIR / model_id
+        if not model_dir.exists():
+            return jsonify({'success': False, 'error': 'Model not found'}), 404
+
+        metadata_path = model_dir / "metadata.json"
+        artifacts = {}
+        if metadata_path.exists():
+            artifacts = load_json(metadata_path).get('metadata', {}).get('artifacts', {})
+
+        if kind in ('psd', 'ora', 'flat') and kind in artifacts:
+            artifact_path = Path(artifacts[kind])
+            if artifact_path.exists():
+                return send_file(artifact_path, as_attachment=True,
+                                 download_name=artifact_path.name)
+
+        if kind == 'package':
+            # Zip the assembled Cubism project folder.
+            import tempfile, zipfile
+            model_subdir = next((p for p in model_dir.iterdir()
+                                 if p.is_dir() and (p / 'kamyii_manifest.json').exists()), None)
+            target = model_subdir or model_dir
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+            with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fp in target.rglob('*'):
+                    if fp.is_file():
+                        zf.write(fp, fp.relative_to(target))
+            return send_file(tmp.name, as_attachment=True,
+                             download_name=f'{model_id}_live2d_package.zip',
+                             mimetype='application/zip')
+
+        return jsonify({'success': False, 'error': f"Artifact '{kind}' not available"}), 404
+    except Exception as e:
+        logger.error(f"Failed to get artifact: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
