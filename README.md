@@ -57,6 +57,8 @@ ready for Cubism 5's AI auto-rig.
    - `1` = Production mode (GPU/CUDA if available)
    - `2` = Demo mode (no GPU needed, instant start)
 
+> **⚠️ If `run.bat` fails or closes immediately**: Try `run-simple.bat` instead (simpler version with better error messages)
+
 The script will:
 - ✅ Check if Python is installed (install from [python.org](https://www.python.org/) if not)
 - ✅ Create a virtual environment automatically
@@ -198,6 +200,36 @@ tests/test_pipeline.py     End-to-end demo-mode smoke tests
 ## 🪟 Windows Troubleshooting
 
 ### Common Issues & Solutions
+
+#### `run.bat` fails or closes immediately
+**Symptoms**: Window flashes and closes, or stops after "Upgrading pip..."
+
+**Quick Fix**: Use `run-simple.bat` instead (simpler version with better error reporting)
+
+**Debug Steps**:
+1. **Don't double-click** - instead, open Command Prompt in the folder:
+   - Hold `Shift` + Right-click in the Ka-myii folder
+   - Choose "Open Command window here" or "Open PowerShell window here"
+   - Type: `run.bat` and press Enter
+   - This keeps the window open so you can see the error
+
+2. **Common causes**:
+   - **Antivirus blocking**: Windows Defender may block pip installs
+     - Solution: Add Ka-myii folder to exclusions
+   - **Permissions**: Script can't write to folder
+     - Solution: Right-click run.bat → Run as Administrator
+   - **Network proxy**: Pip can't download packages
+     - Solution: Check your internet connection / proxy settings
+   - **Corrupted pip**: Python installation is broken
+     - Solution: `python -m pip install --upgrade pip --user`
+
+3. **Manual install** (if batch file won't work):
+```cmd
+python -m venv venv
+venv\Scripts\activate.bat
+pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six python-dotenv
+python app.py --dummy
+```
 
 #### "Python is not recognized" or "python: command not found"
 **Solution**: Python isn't in your PATH
