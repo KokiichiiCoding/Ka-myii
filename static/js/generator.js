@@ -37,6 +37,7 @@
     connectSocket();
     await loadOptions();
     await refreshModelNotice();
+    addUIEnhancements();
   });
 
   function bindControls() {
@@ -269,5 +270,103 @@
     els.layerPanel.classList.add('hidden');
     els.resultImg.classList.add('hidden');
     els.canvasEmpty.classList.remove('hidden');
+  }
+
+  // ---- UI enhancements ----
+  function addUIEnhancements() {
+    // Add smooth scrolling for form controls
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const val = (e.target.value - e.target.min) / (e.target.max - e.target.min);
+        e.target.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+      });
+      // Initialize
+      const val = (slider.value - slider.min) / (slider.max - slider.min);
+      slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+    });
+
+    // Add ripple effect to buttons
+    document.querySelectorAll('.btn, .chip').forEach(btn => {
+      btn.addEventListener('click', function(e) {
+        const ripple = document.createElement('span');
+        ripple.style.cssText = `
+          position: absolute;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.3);
+          transform: scale(0);
+          animation: ripple 0.6s ease-out;
+          pointer-events: none;
+        `;
+        const rect = this.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = e.clientX - rect.left - size / 2 + 'px';
+        ripple.style.top = e.clientY - rect.top - size / 2 + 'px';
+
+        this.style.position = 'relative';
+        this.style.overflow = 'hidden';
+        this.appendChild(ripple);
+
+        setTimeout(() => ripple.remove(), 600);
+      });
+    });
+
+    // Add CSS animation for ripple if not exists
+    if (!document.getElementById('ripple-style')) {
+      const style = document.createElement('style');
+      style.id = 'ripple-style';
+      style.textContent = '@keyframes ripple { to { transform: scale(4); opacity: 0; } }';
+      document.head.appendChild(style);
+    }
+
+    // Smooth reveal for panels
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.style.animation = 'slideIn 0.6s ease-out forwards';
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.panel, .feature').forEach(el => {
+      if (!el.classList.contains('sticky')) {
+        observer.observe(el);
+      }
+    });
+
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + Enter to generate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !busy) {
+        e.preventDefault();
+        els.generateBtn.click();
+      }
+      // Escape to reset
+      if (e.key === 'Escape' && !busy) {
+        resetToForm();
+      }
+    });
+
+    // Show keyboard shortcuts hint on first load
+    if (!localStorage.getItem('km_shortcuts_shown')) {
+      setTimeout(() => {
+        const hint = document.createElement('div');
+        hint.style.cssText = `
+          position: fixed; bottom: 20px; right: 20px;
+          background: linear-gradient(135deg, rgba(177, 108, 234, 0.95), rgba(92, 200, 255, 0.95));
+          color: white; padding: 12px 18px; border-radius: 10px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          font-size: 0.85rem; z-index: 1000;
+          animation: slideIn 0.4s ease-out;
+          cursor: pointer;
+        `;
+        hint.innerHTML = '💡 <strong>Tip:</strong> Ctrl+Enter to generate, Esc to reset';
+        document.body.appendChild(hint);
+        hint.onclick = () => hint.remove();
+        setTimeout(() => hint.remove(), 8000);
+        localStorage.setItem('km_shortcuts_shown', 'true');
+      }, 2000);
+    }
   }
 })();

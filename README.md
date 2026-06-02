@@ -1,19 +1,21 @@
 # Ka-myii 🎨✨
 
-**Automated VTuber Model Studio**
+### **Automated VTuber Model Studio**
 
-Ka-myii is a local, self-hosted web app that turns a text prompt into a
-**rig-ready Live2D character**. It generates high-quality anime art with modern
-SDXL models, automatically decomposes the character into clean named layers, and
-packages a complete **Live2D Cubism** project — layered PSD, physics, and the
-standard parameter set — ready for auto-rigging.
+> Turn a text prompt into a **rig-ready Live2D character** in minutes
 
-Think *Stable Diffusion WebUI*, but the output is a layered, riggable VTuber
-model instead of a flat image.
+Ka-myii is a local, self-hosted web app that generates high-quality anime art with modern
+**SDXL models**, automatically decomposes characters into **15+ named layers**, and
+packages a complete **Live2D Cubism project** — layered PSD, physics, parameters and all —
+ready for Cubism 5's AI auto-rig.
+
+**Think *Stable Diffusion WebUI*, but the output is a riggable VTuber model instead of a flat image.**
 
 ![status](https://img.shields.io/badge/status-beta-blueviolet)
 ![python](https://img.shields.io/badge/python-3.10+-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
+![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![GPU](https://img.shields.io/badge/GPU-optional-orange)
 
 ---
 
@@ -44,33 +46,95 @@ model instead of a flat image.
 
 ## 🚀 Quick start
 
-### Option A — Demo mode (no GPU, instant)
+### Windows Users 🪟
 
-Explore the whole pipeline with a procedurally-rendered character:
+**Ka-myii includes a smart `run.bat` script that handles everything automatically!**
 
-```bash
-# Linux / macOS
-./run.sh            # choose "1) Demo mode"
+#### Quick Start (3 clicks):
+1. **Download** this repository (Code → Download ZIP) and extract it
+2. **Double-click `run.bat`** (in the Ka-myii folder)
+3. **Choose your mode** when prompted:
+   - `1` = Production mode (GPU/CUDA if available)
+   - `2` = Demo mode (no GPU needed, instant start)
 
-# or manually
-python3 -m venv venv && source venv/bin/activate
-pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six python-dotenv
+The script will:
+- ✅ Check if Python is installed (install from [python.org](https://www.python.org/) if not)
+- ✅ Create a virtual environment automatically
+- ✅ Detect your NVIDIA GPU and install CUDA-enabled PyTorch
+- ✅ Install all dependencies
+- ✅ Start the web server
+
+Then open <http://localhost:5000> in your browser! 🎨
+
+#### Demo Mode (No GPU Required) 🎬
+Perfect for trying Ka-myii without downloading AI models:
+- Double-click `run.bat` → Choose option `2`
+- Opens instantly, uses procedural rendering
+- Full 15-layer decomposition + PSD/Live2D export
+- Test the entire pipeline with zero GPU/VRAM
+
+#### Production Mode (GPU Recommended) ⚡
+For real SDXL anime generation:
+- Double-click `run.bat` → Choose option `1`
+- Auto-detects CUDA and installs GPU-accelerated PyTorch
+- First run downloads Animagine XL (~7GB) automatically
+- Recommended: NVIDIA GPU with 8GB+ VRAM
+
+#### Manual Setup (PowerShell/Command Prompt)
+If you prefer manual control:
+
+```powershell
+# PowerShell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+
+# Demo mode (no GPU)
 python app.py --dummy
 ```
 
-Open <http://localhost:5000> → **Studio** → *Generate Model*. You'll get a real
-15-layer decomposition and downloadable PSD / Live2D package.
-
-### Option B — Full generation (GPU recommended)
-
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt          # installs PyTorch + diffusers
+```cmd
+REM Command Prompt
+python -m venv venv
+venv\Scripts\activate.bat
+pip install -r requirements.txt
 python app.py
+
+REM Demo mode (no GPU)
+python app.py --dummy
 ```
 
-On **Windows**, `run.bat` auto-detects your GPU and installs the correct CUDA
-build of PyTorch.
+### Linux / macOS Users 🐧🍎
+
+```bash
+# Quick start with interactive menu
+./run.sh            # choose "1) Demo mode" or "2) Full/GPU"
+
+# Or manually
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+
+# Demo mode (no GPU needed)
+python app.py --dummy
+```
+
+---
+
+### After Launch
+
+Once the server starts, you'll see:
+```
+======================================================================
+Ka-myii: Automated VTuber Model Generation System
+======================================================================
+Starting server on 0.0.0.0:5000
+```
+
+Open your browser to: **<http://localhost:5000>**
+
+Click **"Open the Studio"** → Enter a prompt → Generate! 🎨✨
 
 ### Using your own checkpoints / LoRAs
 Drop files into:
@@ -130,6 +194,93 @@ src/utils/model_scanner.py Local checkpoint/LoRA/VAE discovery
 templates/ static/         Dark Stable-Diffusion-style WebUI
 tests/test_pipeline.py     End-to-end demo-mode smoke tests
 ```
+
+## 🪟 Windows Troubleshooting
+
+### Common Issues & Solutions
+
+#### "Python is not recognized" or "python: command not found"
+**Solution**: Python isn't in your PATH
+1. Download Python from [python.org](https://www.python.org/) (3.10 or newer)
+2. **Important**: Check "Add Python to PATH" during installation
+3. Restart your terminal/command prompt after installing
+
+#### "Scripts execution is disabled on this system" (PowerShell)
+**Solution**: PowerShell execution policy is restricted
+```powershell
+# Run PowerShell as Administrator, then:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+Or use Command Prompt (`cmd.exe`) instead!
+
+#### "CUDA out of memory" errors
+**Solution**: Your GPU doesn't have enough VRAM
+1. Close other GPU-using apps (Chrome, games, etc.)
+2. Lower resolution: Try 512×768 or 640×896 in the Studio
+3. Set `KAMYII_CPU_OFFLOAD=true` in `.env` (slower but uses less VRAM)
+4. Use demo mode: `python app.py --dummy`
+
+#### Windows Defender / Antivirus blocking
+**Solution**: Add exception for Ka-myii folder
+- Windows Defender → Virus & threat protection → Manage settings → Add exclusion
+- Add the entire `Ka-myii` folder
+
+#### Firewall blocks the server
+**Solution**: Allow Python through Windows Firewall
+- When Windows asks "Allow Python to communicate?", click **Allow access**
+- Or manually: Windows Firewall → Allow an app → Python
+
+#### Very slow generation (no CUDA detected)
+**Solution**: PyTorch can't see your GPU
+1. Update NVIDIA drivers: [nvidia.com/drivers](https://www.nvidia.com/drivers)
+2. Restart PC after driver update
+3. Re-run `run.bat` to reinstall PyTorch with CUDA
+4. Check GPU: `python -c "import torch; print(torch.cuda.is_available())"`
+
+#### Port 5000 already in use
+**Solution**: Another app is using port 5000
+```cmd
+# Use a different port
+python app.py --port 5001
+
+# Or find what's using port 5000
+netstat -ano | findstr :5000
+taskkill /PID <PID_NUMBER> /F
+```
+
+#### Missing DLL errors (VCRUNTIME, msvcp)
+**Solution**: Install Visual C++ Redistributable
+- Download from [Microsoft](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+- Install both x64 and x86 versions
+
+---
+
+## 🚀 Hosting & Testing Options
+
+### For Local / Personal Use
+```bash
+python app.py                      # Local only (localhost:5000)
+python app.py --host 0.0.0.0       # Allow LAN access (same WiFi)
+```
+
+### For Quick Sharing / Remote Testing
+**ngrok** (free tier available):
+1. Start Ka-myii: `python app.py`
+2. In another terminal: `ngrok http 5000`
+3. Share the `https://xxxx.ngrok.io` URL anywhere!
+
+### For Production / Cloud Deployment
+
+Ka-myii can be deployed to:
+- **Hugging Face Spaces** (free GPU tier, best for demos)
+- **Railway / Render** (~$5-10/month, always-on)
+- **AWS / GCP / Azure** (full control, production)
+- **RunPod / Vast.ai** (cheap GPU hourly rates)
+- **Docker** (coming soon)
+
+**📖 Complete deployment guide**: See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step instructions, security checklists, and production configurations
+
+---
 
 ## 🧪 Tests
 
