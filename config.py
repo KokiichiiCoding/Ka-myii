@@ -88,8 +88,8 @@ IMAGE_GENERATION = {
     "default_width": _env_int("KAMYII_DEFAULT_WIDTH", 832),
     "default_height": _env_int("KAMYII_DEFAULT_HEIGHT", 1216),
     "default_steps": _env_int("KAMYII_DEFAULT_STEPS", 28),
-    "default_guidance_scale": float(os.getenv("KAMYII_DEFAULT_CFG", "6.5")),
-    "default_sampler": os.getenv("KAMYII_DEFAULT_SAMPLER", "DPM++ 2M Karras"),
+    "default_guidance_scale": float(os.getenv("KAMYII_DEFAULT_CFG", "5")),  # Animagine XL 4.0 card: 4-7, 5 recommended
+    "default_sampler": os.getenv("KAMYII_DEFAULT_SAMPLER", "Euler a"),
     "model_name": DEFAULT_MODEL,
     # Supported values: "auto", "sd15", "sdxl". SDXL is the modern default.
     "pipeline": os.getenv("KAMYII_MODEL_PIPELINE", "auto"),
