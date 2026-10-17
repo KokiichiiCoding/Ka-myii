@@ -39,6 +39,9 @@ def init_assembly_line(use_dummy: bool = False):
     logger.info("Assembly line initialized")
 
 
+MAX_PROMPT_CHARS = 5000
+
+
 def _number(data, key, default, kind, low, high):
     value = data.get(key)
     if value is None or value == '':
@@ -59,8 +62,12 @@ def _parse_request(data) -> GenerationRequest:
     if not isinstance(data, dict):
         raise ValueError('Send the brief as a JSON object')
     prompt = str(data.get('prompt') or '').strip()
+    negative = str(data.get('negative_prompt') or '')
     if not prompt:
         raise ValueError('Prompt is required')
+    if max(len(prompt), len(negative)) > MAX_PROMPT_CHARS:
+        # Every 75 tokens add a text-encoder pass; ~60 chunks is far beyond any real brief.
+        raise ValueError(f'Keep prompts under {MAX_PROMPT_CHARS} characters')
     framing = data.get('framing') or 'full_body'
     if framing not in ('full_body', 'upper_body'):
         raise ValueError('Choose full_body or upper_body framing')
@@ -88,7 +95,7 @@ def _parse_request(data) -> GenerationRequest:
     h = _number(data, 'height', defaults.get('default_height', 1216), int, 256, 2048)
     return GenerationRequest(
         prompt=prompt,
-        negative_prompt=str(data.get('negative_prompt') or ''),
+        negative_prompt=negative,
         style=style,
         width=w - w % 8,
         height=h - h % 8,

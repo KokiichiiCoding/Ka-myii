@@ -52,6 +52,7 @@ def test_generate_validates_the_brief(client):
         ({"prompt": "x", "model_id": "C:/Windows/notepad.exe"}, "checkpoint"),
         ({"prompt": "x", "loras": [{"id": "../../evil.pt"}]}, "LoRA"),
         ({"prompt": "x", "sampler": "nope"}, "sampler"),
+        ({"prompt": "x, " * 3000}, "characters"),
     ]:
         r = client.post("/api/generation/generate", json=body) if body is not None else \
             client.post("/api/generation/generate", data="x", content_type="text/plain")
