@@ -131,6 +131,14 @@
     <!-- ============ RIGHT: canvas + results ============ -->
     <div>
       <!-- Demo / model notice -->
+      <div id="gpuNotice" class="alert-km alert-warn hidden" style="margin-bottom:16px;">
+        <i class="fas fa-circle-info"></i>
+        <div style="flex:1;">
+          <strong>No NVIDIA GPU is available to PyTorch.</strong> Generating artwork on the CPU takes a
+          very long time. Run the demo mode, or update the NVIDIA driver and reinstall (delete
+          <code>.venv</code> and run <code>run.bat</code> again).
+        </div>
+      </div>
       <div id="seethroughNotice" class="alert-km alert-warn hidden" style="margin-bottom:16px;">
         <i class="fas fa-circle-info"></i>
         <div style="flex:1;">

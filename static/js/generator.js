@@ -214,6 +214,7 @@
       const { data } = await axios.get('/api/generation/model-status');
       els.modelNotice.classList.toggle('hidden', !data.is_dummy);
       $('seethroughNotice').classList.toggle('hidden', data.is_dummy || data.seethrough !== false);
+      $('gpuNotice').classList.toggle('hidden', data.is_dummy || data.device === 'cuda');
     } catch (e) { /* ignore */ }
   }
 
