@@ -91,7 +91,7 @@ function createCamera(opts){
       if(t0<nextAt||v.readyState<2||v.currentTime===s.lastTime)return;
       busy=true;
       try{s.lastTime=v.currentTime;s.pending=s.fm.send({image:v});await s.pending;}
-      catch(err){if(token===gen){stop();state('error','顔追跡が停止しました。カメラを再度ONにしてください');}}
+      catch(err){if(token===gen){stop();state('error','Face tracking stopped. Turn the camera on again');}}
       finally{busy=false;const t1=performance.now();nextAt=t1+Math.max(8,(t1-t0)*0.5);}
     };
     s.ticker=createTicker(16,step);

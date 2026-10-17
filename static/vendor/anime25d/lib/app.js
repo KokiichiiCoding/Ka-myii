@@ -37,7 +37,7 @@ const cv=$('cv');
 const gl=cv.getContext('webgl',{alpha:true,antialias:true,premultipliedAlpha:true,preserveDrawingBuffer:false});
 if(!gl){$('dropStatus').textContent='WebGL is unavailable. Enable browser hardware acceleration and reload.';return;}
 let renderer;
-try{renderer=window.RigRenderer.create(gl);}catch(err){$('dropStatus').textContent='描画の初期化に失敗しました: '+err.message;return;}
+try{renderer=window.RigRenderer.create(gl);}catch(err){$('dropStatus').textContent='Could not start the renderer: '+err.message;return;}
 const EXPORT_BG={transparent:[0,0,0,0],green:[0,177/255,64/255,1],dark:[20/255,21/255,28/255,1]};
 
 // ---------- model state (rebuilt per PSD) ----------
@@ -59,10 +59,10 @@ function makeThumb(img){
 function prepareLayers(rig){
   const prepared=[],W=rig.canvas.w;
   const maxTexture=gl.getParameter(gl.MAX_TEXTURE_SIZE),maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS);
-  if(rig.canvas.w>maxViewport[0]||rig.canvas.h>maxViewport[1]||rig.canvas.w>maxTexture||rig.canvas.h>maxTexture)throw new Error('この端末の描画サイズ（'+Math.min(maxViewport[0],maxTexture)+'px）を超えています。PSDを縮小してください');
+  if(rig.canvas.w>maxViewport[0]||rig.canvas.h>maxViewport[1]||rig.canvas.w>maxTexture||rig.canvas.h>maxTexture)throw new Error('The canvas is larger than this device can draw ('+Math.min(maxViewport[0],maxTexture)+' px). Use a smaller PSD');
   try{
     for(const Lr of rig.layers){
-      if(Lr.w>maxTexture||Lr.h>maxTexture)throw new Error('画像パーツがこの端末の上限 '+maxTexture+'px を超えています');
+      if(Lr.w>maxTexture||Lr.h>maxTexture)throw new Error('An image part is larger than this device\'s limit of '+maxTexture+' px');
       const L=Object.assign({visible:true,opacity:1},Lr,{id:String(Lr.z)+':'+Lr.name});
       delete L.img;
       L.defaultDepth=L.depth;L.defaultOpacity=L.opacity;
@@ -122,7 +122,7 @@ function applyAnchors(){
   renderOverlay();invalidate();
 }
 function applyRig(rig){
-  if(contextLost)throw new Error('描画の復旧を待ってから読み込んでください');
+  if(contextLost)throw new Error('Wait for the renderer to recover, then load again');
   const prepared=prepareLayers(rig);
   layers.forEach(renderer.dispose);layers=prepared;currentRig=rig;
   CW=rig.canvas.w;CH=rig.canvas.h;
@@ -147,7 +147,7 @@ function setLoading(on){$('btnCancelLoad').hidden=!on;$('loadProgress').hidden=!
 function cancelLoad(){
   loadTicket++;loadController?.abort();loadController=null;
   loaderWorker?.terminate();loaderWorker=null;
-  cancelWorker?.(new DOMException('中止','AbortError'));cancelWorker=null;
+  cancelWorker?.(new DOMException('Cancelled','AbortError'));cancelWorker=null;
   setLoading(false);
   dropEl.classList.toggle('hidden',!!layers.length);dropStatus.textContent='';
 }
@@ -162,13 +162,13 @@ async function parseModel(buffer,generic,ticket){
         loaderWorker.terminate();loaderWorker=null;cancelWorker=null;
         if(ev.data.error)reject(new Error(ev.data.error));else resolve(ev.data);
       };
-      loaderWorker.onerror=ev=>{ev.preventDefault?.();loaderWorker?.terminate();loaderWorker=null;cancelWorker=null;reject(new Error('PSD解析を開始できません（メモリ不足の可能性があります）。localhostでOpen直すか、PSDを縮小してください'));};
+      loaderWorker.onerror=ev=>{ev.preventDefault?.();loaderWorker?.terminate();loaderWorker=null;cancelWorker=null;reject(new Error('Could not start reading the PSD (possibly out of memory). Reopen the page from localhost or use a smaller PSD'));};
       loaderWorker.postMessage({buffer,generic},[buffer]);
     });
   }
   // Direct file opening cannot reliably start a worker. Keep that workflow usable.
   await new Promise(r=>setTimeout(r,20));
-  if(ticket!==loadTicket)throw new DOMException('中止','AbortError');
+  if(ticket!==loadTicket)throw new DOMException('Cancelled','AbortError');
   const id=RT.fingerprint(buffer);
   const options={useImageData:true,skipThumbnail:true,skipCompositeImageData:true};
   Rigger.validatePsd(agPsd.readPsd(new Uint8Array(buffer),{...options,skipLayerImageData:true}));
@@ -182,8 +182,8 @@ async function loadModel(source,name,opts={}){
   setLoading(true);
   dropEl.classList.remove('hidden');loadProgress(name+' — loading…');
   try{
-    if(!window.agPsd)throw new Error('lib/ag-psd.min.js が未読込です。ZIPを展開してから開く / lib フォルダを index.html と同じ階層に配置してください');
-    if(!window.Rigger)throw new Error('lib/rigger.js が未読込です。lib フォルダの配置を確認してください');
+    if(!window.agPsd)throw new Error('lib/ag-psd.min.js did not load. Check that the lib folder is next to the page');
+    if(!window.Rigger)throw new Error('lib/rigger.js did not load. Check the lib folder');
     const got=await source(signal);
     let buf=got,displayName=name;
     if(got&&!(got instanceof ArrayBuffer)&&got.buffer instanceof ArrayBuffer){buf=got.buffer;displayName=got.name||name;}
@@ -216,7 +216,7 @@ async function loadModel(source,name,opts={}){
     if(ticket===loadTicket){setLoading(false);loadController=null;}
   }
 }
-$('btnCancelLoad').addEventListener('click',()=>{cancelLoad();status('Cancel loadingしました');});
+$('btnCancelLoad').addEventListener('click',()=>{cancelLoad();status('Loading cancelled');});
 let customGeneric=null;
 async function loadCustomGeneric(){
   if(typeof fetch==='undefined'||!window.agPsd||!window.Rigger||location.protocol==='file:')return;
@@ -247,8 +247,8 @@ $('btnFile').addEventListener('click',()=>$('fileInput').click());
 $('btnOpen').addEventListener('click',()=>$('fileInput').click());
 function loadFile(f){
   return loadModel(async()=>{
-    if(!/\.psd$/i.test(f.name))throw new Error('拡張子が .psd のファイルを選んでください');
-    if(f.size>RT.MAX_FILE_BYTES)throw new Error('PSDは128MB以下にしてください');
+    if(!/\.psd$/i.test(f.name))throw new Error('Choose a .psd file');
+    if(f.size>RT.MAX_FILE_BYTES)throw new Error('The PSD must be 128 MB or smaller');
     return f.arrayBuffer();
   },f.name);
 }
@@ -257,8 +257,8 @@ $('fileInput').addEventListener('change',ev=>{const f=ev.target.files[0];ev.targ
 function fetchSource(path){
   return async signal=>{
     const r=await fetch(path,{signal});
-    if(!r.ok)throw new Error(path+' が見つかりません（HTTP '+r.status+'）');
-    if(Number(r.headers.get('Content-Length'))>RT.MAX_FILE_BYTES)throw new Error('PSDは128MB以下にしてください');
+    if(!r.ok)throw new Error(path+' was not found (HTTP '+r.status+')');
+    if(Number(r.headers.get('Content-Length'))>RT.MAX_FILE_BYTES)throw new Error('The PSD must be 128 MB or smaller');
     return r.arrayBuffer();
   };
 }
@@ -267,7 +267,7 @@ function loadSample(key='B'){const filename=SAMPLE_FILES[key];if(filename)return
 document.querySelectorAll('[data-sample]').forEach(button=>button.addEventListener('click',()=>loadSample(button.dataset.sample)));
 (function(){const miss=[];
   if(!window.agPsd)miss.push('ag-psd.min.js');if(!window.Rigger)miss.push('rigger.js');if(!window.GenericParts)miss.push('genericparts.js');
-  if(miss.length)dropStatus.textContent='⚠ lib/'+miss.join(', lib/')+' が読み込めていません（ZIP展開・libフォルダの配置を確認）';
+  if(miss.length)dropStatus.textContent='⚠ lib/'+miss.join(', lib/')+' did not load (check the lib folder)';
 })();
 // Drag & drop: PSD opens a model, JSON imports settings.
 let dragDepth=0;
@@ -370,16 +370,16 @@ function resetParams(){
   for(const key in sliderOf)setSlider(key,DEFAULTS[key]);
   Object.assign(cur,T);
 }
-$('btnReset').addEventListener('click',()=>{resetParams();commitHistory();$('utilStatus').textContent='全パラメータを初期値に戻しました';});
+$('btnReset').addEventListener('click',()=>{resetParams();commitHistory();$('utilStatus').textContent='All sliders reset';});
 $('btnSavePsd').addEventListener('click',()=>{
   const st=$('utilStatus');
-  if(!lastPsd){st.textContent='先にPSDを読み込んでください';return;}
+  if(!lastPsd){st.textContent='Load a PSD first';return;}
   try{
-    st.textContent='Export中…';
+    st.textContent='Exporting…';
     const out=window.agPsd.writePsd(lastPsd,{generateThumbnail:false});
     const blob=new Blob([out],{type:'application/octet-stream'});
     download(blob,baseFileName()+'_clean.psd');
-    st.textContent='Save cleaned PSDしました（'+(blob.size/1e6).toFixed(1)+'MB / ノイズ除去+トリム済み）';
+    st.textContent='Cleaned PSD saved ('+(blob.size/1e6).toFixed(1)+' MB, noise removed and trimmed)';
   }catch(err){st.textContent='ExportError: '+err.message;}
 });
 function setBackground(value){
@@ -416,37 +416,37 @@ function applySettings(value,opts={}){
   setBackground(data.background);renderLayerList();invalidate();
   return data;
 }
-function layerDiffNote(data){const n=data.missingLayers+data.unknownLayers;return n?'（Layers構成の違い '+n+' 件は初期値のまま）':'';}
+function layerDiffNote(data){const n=data.missingLayers+data.unknownLayers;return n?' ('+n+' layer differences kept their defaults)':'';}
 function restoreSettings(quiet=false){
   try{
     if(quiet)for(const k of RT.AUTO_KEYS)setAuto(k,autoDefaults[k]);
     const saved=storageGet('anime25d.settings.'+modelId);
-    if(!saved){if(!quiet)status('このモデルの保存済み調整はありません');return false;}
+    if(!saved){if(!quiet)status('No saved adjustments for this character');return false;}
     const data=applySettings(JSON.parse(saved));
-    $('utilStatus').textContent='保存した調整を復元しました'+layerDiffNote(data);
+    $('utilStatus').textContent='Saved adjustments restored'+layerDiffNote(data);
     if(!quiet){commitHistory();savedSettings=comparableSettings();updateDirty();syncState(true);}
     return true;
-  }catch(err){$('utilStatus').textContent='調整を復元できません: '+err.message;return false;}
+  }catch(err){$('utilStatus').textContent='Could not restore adjustments: '+err.message;return false;}
 }
 function saveSettings(){
   if(!layers.length)return;
-  try{storageSet('anime25d.settings.'+modelId,JSON.stringify(settingsSnapshot()));savedSettings=comparableSettings();updateDirty();status('このモデルの調整をブラウザに保存しました');}
-  catch(err){status('ブラウザに保存できません。設定JSONをExportてください',true);}
+  try{storageSet('anime25d.settings.'+modelId,JSON.stringify(settingsSnapshot()));savedSettings=comparableSettings();updateDirty();status('Adjustments saved in this browser');}
+  catch(err){status('Could not save in this browser. Export the settings JSON instead',true);}
 }
 $('btnSaveSettings').addEventListener('click',saveSettings);
 $('btnRestoreSettings').addEventListener('click',()=>restoreSettings());
-$('btnExportSettings').addEventListener('click',()=>{download(new Blob([JSON.stringify(settingsSnapshot(),null,2)],{type:'application/json'}),baseFileName()+'.rig.json');status('設定JSONをExportました');});
+$('btnExportSettings').addEventListener('click',()=>{download(new Blob([JSON.stringify(settingsSnapshot(),null,2)],{type:'application/json'}),baseFileName()+'.rig.json');status('Settings JSON exported');});
 $('btnImportSettings').addEventListener('click',()=>$('settingsInput').click());
 async function importSettingsFile(f){
   const id=modelId;
   try{
-    if(!layers.length)throw new Error('先にPSDを読み込んでください');
-    if(f.size>1024*1024)throw new Error('設定JSONは1MB以下にしてください');
+    if(!layers.length)throw new Error('Load a PSD first');
+    if(f.size>1024*1024)throw new Error('The settings JSON must be 1 MB or smaller');
     const value=JSON.parse(await f.text());
-    if(id!==modelId)throw new Error('モデルが切り替わりました。設定を選び直してください');
+    if(id!==modelId)throw new Error('The character changed. Choose the settings file again');
     const data=applySettings(value);commitHistory();syncState(true);
-    status('設定を読み込みました'+layerDiffNote(data)+'。「Save adjustments」で記憶できます');
-  }catch(err){status('設定を読み込めません: '+err.message,true);}
+    status('Settings loaded'+layerDiffNote(data)+'. Use Save adjustments to keep them');
+  }catch(err){status('Could not load the settings: '+err.message,true);}
 }
 $('settingsInput').addEventListener('change',ev=>{const f=ev.target.files[0];ev.target.value='';if(f)importSettingsFile(f);});
 
@@ -472,25 +472,25 @@ function restoreHistory(snap,label){
   renderLayerList();invalidate();updateHistoryButtons();updateDirty();syncState(true);
   status(label);
 }
-function undo(){if(history.canUndo)restoreHistory(history.undo(),'元に戻しました');}
-function redo(){if(history.canRedo)restoreHistory(history.redo(),'やり直しました');}
+function undo(){if(history.canUndo)restoreHistory(history.undo(),'Undone');}
+function redo(){if(history.canRedo)restoreHistory(history.redo(),'Redone');}
 function updateHistoryButtons(){$('btnUndo').disabled=!history.canUndo;$('btnRedo').disabled=!history.canRedo;}
 $('btnUndo').addEventListener('click',undo);$('btnRedo').addEventListener('click',redo);
 function updateDirty(){
   unsaved=!!layers.length&&!OBS_MODE&&comparableSettings()!==savedSettings;
   const b=$('btnSaveSettings');b.textContent=unsaved?'Save adjustments ●':'Save adjustments';
-  b.title=unsaved?'未保存の変更があります（Ctrl+S）':'Save in this browser (Ctrl+S)';
+  b.title=unsaved?'Unsaved changes (Ctrl+S)':'Save in this browser (Ctrl+S)';
 }
 window.addEventListener('beforeunload',e=>{if(unsaved){e.preventDefault();e.returnValue='';}});
 
 function togglePause(){
   paused=!paused;const b=$('btnPause');b.textContent=paused?'Play':'Pause';b.setAttribute('aria-pressed',String(paused));
-  invalidate();status(paused?'Pause中 — 数値を調整して静止画を保存できます':'Play中');
+  invalidate();status(paused?'Paused: adjust the sliders and save a still':'Playing');
 }
 $('btnPause').addEventListener('click',togglePause);
 $('btnResetLayers').addEventListener('click',()=>{
   layers.sort((a,b)=>a.z-b.z);for(const L of layers){L.visible=true;L.depth=L.defaultDepth;L.opacity=L.defaultOpacity;}
-  renderLayerList();invalidate();commitHistory();status('Reset layersしました');
+  renderLayerList();invalidate();commitHistory();status('Layers reset');
 });
 
 // ---------- export: PNG / video ----------
@@ -502,10 +502,10 @@ function updateRecordAvailability(){
   const formats=window.RigRecorder?window.RigRecorder.formats():[];
   const ok=formats.length&&typeof cv.captureStream==='function';
   for(const id of ['btnRecord','btnRecord2'])if(!ok)$(id).disabled=true;
-  if(!ok)$('recordStatus').textContent='このブラウザは動画Exportに対応していません（Chrome / Edge / Firefox を使用してください）';
+  if(!ok)$('recordStatus').textContent='This browser cannot record video (use Chrome, Edge or Firefox)';
 }
 function setRecordingUi(on){
-  $('btnRecord').textContent=on?'Recordを停止':'Record';$('btnRecord2').textContent=on?'Recordを停止して保存':'Start recording';
+  $('btnRecord').textContent=on?'Stop recording':'Record';$('btnRecord2').textContent=on?'Stop and save recording':'Start recording';
   $('btnRecord').classList.toggle('recording',on);$('btnRecord2').classList.toggle('recording',on);$('recBadge').hidden=!on;
 }
 async function toggleRecording(){
@@ -517,10 +517,10 @@ async function toggleRecording(){
     const res=await recorder.start({seconds:prefs.recSeconds,fps:prefs.recFps,format:fmt,
       onProgress:(t,total)=>{$('recBadge').textContent='● REC '+t.toFixed(1)+' / '+total+'s';}});
     download(res.blob,baseFileName()+'.'+res.format.ext);
-    const note=prefs.exportBg==='transparent'&&!res.format.alpha?'（このFormatはTransparentを保持しません）':'';
-    status('動画をExportました（'+CW+' × '+CH+'px・'+res.seconds.toFixed(1)+'秒・'+(res.blob.size/1e6).toFixed(1)+'MB）'+note);
+    const note=prefs.exportBg==='transparent'&&!res.format.alpha?' (this format does not keep transparency)':'';
+    status('Video exported ('+CW+' × '+CH+' px, '+res.seconds.toFixed(1)+' s, '+(res.blob.size/1e6).toFixed(1)+' MB)'+note);
   }catch(err){
-    if(err.name==='AbortError')status('Recordを中止しました');else status('Recordできません: '+err.message,true);
+    if(err.name==='AbortError')status('Recording cancelled');else status('Could not record: '+err.message,true);
   }finally{setRecordingUi(false);invalidate();}
 }
 $('btnRecord').addEventListener('click',toggleRecording);$('btnRecord2').addEventListener('click',toggleRecording);
@@ -576,19 +576,19 @@ async function openReadme(){
     if(!r.ok)throw new Error('HTTP '+r.status);
     body.innerHTML=mdToHtml(await r.text());readmeLoaded=true;
   }catch(err){
-    body.innerHTML='<p>README.md を取得できませんでした。<a href="https://github.com/852wa/Anime2.5DRig#readme" target="_blank" rel="noopener">GitHubで読む</a></p>';
+    body.innerHTML='<p>Could not load README.md. <a href="https://github.com/852wa/Anime2.5DRig#readme" target="_blank" rel="noopener">Read it on GitHub</a></p>';
   }
 }
 $('btnReadme').addEventListener('click',openReadme);$('btnReadme2').addEventListener('click',openReadme);
 $('readmeClose').addEventListener('click',closeDialog);$('shortcutClose').addEventListener('click',closeDialog);
 document.querySelectorAll('.overlay-dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d)closeDialog();}));
 const SHORTCUTS=[
-  [['Space'],'Pause / Play'],[['1','〜','7'],'Expressions（同じキーで解除）'],[['0'],'Expressionsを解除'],
-  [['Ctrl','Z'],'Undo'],[['Ctrl','Shift','Z'],'Redo（Ctrl+Y も可）'],[['Ctrl','S'],'調整をブラウザに保存'],
-  [['Ctrl','O'],'Open PSD'],[['E'],'Edit anchorsモード'],[['F'],'プレビューをFit表示に戻す'],
-  [['B'],'Backgroundを切り替え'],[['ホイール'],'プレビューの拡大・縮小'],[['ドラッグ'],'拡大中のプレビューを移動'],
-  [['ダブルクリック'],'プレビューをFit表示に戻す'],[['?'],'この一覧 visibility'],[['Esc'],'ダイアログ・Edit anchorsを閉じる']];
-$('shortcutTable').innerHTML=SHORTCUTS.map(([keys,desc])=>'<tr><td>'+keys.map(k=>k==='〜'?'〜':'<kbd>'+k+'</kbd>').join(' ')+'</td><td>'+desc+'</td></tr>').join('');
+  [['Space'],'Pause / Play'],[['1','–','7'],'Expressions (same key clears)'],[['0'],'Clear expression'],
+  [['Ctrl','Z'],'Undo'],[['Ctrl','Shift','Z'],'Redo (or Ctrl+Y)'],[['Ctrl','S'],'Save adjustments in this browser'],
+  [['Ctrl','O'],'Open PSD'],[['E'],'Edit anchors mode'],[['F'],'Fit the preview'],
+  [['B'],'Change background'],[['Wheel'],'Zoom the preview'],[['Drag'],'Pan the zoomed preview'],
+  [['Double-click'],'Fit the preview'],[['?'],'Show or hide this list'],[['Esc'],'Close dialogs and Edit anchors']];
+$('shortcutTable').innerHTML=SHORTCUTS.map(([keys,desc])=>'<tr><td>'+keys.map(k=>k==='–'?'–':'<kbd>'+k+'</kbd>').join(' ')+'</td><td>'+desc+'</td></tr>').join('');
 $('btnShortcuts').addEventListener('click',()=>openDialog('shortcutOverlay','shortcutClose'));
 
 // ---------- keyboard ----------
@@ -677,8 +677,8 @@ function renderLayerList(){
     more.addEventListener('click',()=>{const now=!expandedLayers.has(L.id);if(now)expandedLayers.add(L.id);else expandedLayers.delete(L.id);details.hidden=!now;more.textContent=now?'▾':'▸';more.setAttribute('aria-expanded',String(now));});
     for(const [key,label,max] of [['opacity','Opacity',1],['depth','Depth',2]]){
       const row=document.createElement('div');row.className='row';const caption=document.createElement('label');caption.textContent=label;
-      const range=document.createElement('input');range.type='range';range.min='0';range.max=String(max);range.step='0.01';range.value=L[key];range.id='layer-'+i+'-'+key;caption.htmlFor=range.id;range.setAttribute('aria-label',(L.source||L.name)+'の'+label);
-      const value=document.createElement('input');value.type='number';value.min='0';value.max=String(max);value.step='0.01';value.value=L[key];value.setAttribute('aria-label',(L.source||L.name)+'の'+label+' value');
+      const range=document.createElement('input');range.type='range';range.min='0';range.max=String(max);range.step='0.01';range.value=L[key];range.id='layer-'+i+'-'+key;caption.htmlFor=range.id;range.setAttribute('aria-label',(L.source||L.name)+' '+label);
+      const value=document.createElement('input');value.type='number';value.min='0';value.max=String(max);value.step='0.01';value.value=L[key];value.setAttribute('aria-label',(L.source||L.name)+' '+label+' value');
       range.addEventListener('input',()=>{L[key]=Number(range.value);value.value=range.value;invalidate();syncState();});
       range.addEventListener('change',commitHistory);
       value.addEventListener('input',()=>{if(value.value!==''&&Number.isFinite(value.valueAsNumber)){L[key]=RT.clamp(value.valueAsNumber,0,max);range.value=L[key];invalidate();}});
@@ -719,7 +719,7 @@ document.querySelectorAll('#panel .sec > h2').forEach(h=>{
 });
 function saveCollapsed(){
   prefs.collapsed=[...document.querySelectorAll('#panel .sec.collapsed')].map(s=>s.dataset.sec);savePrefs();
-  const all=[...document.querySelectorAll('#panel .sec')];$('btnCollapse').textContent=all.every(s=>s.classList.contains('collapsed'))?'すべて開く':'Collapse all';
+  const all=[...document.querySelectorAll('#panel .sec')];$('btnCollapse').textContent=all.every(s=>s.classList.contains('collapsed'))?'Expand all':'Collapse all';
 }
 $('btnCollapse').addEventListener('click',()=>{const all=[...document.querySelectorAll('#panel .sec')],value=all.some(s=>!s.classList.contains('collapsed'));for(const s of all)collapseSection(s,value);saveCollapsed();});
 const FILTER_ITEMS='.row,.toggles>*,.btns>*,.layer-card,.check-row,.field-row,.copy-row,.meter';
@@ -812,15 +812,15 @@ const overlay=$('overlay'),SVG_NS='http://www.w3.org/2000/svg';
 function svg(tag,attrs){const el=document.createElementNS(SVG_NS,tag);for(const k in attrs)el.setAttribute(k,attrs[k]);return el;}
 function anchorHandles(){
   const out=[];if(!A)return out;
-  out.push({key:'face',label:'顔の中心',x:A.face.cx,y:A.face.cy,axes:['dx','dy']});
+  out.push({key:'face',label:'Face centre',x:A.face.cx,y:A.face.cy,axes:['dx','dy']});
   for(const s of ['L','R']){
-    const e=A['eye'+s];if(!e)continue;const name=s==='L'?'左目':'右目';
+    const e=A['eye'+s];if(!e)continue;const name=s==='L'?'Left eye':'Right eye';
     out.push({key:'eye'+s,label:name,x:e.icx,y:e.icy,axes:['dx','dy'],place:'above'});
-    out.push({key:'eye'+s+'Close',label:name+' 閉じ位置',x:s==='L'?e.x0-4:e.x1+4,y:e.closeY,axes:['dy'],cls:'close',guide:[e.x0,e.x1],place:s==='L'?'left':'right'});
+    out.push({key:'eye'+s+'Close',label:name+' closed position',x:s==='L'?e.x0-4:e.x1+4,y:e.closeY,axes:['dy'],cls:'close',guide:[e.x0,e.x1],place:s==='L'?'left':'right'});
   }
-  out.push({key:'mouth',label:'口',x:A.mouth.cx,y:A.mouth.cy,axes:['dx','dy']});
-  out.push({key:'neck',label:'首の回転軸',x:NP.cx,y:NP.cy,axes:['dx','dy']});
-  if(layers.some(L=>L.bn==='topwear'))out.push({key:'chest',label:'胸',x:CHEST.cx,y:CHEST.cy+T.bustY*70*FS,axes:['dx','dy'],cls:'chest'});
+  out.push({key:'mouth',label:'Mouth',x:A.mouth.cx,y:A.mouth.cy,axes:['dx','dy']});
+  out.push({key:'neck',label:'Neck pivot',x:NP.cx,y:NP.cy,axes:['dx','dy']});
+  if(layers.some(L=>L.bn==='topwear'))out.push({key:'chest',label:'Chest',x:CHEST.cx,y:CHEST.cy+T.bustY*70*FS,axes:['dx','dy'],cls:'chest'});
   return out;
 }
 let dragAnchor=null;
@@ -835,7 +835,7 @@ function renderOverlay(){
   if(!anchorMode)return;
   for(const h of anchorHandles()){
     if(h.guide)overlay.append(svg('line',{class:'guide',x1:h.guide[0],x2:h.guide[1],y1:h.y,y2:h.y,'stroke-width':u,'stroke-dasharray':4*u+' '+4*u}));
-    const g=svg('g',{class:'handle'+(h.cls?' '+h.cls:''),tabindex:'0',role:'button','aria-label':h.label+'（ドラッグまたは矢印キーで移動）','data-key':h.key});
+    const g=svg('g',{class:'handle'+(h.cls?' '+h.cls:''),tabindex:'0',role:'button','aria-label':h.label+' (drag or use the arrow keys)','data-key':h.key});
     if(dragAnchor&&dragAnchor.key===h.key)g.classList.add('dragging');
     g.append(svg('circle',{cx:h.x,cy:h.y,r:7*u,'stroke-width':2*u}));
     const place=h.place||'right';
@@ -893,11 +893,11 @@ function setAnchorMode(on){
   $('anchorHint').hidden=!on;
   if(!on)Object.assign(cur,T);
   renderOverlay();invalidate();
-  if(on)status('Edit anchors中 — 静止したポーズで基準点を調整します');
+  if(on)status('Editing anchors: adjust the reference points on a still pose');
 }
 $('btnAnchorMode').addEventListener('click',()=>setAnchorMode(!anchorMode));
 $('btnAnchorMode2').addEventListener('click',()=>setAnchorMode(!anchorMode));
-$('btnResetAnchors').addEventListener('click',()=>{anchorOffsets={};applyAnchors();commitHistory();syncState(true);status('アンカーをAnimation検出の位置に戻しました');});
+$('btnResetAnchors').addEventListener('click',()=>{anchorOffsets={};applyAnchors();commitHistory();syncState(true);status('Anchors reset to the detected positions');});
 
 // ---------- preferences (per browser) ----------
 const PREF_SCHEMA={
@@ -926,7 +926,7 @@ for(const [id,key] of Object.entries(prefChecks)){
 }
 const formatSelect=$('prefRecFormat');
 (window.RigRecorder?window.RigRecorder.formats():[]).forEach(f=>{const o=document.createElement('option');o.value=f.mime;o.textContent=f.label;formatSelect.append(o);});
-if(!formatSelect.options.length){const o=document.createElement('option');o.textContent='（非対応）';formatSelect.append(o);formatSelect.disabled=true;}
+if(!formatSelect.options.length){const o=document.createElement('option');o.textContent='(not supported)';formatSelect.append(o);formatSelect.disabled=true;}
 if([...formatSelect.options].some(o=>o.value===prefs.recFormat))formatSelect.value=prefs.recFormat;else prefs.recFormat=formatSelect.value;
 $('prefExportBg').value=prefs.exportBg;$('prefRecSeconds').value=String(prefs.recSeconds);$('prefRecFps').value=String(prefs.recFps);
 if(!$('prefRecSeconds').value)$('prefRecSeconds').value='5';
@@ -965,7 +965,7 @@ const camera=window.RigDevices.createCamera({
   }
 });
 function startCam(){
-  if(OBS_MODE){status('Neutralブラウザからの追跡を待っています');return;}
+  if(OBS_MODE){status('Waiting for tracking from the main browser');return;}
   camera.start().catch(err=>{auto.cam=false;syncToggle('cam');camChip(toggleLabels.cam);status('Camera unavailable: '+err.message,true);updateLiveTicker();});
 }
 function stopCam(){
@@ -978,7 +978,7 @@ function calibrationText(){$('calibrationStatus').textContent=prefs.calibration?
 calibrationText();
 $('btnCalibrate').addEventListener('click',()=>{
   if(!camera.active)return;
-  tracker.startCalibration();$('btnCalibrate').disabled=true;status('正面を向いて、自然な表情のまま1秒ほどお待ちください…');
+  tracker.startCalibration();$('btnCalibrate').disabled=true;status('Look straight at the camera with a relaxed face for about a second…');
   // Average at least 1 s and 5 frames (slow PCs track fewer frames per second).
   const started=performance.now();
   const poll=setInterval(()=>{
@@ -986,11 +986,11 @@ $('btnCalibrate').addEventListener('click',()=>{
     if(camera.active&&elapsed<6000&&(elapsed<1000||n<5))return;
     clearInterval(poll);
     const c=tracker.finishCalibration();$('btnCalibrate').disabled=!camera.active;
-    if(!c){status('顔を検出できなかったため記録できませんでした',true);return;}
-    prefs.calibration=c;savePrefs();calibrationText();tracker.reset();status('正面の表情を記録しました（'+n+'フレーム）');
+    if(!c){status('No face detected, so nothing was recorded',true);return;}
+    prefs.calibration=c;savePrefs();calibrationText();tracker.reset();status('Neutral pose recorded ('+n+' frames)');
   },100);
 });
-$('btnClearCalibration').addEventListener('click',()=>{prefs.calibration=null;tracker.setCalibration(null);savePrefs();calibrationText();status('キャリブレーションを消去しました');});
+$('btnClearCalibration').addEventListener('click',()=>{prefs.calibration=null;tracker.setCalibration(null);savePrefs();calibrationText();status('Calibration cleared');});
 
 function micChip(text,busy){const el=$('tgMic');el.textContent=text;el.classList.toggle('busy',!!busy);}
 const mic=window.RigDevices.createMic({onState:(s,msg)=>{
@@ -1035,7 +1035,7 @@ function receiveState(state){
 }
 async function loadFromRelay(id){
   relayLoadingId=id||'?';
-  try{await loadModel(async()=>sync.fetchModel(),'OBS用モデル',{relay:false});}
+  try{await loadModel(async()=>sync.fetchModel(),'OBS model',{relay:false});}
   finally{if(relayLoadingId===(id||'?'))relayLoadingId=null;}
 }
 function receiveModel(info){
@@ -1050,20 +1050,20 @@ async function afterObsModel(){
   if(path){try{const r=await fetch(path);if(r.ok)applySettings(await r.json(),{anyModel:true});}catch(err){console.warn('settings:',err.message);}}
 }
 const obsUrl=location.origin+location.pathname.replace(/[^/]*$/,'')+'?obs=1';
-$('obsUrl').value=location.protocol.startsWith('http')?obsUrl:'（start_obs.bat で起動すると表示されます）';
-$('btnCopyObsUrl').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('obsUrl').value);status('OBS用のURLをコピーしました');}catch(err){$('obsUrl').select();status('URLを選択しました。Ctrl+C でコピーしてください');}});
+$('obsUrl').value=location.protocol.startsWith('http')?obsUrl:' (shown when started with start_obs.bat)';
+$('btnCopyObsUrl').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('obsUrl').value);status('OBS URL copied');}catch(err){$('obsUrl').select();status('URL selected. Press Ctrl+C to copy it');}});
 $('obsChip').addEventListener('click',()=>{const s=document.querySelector('.sec[data-sec="obs"]');collapseSection(s,false);s.scrollIntoView({behavior:'smooth',block:'start'});});
 function renderObsStatus(st){
   if(OBS_MODE)return;
   const chip=$('obsChip'),text=$('obsStatus');
   chip.hidden=!st.relay;
-  if(!st.relay){text.textContent='OBS中継サーバーに接続していません。start_obs.bat（python obs_server.py）で開くと、このブラウザで開いたPSD・調整・表情がOBSへAnimationで反映されます。';return;}
-  if(!st.features.includes('model')){chip.textContent='OBS';chip.className='obs-chip busy';text.textContent='古い obs_server.py です。表情・モデルの同期には最新版に置き換えてください（顔追跡のみ中継します）。';return;}
+  if(!st.relay){text.textContent='Not connected to the OBS relay. Open the page through start_obs.bat (python obs_server.py) to mirror this browser to OBS.';return;}
+  if(!st.features.includes('model')){chip.textContent='OBS';chip.className='obs-chip busy';text.textContent='This obs_server.py is outdated; replace it to sync expressions and models (face tracking only for now).';return;}
   const viewers=st.viewers|0;
   chip.className='obs-chip'+(!st.enabled?' off':st.uploading?' busy':'');
-  chip.textContent=!st.enabled?'OBS 同期OFF':st.uploading?'OBS 送信中…':viewers?'OBS ● 表示中 '+viewers:'OBS 待機中';
-  text.textContent=st.error?st.error:!st.enabled?'同期はOFFです。OBSには最後に送った状態が表示されます。':
-    '中継サーバーに接続中 · OBS表示 '+viewers+'件 · '+(st.uploaded&&st.uploaded===modelId?'このモデルを送信済み':layers.length?'モデル送信待ち':'Loading character…');
+  chip.textContent=!st.enabled?'OBS sync off':st.uploading?'OBS sending…':viewers?'OBS ● live '+viewers:'OBS waiting';
+  text.textContent=st.error?st.error:!st.enabled?'Sync is off. OBS shows the last state sent.':
+    'Connected to the relay · '+viewers+' OBS view(s) · '+(st.uploaded&&st.uploaded===modelId?'this character sent':layers.length?'waiting to send the character':'Loading character…');
 }
 
 // ---------- animation ----------
@@ -1301,7 +1301,7 @@ function render(e){
   try{renderer.draw(frame);}
   catch(err){
     if(maskFailed)throw err;
-    maskFailed=true;status(err.message+'（瞳の切り抜きを無効にしました）',true);
+    maskFailed=true;status(err.message+' (iris clipping disabled)',true);
     frame.masks=[];renderer.draw(frame);
   }
 }
@@ -1317,18 +1317,18 @@ function tick(now){
   if(dirty||capturePending||(recorder&&recorder.active)){render(lastFrame);dirty=false;}
   if(capturePending){
     capturePending=false;
-    cv.toBlob(blob=>{if(blob){download(blob,baseFileName()+'.png');status('PNGをExportました（'+CW+' × '+CH+'px'+(prefs.exportBg==='transparent'?'・Transparent':'')+'）');}else status('PNGを書き出せませんでした',true);},'image/png');
+    cv.toBlob(blob=>{if(blob){download(blob,baseFileName()+'.png');status('PNG exported ('+CW+' × '+CH+' px'+(prefs.exportBg==='transparent'?', transparent':'')+')');}else status('Could not export the PNG',true);},'image/png');
     invalidate();
   }
   fpsN++;if(now-fpsT>500){$('fps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps';fpsN=0;fpsT=now;}
 }
-cv.addEventListener('webglcontextlost',ev=>{ev.preventDefault();contextLost=true;capturePending=false;recorder?.cancel();status('描画がPauseしました。復旧を待っています',true);});
+cv.addEventListener('webglcontextlost',ev=>{ev.preventDefault();contextLost=true;capturePending=false;recorder?.cancel();status('Rendering paused; waiting for the GPU to recover',true);});
 cv.addEventListener('webglcontextrestored',()=>{
   try{
     const saved=currentRig?settingsSnapshot():null;layers=[];renderer.init();contextLost=false;
     if(currentRig){applyRig(currentRig);applySettings(saved);}
-    status('描画を復旧しました');
-  }catch(err){contextLost=true;status('描画の復旧に失敗しました。ページを再読み込みしてください',true);}
+    status('Rendering recovered');
+  }catch(err){contextLost=true;status('Rendering could not recover. Reload the page',true);}
 });
 window.addEventListener('pagehide',()=>{mic.stop(true);camera.stop(true);liveTicker?.stop();liveTicker=null;sync.close();cancelLoad();recorder?.cancel();});
 

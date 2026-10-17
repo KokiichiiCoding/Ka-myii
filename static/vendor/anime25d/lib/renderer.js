@@ -58,7 +58,7 @@ function createRenderer(gl){
     gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,maskTex,0);
     const ok=gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    if(!ok)throw new Error('瞳のマスク用メモリを確保できません。PSDを縮小してください');
+    if(!ok)throw new Error('Not enough graphics memory for the iris mask. Use a smaller PSD');
     maskW=w;maskH=h;
   }
   // Upload one mesh + texture. `mesh` = {positions, uvs, indices, image}.
@@ -69,7 +69,7 @@ function createRenderer(gl){
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,L.ibo);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,mesh.indices,gl.STATIC_DRAW);
     L.nIdx=mesh.indices.length;
     gl.activeTexture(gl.TEXTURE0);L.tex=texture(mesh.image);
-    if(!L.vboPos||!L.vboUV||!L.ibo||!L.tex||gl.getError()!==gl.NO_ERROR)throw new Error('描画メモリを確保できません。PSDを縮小してください');
+    if(!L.vboPos||!L.vboUV||!L.ibo||!L.tex||gl.getError()!==gl.NO_ERROR)throw new Error('Not enough graphics memory. Use a smaller PSD');
   }
   function dispose(L){
     if(L.tex)gl.deleteTexture(L.tex);if(L.vboPos)gl.deleteBuffer(L.vboPos);

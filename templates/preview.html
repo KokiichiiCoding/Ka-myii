@@ -14,43 +14,43 @@
 <body>
 <header>
   <a class="brand" href="/gallery"><span class="brand-mark" aria-hidden="true">K</span><div><h1>Ka-myii</h1><span>LIVE PREVIEW / <span id="appVersion">v2.0</span></span></div></a>
-  <div class="sample-actions" role="group" aria-label="サンプルを読み込む">
+  <div class="sample-actions" role="group" aria-label="Load a sample">
     
     
   </div>
   <span id="modelName">Loading character…</span>
-  <button class="obs-chip" type="button" id="obsChip" hidden title="OBS連携の設定を開く">OBS</button>
+  <button class="obs-chip" type="button" id="obsChip" hidden title="Open OBS link settings">OBS</button>
   <a class="collection-link" href="/generator?model={{ model_id }}">← Artwork & exports</a><div class="header-actions">
-    <button class="btn primary" type="button" id="btnOpen" title="Open PSD（Ctrl+O）">Open PSD</button>
-    <div class="btn-group" role="group" aria-label="履歴">
+    <button class="btn primary" type="button" id="btnOpen" title="Open PSD (Ctrl+O)">Open PSD</button>
+    <div class="btn-group" role="group" aria-label="History">
       <button class="btn icon" type="button" id="btnUndo" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
       <button class="btn icon" type="button" id="btnRedo" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
     </div>
-    <button class="btn" type="button" id="btnPause" data-model-action disabled aria-pressed="false" title="Pause（Space）">Pause</button>
-    <button class="btn" type="button" id="btnPng" data-model-action disabled title="現在のポーズをTransparentPNGで保存">Save PNG</button>
-    <button class="btn" type="button" id="btnRecord" data-model-action disabled title="モーションを動画で保存">Record</button>
+    <button class="btn" type="button" id="btnPause" data-model-action disabled aria-pressed="false" title="Pause (Space)">Pause</button>
+    <button class="btn" type="button" id="btnPng" data-model-action disabled title="Save the current pose as a transparent PNG">Save PNG</button>
+    <button class="btn" type="button" id="btnRecord" data-model-action disabled title="Record the motion as a video">Record</button>
     <button class="btn" type="button" id="btnReadme">Help</button>
   </div>
 </header>
 <div id="main">
   <div id="stage" class="checker">
     <div id="viewport">
-      <canvas id="cv" aria-label="アバターのプレビュー"></canvas>
+      <canvas id="cv" aria-label="Character preview"></canvas>
       <svg id="overlay" aria-hidden="true"></svg>
     </div>
     <div id="stageLabel">PREVIEW <span>Checkerboard is not included in exports</span></div>
     <div id="stageTools">
       <span id="recBadge" hidden>● REC</span>
-      <button class="stage-btn" type="button" id="btnAnchorMode" data-model-action disabled aria-pressed="false" title="Edit anchors（E）">Edit anchors</button>
-      <button class="stage-btn" type="button" id="btnZoom" title="ホイールで拡大、ドラッグで移動。クリックでFit表示（F）">Fit</button>
+      <button class="stage-btn" type="button" id="btnAnchorMode" data-model-action disabled aria-pressed="false" title="Edit anchors (E)">Edit anchors</button>
+      <button class="stage-btn" type="button" id="btnZoom" title="Wheel to zoom, drag to pan, click to fit (F)">Fit</button>
       <span id="fps" aria-hidden="true"></span>
     </div>
     <div id="anchorHint" hidden>Drag anchors to adjust. Arrow keys: 1px; Shift: 10px. Esc to finish.</div>
     <div id="camPreview" hidden>
-      <canvas id="camCanvas" width="192" height="144" aria-label="カメラ映像のプレビュー"></canvas>
-      <button type="button" id="camPreviewClose" aria-label="カメラ映像を隠す" title="カメラ映像を隠す">✕</button>
+      <canvas id="camCanvas" width="192" height="144" aria-label="Camera preview"></canvas>
+      <button type="button" id="camPreviewClose" aria-label="Hide camera preview" title="Hide camera preview">✕</button>
     </div>
-    <div id="appStatus" role="status" aria-live="polite">PSDを読み込むと編集を始められます</div>
+    <div id="appStatus" role="status" aria-live="polite">Load a PSD to start</div>
     <div id="drop">
       <div class="drop-symbol" aria-hidden="true">＋</div><p class="eyebrow">YOUR ART, IN MOTION</p>
       <h2>Preparing your character.</h2>
@@ -70,7 +70,7 @@
   </div>
   <div id="panel">
     <div class="preview-note">All motion runs on your device. Camera and microphone stay off until you enable them.</div><div class="panel-head"><div><p class="eyebrow">WORKSPACE</p><h2>Bring it to life</h2></div>
-      <div class="panel-head-actions"><button class="btn compact" type="button" id="btnShortcuts" title="Keyboard shortcuts（?）">Shortcuts</button><button class="btn compact" type="button" id="btnCollapse">Collapse all</button></div></div>
+      <div class="panel-head-actions"><button class="btn compact" type="button" id="btnShortcuts" title="Keyboard shortcuts (?)">Shortcuts</button><button class="btn compact" type="button" id="btnCollapse">Collapse all</button></div></div>
     <label class="search-box">Search controls<input type="search" id="controlSearch" placeholder="Eyes, hair, mouth, layers…" autocomplete="off"></label>
     <p id="searchEmpty" hidden>No matching controls</p>
 
@@ -175,11 +175,11 @@
       <div class="row"><label>Noise gate</label><input type="range" id="prefMicGate" min="0" max="0.5" step="0.01"><span class="val"></span></div>
       <div class="meter" id="micMeter" title="Microphone level; line shows noise gate"><span class="meter-level"></span><span class="meter-gate"></span></div>
     </section>
-    <section class="sec" data-sec="obs"><h2>OBS連携</h2>
-      <p class="section-hint" id="obsStatus">start_obs.bat（obs_server.py）で開くと、このブラウザで開いたPSD・調整・表情がOBSへAnimationで反映されます。</p>
-      <label class="check-row"><input type="checkbox" id="prefObsSync"> OBS表示へ同期する</label>
-      <div class="copy-row"><input type="text" id="obsUrl" readonly aria-label="OBSのブラウザソースURL"><button class="btn compact" type="button" id="btnCopyObsUrl">コピー</button></div>
-      <p class="section-hint">OBSの「ブラウザ」ソースに上のURLを設定します。幅・高さはPSDのサイズに合わせてください。</p>
+    <section class="sec" data-sec="obs"><h2>OBS link</h2>
+      <p class="section-hint" id="obsStatus">When opened through start_obs.bat (obs_server.py), the PSD, adjustments and expressions in this browser are mirrored to OBS.</p>
+      <label class="check-row"><input type="checkbox" id="prefObsSync"> Sync to the OBS view</label>
+      <div class="copy-row"><input type="text" id="obsUrl" readonly aria-label="OBS browser source URL"><button class="btn compact" type="button" id="btnCopyObsUrl">Copy</button></div>
+      <p class="section-hint">Use this URL as an OBS "Browser" source, with the PSD's width and height.</p>
     </section>
     <section class="sec" data-sec="export"><h2>Export</h2>
       <div class="field-row"><label for="prefExportBg">Background</label><select id="prefExportBg"><option value="transparent">Transparent</option><option value="green">Green screen</option><option value="dark">Dark</option></select></div>
