@@ -78,11 +78,9 @@ DEBUG = FLASK_ENV == "development"
 # ---------------------------------------------------------------------------
 # Image generation
 # ---------------------------------------------------------------------------
-# Default to a strong, openly-hosted anime SDXL model so a fresh install can
-# auto-download something high quality. Power users should drop an
-# Illustrious-XL / NoobAI-XL / Pony / Holodayo checkpoint into
-# ``models/checkpoints`` and select it in the UI for best results.
-DEFAULT_MODEL = os.getenv("KAMYII_MODEL_NAME", "cagliostrolab/animagine-xl-3.1")
+# A fresh install auto-downloads an openly licensed anime SDXL model. Checkpoints dropped
+# into ``models/checkpoints`` are listed in the Studio and preferred when present.
+DEFAULT_MODEL = os.getenv("KAMYII_MODEL_NAME", "cagliostrolab/animagine-xl-4.0")
 
 IMAGE_GENERATION = {
     # Portrait orientation at SDXL-native resolution gives full-body, rig-ready
@@ -111,50 +109,16 @@ IMAGE_GENERATION = {
     "clip_skip": _env_int("KAMYII_CLIP_SKIP", 2),
 }
 
-# Curated 2026 model presets surfaced in the UI. ``source`` is either a
-# Hugging Face repo id (auto-downloaded) or "local" (scanned from
-# ``models/checkpoints``). These reflect the current state-of-the-art for
-# anime / VTuber character art.
+# Auto-downloadable checkpoints offered next to the user's own files in models/checkpoints
+# (any SDXL anime checkpoint there — Illustrious, NoobAI eps, Pony — shows up automatically).
 MODEL_PRESETS = [
     {
-        "id": "cagliostrolab/animagine-xl-3.1",
-        "name": "Animagine XL 3.1",
+        "id": "cagliostrolab/animagine-xl-4.0",
+        "name": "Animagine XL 4.0",
         "pipeline": "sdxl",
         "source": "huggingface",
-        "tags": ["anime", "general", "auto-download"],
-        "note": "Well-rounded anime SDXL, hosted on Hugging Face. Great default.",
-    },
-    {
-        "id": "Illustrious-XL",
-        "name": "Illustrious-XL (local)",
-        "pipeline": "sdxl",
-        "source": "local",
-        "tags": ["anime", "illustration", "recommended"],
-        "note": "Place Illustrious-XL .safetensors in models/checkpoints. Best line work.",
-    },
-    {
-        "id": "NoobAI-XL",
-        "name": "NoobAI-XL v-pred (local)",
-        "pipeline": "sdxl",
-        "source": "local",
-        "tags": ["anime", "v-prediction", "recommended"],
-        "note": "v-prediction anime model built on Illustrious. Superb detail.",
-    },
-    {
-        "id": "Holodayo-XL",
-        "name": "Holodayo XL 2.1 (local)",
-        "pipeline": "sdxl",
-        "source": "local",
-        "tags": ["vtuber", "anime"],
-        "note": "Tuned specifically for VTuber aesthetics. Place in models/checkpoints.",
-    },
-    {
-        "id": "stabilityai/stable-diffusion-xl-base-1.0",
-        "name": "SDXL Base 1.0",
-        "pipeline": "sdxl",
-        "source": "huggingface",
-        "tags": ["general", "auto-download"],
-        "note": "Vanilla SDXL base. Reliable fallback for non-anime styles.",
+        "tags": ["anime", "auto-download"],
+        "note": "Anime SDXL (CreativeML Open RAIL++-M). Downloads ~7 GB from Hugging Face on first use.",
     },
 ]
 

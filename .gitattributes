@@ -1,0 +1,6 @@
+# Normalise text to LF in the repo; scripts keep the line endings their shells need.
+* text=auto
+*.bat text eol=crlf
+*.sh text eol=lf
+# Vendored third-party files stay byte-for-byte as upstream shipped them.
+static/vendor/** -text

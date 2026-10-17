@@ -1,0 +1,23 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The suite is GPU-free: demo mode plus monkeypatched See-through, so no torch is needed.
+      - run: python -m pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv pytest
+      - run: python -m pytest tests -q
+      - run: node tests/preview_runtime.test.cjs
+      - run: node tests/tagcomplete.test.cjs

@@ -43,11 +43,9 @@ def list_checkpoints() -> List[Dict]:
     ``models/checkpoints``.
     """
     entries: List[Dict] = []
-    seen_local_names = set()
 
     # Local checkpoints first — these are what power users actually want.
     for path in _scan_dir(config.CHECKPOINTS_DIR, CHECKPOINT_EXTS):
-        seen_local_names.add(path.stem.lower())
         entries.append(
             {
                 "id": str(path),
@@ -60,16 +58,8 @@ def list_checkpoints() -> List[Dict]:
             }
         )
 
-    # Curated presets. A "local" preset is only offered if the matching file is
-    # actually present; HF presets are always offered (auto-download).
-    for preset in config.MODEL_PRESETS:
-        if preset["source"] == "local":
-            stem = preset["id"].lower()
-            if not any(stem in name or name in stem for name in seen_local_names):
-                # Still show it as a hint, but flag that the file is missing.
-                entries.append({**preset, "available": False})
-                continue
-        entries.append({**preset, "available": True})
+    # Hugging Face presets are always offered (downloaded on first use).
+    entries.extend({**preset, "available": True} for preset in config.MODEL_PRESETS)
 
     return entries
 

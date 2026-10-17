@@ -1,433 +1,235 @@
-# Ka-myii 🎨✨
+# Ka-myii
 
-### **Automated VTuber Model Studio**
+**Type a character brief, get a layered, rig-ready VTuber model, all on your own PC.**
 
-> Turn a text prompt into a **rig-ready Live2D character** in minutes
+Ka-myii is a local web studio that turns a prompt into an anime character, splits it into
+20+ clean, named, transparent parts with [See-through](https://github.com/shitagaki-lab/see-through)
+(SIGGRAPH 2026), lets you watch it blink, talk and follow your webcam in the browser, and
+packages everything for Live2D Cubism: a layered PSD, an OpenRaster file and a Cubism project
+scaffold.
 
-Ka-myii is a local, self-hosted web app that generates high-quality anime art with modern
-**SDXL models**, decomposes each character into **20+ inpainted layers** with
-[See-through](https://github.com/shitagaki-lab/see-through) (SIGGRAPH 2026), and
-packages a complete **Live2D Cubism project** — layered PSD, physics, parameters and all —
-ready for Cubism 5's semi-automatic deformer and face-motion tools.
-
-**Think *Stable Diffusion WebUI*, but the output is a riggable VTuber model instead of a flat image.**
-
-![status](https://img.shields.io/badge/status-beta-blueviolet)
-![python](https://img.shields.io/badge/python-3.10+-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
-![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
-![GPU](https://img.shields.io/badge/GPU-optional-orange)
-
----
-
-## ✨ What it does
+![Studio with a finished character and its decomposed layers](docs/images/studio.jpg)
 
 ```
- Prompt → SDXL → See-through layers → Live Preview + layered PSD → Finish rigging in Cubism
+brief ──► SDXL artwork ──► See-through layers ──► Live Preview ──► PSD / ORA + Cubism scaffold
+          (~1–2 min)        (~10 min, 8 GB GPU)    (webcam, blink)   (finish rigging in Cubism 5)
 ```
 
-| Stage | What happens |
-|-------|--------------|
-| **Generate** | Modern SDXL / Illustrious / NoobAI / Pony / Holodayo checkpoints with sampler, LoRA, clip-skip and VAE controls |
-| **Decompose** | See-through splits the character into 20+ aligned, named, transparent layers (front/back hair, face, eye whites / irises / lashes / brows L+R, ears, mouth, nose, neck, top, bottom, arms L+R, legs, shoes, accessories…) with hidden regions genuinely inpainted |
-| **Package** | A true layered **`.psd`** (plus open **`.ora`**) and a Cubism-import-ready project: `model3.json`, `physics3.json`, `cdi3.json` (pre-loaded with the standard parameter set), an idle motion and a step-by-step rigging guide |
-| **Rig** | Open the PSD in **Live2D Cubism 5** and use *Auto Generation of Deformer* (5.1+) and *Auto generation of facial motion* (5.0+) |
+## Highlights
 
-### Highlights
-- **Character workshop UI** — charcoal and copper Studio, an artwork collection,
-  aligned layer inspection, live progress and offline browser libraries.
-- **Live Preview** — local WebGL animation, auto-blink, breathing, expressions, hair
-  physics, optional webcam tracking and microphone lip-sync.
-- **Upper-body framing** — the Studio default gives facial parts more pixels;
-  full-body framing remains available for complete outfits.
-- **Background queue** — generation runs as a server-side job: line up several
-  characters, close or reload the tab and come back, cancel at any stage (a cancelled
-  decomposition stops its GPU process at once). Progress shows on the browser tab.
-- **Long prompts** — SDXL briefs past CLIP's 77-token limit are encoded in 75-token chunks
-  (A1111/ComfyUI style) instead of being cut off, and clip skip uses the A1111 meaning
-  (2 = penultimate layer) for both the positive and negative prompt.
-- **Saved character briefs and seeds** — reopen a result with its settings and reuse its
-  actual seed, including when generation originally requested a random one.
-- ✂️ **Real decomposition** — See-through (SIGGRAPH 2026) layer diffusion with
-  inpainted hidden regions, running on 8 GB GPUs; geometric fallback without it.
-- 🧩 **Layered PSD / ORA export** with Live2D-friendly naming and draw order.
-- 🦴 **Rig-ready Live2D scaffold** with the full standard parameter set.
-- 💻 **Runs locally**, and a built-in **demo mode** exercises the entire pipeline
-  with **no GPU and no model downloads**.
+- **Runs on an 8 GB laptop GPU.** See-through's 4-bit weights with block swapping peak at about
+  4.6 GB. A character takes about 11 minutes on an RTX 4070 Laptop.
+- **Real layer decomposition.** Front and back hair, face, eye whites, irises, lashes and
+  brows (left and right), ears, nose, mouth, neck, clothing, accessories. Hidden areas are
+  genuinely inpainted, so hair can move without leaving holes. Ka-myii also corrects
+  See-through's draw-order mistakes, trims over-extended parts to what the artwork actually
+  shows, drops hallucinated layers and keeps any unclaimed pixels in a `leftover` layer.
+- **Live Preview.** WebGL animation with breathing, auto-blink, expressions and hair physics,
+  plus optional webcam face tracking and microphone lip sync. Camera and audio never leave
+  the browser.
+- **A Studio that feels like a WebUI.** Your own SDXL checkpoints and LoRAs, sampler, CFG,
+  seed and clip skip. Prompts longer than 77 tokens are encoded in chunks, not cut off.
+  Danbooru tag autocomplete suggests 57k tags, most-used first.
+- **Background queue.** Line up several characters, reload or close the tab and come back.
+  Cancel works at any stage.
+- **Demo mode.** The whole pipeline (layers, PSD, Cubism files, Live Preview) runs on a
+  procedurally drawn character with no GPU and no downloads.
 
----
+![Live Preview of a generated character](docs/images/preview.jpg)
 
-## Live Preview
+## Requirements
 
-Create a character in Studio and choose **Live Preview**, or open it from the Gallery.
-The exporter requires `psd-tools>=1.25.0` (included in requirements).
-Older outputs work too: `/preview/<model_id>` builds and caches a separate preview PSD
-from their aligned PNG layers. Cubism PSD/ORA files are preserved. Eye, brow and ear
-pairs are merged for the browser engine, which splits them again around the face.
-PSD canvas margins and layer offsets are retained in both preview and artist exports.
-Visible layer colors are taken from the original artwork; hidden inpainted pixels stay intact.
+| | Real generation | Demo mode |
+|---|---|---|
+| GPU | NVIDIA, **8 GB+ VRAM** (CUDA 12.8 driver) | none |
+| RAM | 16 GB | 4 GB |
+| Disk | ~25 GB (PyTorch ~5 GB, Animagine XL 4.0 ~7 GB, See-through ~9 GB) | ~1 GB |
+| Python | 3.10 – 3.13 (3.12 recommended) | same |
 
-The preview starts with breathing, blinking and gentle hair physics. **Face detail**
-zooms to the face; **Fit** restores the whole character. Expressions, head and eye
-sliders, anchor adjustment, layer visibility/order, transparent PNG snapshots and
-short video recording are available. Save adjustments in the browser or export a
-settings JSON. These adjustments affect the browser preview; they do not rig the
-Cubism scaffold or create a `.moc3` file.
+Tested on Windows 11 with an RTX 4070 Laptop (8 GB VRAM, 16 GB RAM). Linux should work with
+`run.sh` but hasn't been tested yet. macOS has no CUDA, so it supports demo mode only.
 
-**Use camera** and **Use microphone** request browser permissions only when clicked.
-Camera frames and microphone audio stay in the browser. Use `localhost` / `127.0.0.1`
-or HTTPS. A denied or missing input leaves idle motion available; click a pending
-input toggle again to cancel. Chrome or Edge with WebGL and WebAssembly SIMD is
-recommended. All runtime scripts, fonts and face-tracking assets are bundled locally;
-there is no tracking-model CDN fallback. Generation still requires locally installed
-model weights (initial installation/downloads require internet).
+## Quick start
 
-Closed-eye and closed-mouth expression artwork is generated by Anime2.5DRig from
-bundled parts, scaled to detected anchors and tinted to the model. The inspected
-v2 engine supports this directly, so an additional SDXL expression-inpainting pass
-is unnecessary for preview. Artists can supply their own `eye_close` / `mouth_close`
-layers for a closer match. Automatic animation remains an approximation: inspect
-occluded parts and adjust anchors before relying on the result for a stream.
+### Windows
 
-### Preview checks
+1. Install [Python 3.12](https://www.python.org/downloads/) and tick **Add python.exe to PATH**.
+   Newer Pythons can stay installed; the launcher picks a supported one through the `py` launcher.
+2. Download or `git clone` this repository and double-click **`run.bat`**.
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider --basetemp outputs/test-preview
-node tests/preview_runtime.test.cjs
+On first run it creates `.venv`, installs PyTorch (with CUDA if an NVIDIA GPU is present) and
+the other dependencies, offers to install See-through (recommended, ~9 GB), then asks for
+**1) Studio** or **2) Demo** and opens <http://127.0.0.1:5000/generator> in your browser.
+Later runs start in seconds; dependencies are reinstalled only when `requirements.txt`
+changes. Keep the console window open while you work; closing it stops the server.
+
+### Linux
+
+```bash
+./run.sh
 ```
 
-The alternate temporary directory avoids Windows permission conflicts with temp
-folders created by another account. Node is only needed for the browser-runtime
-unit checks; the application itself runs with Python and a browser.
+### Manual setup
 
-### Browser dependencies and credits
-
-- [Anime2.5DRig](https://github.com/852wa/Anime2.5DRig), 852wa, MIT,
-  pinned to `7ddbd9943ea3152561b3dc8348fd752c850f3e95`. Vendored in
-  `static/vendor/anime25d` with its license. Local changes add direct model loading,
-  English primary controls, calmer motion, offline-only devices, face framing and
-  a smaller noise threshold to preserve tiny facial details.
-- [ag-psd](https://github.com/Agamnentzar/ag-psd), MIT; bundled by Anime2.5DRig.
-- [MediaPipe FaceMesh](https://github.com/google-ai-edge/mediapipe), Google LLC,
-  package `0.4.1633559619`, Apache-2.0. License and version notice accompany assets.
-- Bootstrap 5.3.0, Axios 1.13.2 and Socket.IO client 4.5.4, MIT.
-- Font Awesome Free 6.4.0: icons CC BY 4.0, fonts SIL OFL 1.1, code MIT.
-- [anime-segmentation](https://github.com/SkyTNT/anime-segmentation) IS-Net weights
-  (`skytnt/anime-seg`, revision `493cb608`), SkyTNT, Apache-2.0 — character cut-outs,
-  run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
-- Danbooru tag list from [a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete),
-  Dominik Reh, MIT, pinned to `4170882f90b47be130a0ff9314f663c230b9153d`, trimmed to tags
-  with ≥ 100 posts. License in `static/vendor/tags`.
-  UI-library licenses are in `static/vendor/ui`. Typography uses system fonts.
-
-## 🚀 Quick start
-
-### Windows Users 🪟
-
-**Ka-myii includes a smart `run.bat` script that handles everything automatically!**
-
-#### Quick Start (3 clicks):
-1. **Download** this repository (Code → Download ZIP) and extract it
-2. **Double-click `run.bat`** (in the Ka-myii folder)
-3. **Choose your mode** when prompted:
-   - `1` = Production mode (GPU/CUDA if available)
-   - `2` = Demo mode (no GPU needed, instant start)
-
-> **⚠️ If `run.bat` fails or closes immediately**: Try `run-simple.bat` instead (simpler version with better error messages)
-
-The script will:
-- ✅ Check if Python is installed (install from [python.org](https://www.python.org/) if not)
-- ✅ Create a virtual environment automatically
-- ✅ Detect your NVIDIA GPU and install CUDA-enabled PyTorch
-- ✅ Install all dependencies
-- ✅ Start the web server
-
-Then open <http://localhost:5000> in your browser! 🎨
-
-#### Demo Mode (No GPU Required) 🎬
-Perfect for trying Ka-myii without downloading AI models:
-- Double-click `run.bat` → Choose option `2`
-- Opens instantly, uses procedural rendering
-- Full 15-layer decomposition + PSD/Live2D export
-- Test the entire pipeline with zero GPU/VRAM
-
-#### Production Mode (GPU Recommended) ⚡
-For real SDXL anime generation:
-- Double-click `run.bat` → Choose option `1`
-- Auto-detects CUDA and installs GPU-accelerated PyTorch
-- First run downloads Animagine XL (~7GB) automatically
-- Recommended: NVIDIA GPU with 8GB+ VRAM
-
-#### Manual Setup (PowerShell/Command Prompt)
-If you prefer manual control:
-
-```powershell
-# PowerShell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+```bash
+python -m venv .venv
+.venv\Scripts\activate          # Linux: source .venv/bin/activate
+# NVIDIA on Windows: the CUDA build of PyTorch first
+pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
-python app.py
-
-# Demo mode (no GPU)
-python app.py --dummy
+python scripts/install_seethrough.py   # optional but recommended
+python app.py --open                   # or: python app.py --dummy --open
 ```
 
-```cmd
-REM Command Prompt
-python -m venv venv
-venv\Scripts\activate.bat
-pip install -r requirements.txt
-python app.py
+## Using the Studio
 
-REM Demo mode (no GPU)
-python app.py --dummy
-```
+1. **Write a brief.** Danbooru-style tags work best (`1girl, silver hair, twin braids,
+   witch hat, gentle smile`). Autocomplete suggests real tags as you type; Tab or Enter accepts.
+2. **Framing.** *Upper body* (the default) gives the eyes and mouth more pixels, which makes
+   the live animation look much better. *Full body* shows the complete outfit.
+3. **Checkpoint.** The default, **Animagine XL 4.0**, downloads automatically on first use
+   (~7 GB, once). Any SDXL checkpoint you drop into `models/checkpoints/` appears in the list
+   and is selected by default. Illustrious- and NoobAI-based (eps) anime models work well.
+   LoRAs go in `models/loras/`.
+4. **Create.** Progress shows each of the three steps with an estimate, also in the tab title.
+   While a job runs, the button becomes **Add to queue**.
+5. **Use the result.** Inspect the layers, open **Live Preview**, or download the **Live2D
+   package**, **PSD** or **ORA**. Everything is saved under `outputs/<id>/` and listed in the
+   **Gallery**, where a character can be reopened with its exact settings and seed.
 
-### Linux / macOS Users 🐧🍎
+### Live Preview
+
+Breathing, blinking and gentle hair physics start immediately. **Face detail** zooms in on the
+face. There are sliders for expressions, head and eyes, anchor adjustment, layer visibility and
+order, transparent PNG snapshots and short recordings. **Use camera** and **Use microphone**
+ask for permission only when clicked, and all processing stays in the browser (Chrome or Edge
+with WebGL recommended; the camera needs `localhost` or HTTPS). Preview adjustments affect the
+browser preview only; they don't rig the Cubism project.
+
+### Finishing in Live2D Cubism
+
+Each character's `model/<name>/` folder (the **Live2D package** download) contains:
+
+- `<name>.psd` / `.ora`: the layered artwork, back to front, named for Cubism.
+- `<name>.model3.json`, `.cdi3.json` (the standard parameter set: `ParamAngleX/Y/Z`,
+  `ParamEyeLOpen`, `ParamMouthOpenY`, ...), `.physics3.json` (starter hair and cloth physics)
+  and an idle motion.
+- `RIGGING_GUIDE.md`, a step-by-step walkthrough for the specific character.
+
+Open the PSD in **Cubism 5**, run *Modeling → Deformer → Auto Generation of Deformer* (5.1+)
+and *Auto generation of facial motion* from the Parameters palette (5.0+), then export for
+runtime. The binary `.moc3` can only be produced by the Cubism Editor, so Ka-myii prepares
+everything up to that step.
+
+## How decomposition works
+
+Ka-myii picks the best available backend:
+
+1. **See-through** (recommended). A layer-diffusion model generates every semantic part as
+   its own RGBA layer, including the parts hidden behind hair and clothes, and a depth model
+   orders them. Ka-myii runs it in its own virtualenv as a separate process (so its GPU memory
+   is fully released after each job), then:
+   - cuts the character out with an anime segmentation model;
+   - fixes draw orders that depth gets wrong for thin parts (iris under eye white, bangs under
+     the face);
+   - gives every visible pixel to the part the artwork really shows there, trimming
+     over-extended predictions;
+   - drops hallucinated layers and empty accessory specks;
+   - keeps the artist's visible colours;
+   - puts character pixels no layer claimed (cat ears, a witch hat) into a `leftover` layer
+     so nothing goes missing.
+2. **SAM 2**, if `sam2` is installed and `KAMYII_SAM2_CHECKPOINT` is set: automatic masks
+   classified into semantic layers.
+3. **Geometric fallback**: a rough anatomical split of the cut-out character.
+
+Demo mode uses the procedural character's own pixel-perfect region map.
+
+After an update, `python scripts/rebuild_layers.py <model_id>` re-applies the latest
+post-processing to an existing result from its saved See-through PSD, with no GPU needed.
+
+## Configuration
+
+Every setting has a sensible default. To change one, copy `.env.example` to `.env`.
+Common ones:
+
+| Variable | Default | |
+|---|---|---|
+| `PORT` | `5000` | |
+| `HOST` | `127.0.0.1` | `0.0.0.0` exposes the studio to your network, **without any login** |
+| `KAMYII_MODEL_NAME` | `cagliostrolab/animagine-xl-4.0` | default Hugging Face checkpoint |
+| `KAMYII_SEETHROUGH_RESOLUTION` | `1024` | `1280` gives sharper layers on 12 GB+ GPUs |
+| `KAMYII_CPU_OFFLOAD` | auto below 12 GB | lower VRAM use for SDXL, slightly slower |
+
+## Troubleshooting
+
+- **`run.bat` says Python 3.10 to 3.13 is needed.** PyTorch's CUDA 12.8 build doesn't
+  support newer Pythons yet. Install 3.12 alongside your current one; `run.bat` finds it.
+- **The window closes immediately.** Open a terminal in the folder and run `run.bat` there
+  to read the error.
+- **"CUDA available: False" or very slow generation.** Update the NVIDIA driver, delete
+  `.venv` and run `run.bat` again so it reinstalls the CUDA build of PyTorch.
+- **The first character sits on "Downloading ...".** The default checkpoint is ~7 GB and
+  downloads once. See-through's weights are fetched by its installer.
+- **A job fails with out-of-memory, or is extremely slow.** Close other GPU-heavy apps.
+  On 8 GB, keep See-through at resolution 1024. Above ~7.7 GB of VRAM use, NVIDIA drivers
+  silently spill into system RAM and run ~10× slower.
+- **The camera doesn't start in Live Preview.** Use Chrome or Edge on `http://127.0.0.1:5000`
+  (not a LAN IP) and allow camera access.
+- **Port 5000 is busy.** `python app.py --port 5001`, or set `PORT` in `.env`.
+
+Logs are written to `logs/kamyii.log`.
+
+## Privacy and security
+
+Everything runs locally; nothing is uploaded and there is no telemetry. Internet is needed
+only to download dependencies and model weights. The server listens on `127.0.0.1` and
+rejects requests from other sites. It has no accounts or authentication, so don't expose it
+to the internet.
+
+## Development
 
 ```bash
-# Quick start with interactive menu
-./run.sh            # choose "1) Demo mode" or "2) Full/GPU"
-
-# Or manually
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python app.py
-
-# Demo mode (no GPU needed)
-python app.py --dummy
-```
-
----
-
-### After Launch
-
-Once the server starts, you'll see:
-```
-======================================================================
-Ka-myii: Automated VTuber Model Generation System
-======================================================================
-Starting server on 0.0.0.0:5000
-```
-
-Open your browser to: **<http://localhost:5000>**
-
-Click **"Open the Studio"** → Enter a prompt → Generate! 🎨✨
-
-### Using your own checkpoints / LoRAs
-Drop files into:
-```
-models/checkpoints/   # .safetensors / .ckpt  (Illustrious, NoobAI, Pony, …)
-models/loras/         # .safetensors LoRAs
-models/vae/           # custom VAEs
-```
-They appear automatically in the Studio's dropdowns. Recommended 2026 anime
-models: **Illustrious-XL**, **NoobAI-XL (v-pred)**, **Pony Diffusion V6**,
-**Holodayo XL** (VTuber-tuned). The default, auto-downloaded model is
-**Animagine XL 3.1**.
-
----
-
-## 🧠 How decomposition works
-
-The asset separator picks the best available backend:
-
-1. **Region map** — Ka-myii's demo renderer emits a pixel-perfect sidecar.
-2. **See-through** *(recommended)* — [Lin et al., SIGGRAPH 2026](https://github.com/shitagaki-lab/see-through)
-   (Apache-2.0). A layer-diffusion model generates every semantic part as its own
-   RGBA layer — including the parts hidden behind hair and clothes — and a depth
-   model orders them. Ka-myii then cuts the character out with an anime segmentation
-   model, fixes draw orders depth gets wrong for thin parts (iris under eye white, bangs
-   under the face), gives every visible pixel to the part the artwork really shows there
-   (trimming over-extended predictions), drops hallucinated or empty accessory layers,
-   keeps the artist's visible colours, and puts any character pixels no layer claimed
-   (e.g. cat ears, a witch hat) into a `leftover` layer so nothing goes missing.
-   After an update, `python scripts/rebuild_layers.py <model_id>` re-applies this to an
-   older result from its saved See-through PSD — no GPU needed.
-3. **SAM 2** — Meta's Segment Anything 2 automatic masks (set
-   `KAMYII_SAM2_CHECKPOINT`), classified into semantic layers.
-4. **rembg + anatomy / anatomy heuristic** — rough geometric fallback.
-
-### Installing See-through
-
-`run.bat` offers to install it, or run:
-
-```bash
-python scripts/install_seethrough.py   # ~9 GB: engine venv + 4-bit weights
-```
-
-It lives in `engines/see-through` with its own virtualenv and runs as a separate
-process, so its GPU memory is fully released after every job. Ka-myii uses the
-4-bit weights with block swapping (`scripts/seethrough_runner.py`), which fits
-**8 GB GPUs**: ~4.6 GB peak, ~10 minutes per character on an RTX 4070 Laptop at
-the default 1024 resolution. Set `KAMYII_SEETHROUGH_RESOLUTION=1280` on 12 GB+ cards
-for sharper layers.
-
-> **Note on `.moc3`:** the binary runtime model can only be produced by the
-> proprietary Cubism Editor, so Ka-myii prepares a complete, correctly-structured
-> project right up to that final export step.
-
----
-
-## ⚙️ Configuration
-
-Copy `.env.example` to `.env` to change the default model, resolution, sampler,
-decomposition backend, etc. Every option also has a UI control.
-
-## 🗂️ Project structure
-
-```
-app.py                     Flask entry point (+ SocketIO progress)
-config.py                  Central configuration
-src/core/
-  image_generator.py       SDXL/SD pipeline (optional torch) + demo renderer
-  demo_character.py         Procedural character + region map (demo mode)
-  asset_separator.py        Layer decomposition (region-map/See-through/SAM2/geometry)
-  seethrough.py             Runs See-through in its own venv as a subprocess
-  psd_exporter.py           Layered PSD (pytoshop) + OpenRaster .ora
-  model_assembler.py        Cubism-ready project packaging
-  auto_physics.py           physics3.json generation
-src/pipeline/assembly_line.py   Orchestration
-src/pipeline/jobs.py       Background job queue (one GPU job at a time, cancel, progress)
-src/api/                   REST endpoints
-src/utils/model_scanner.py Local checkpoint/LoRA/VAE discovery
-templates/ static/         Dark Stable-Diffusion-style WebUI
-scripts/install_seethrough.py   One-shot See-through engine installer
-scripts/seethrough_runner.py    Low-VRAM (NF4 + block swap) See-through runner
-scripts/rebuild_layers.py       Re-run layer post-processing on existing results (no GPU)
-tests/                     Demo-mode pipeline, job-queue and browser-runtime tests
-```
-
-## 🪟 Windows Troubleshooting
-
-### Common Issues & Solutions
-
-#### `run.bat` fails or closes immediately
-**Symptoms**: Window flashes and closes, or stops after "Upgrading pip..."
-
-**Quick Fix**: Use `run-simple.bat` instead (simpler version with better error reporting)
-
-**Debug Steps**:
-1. **Don't double-click** - instead, open Command Prompt in the folder:
-   - Hold `Shift` + Right-click in the Ka-myii folder
-   - Choose "Open Command window here" or "Open PowerShell window here"
-   - Type: `run.bat` and press Enter
-   - This keeps the window open so you can see the error
-
-2. **Common causes**:
-   - **Antivirus blocking**: Windows Defender may block pip installs
-     - Solution: Add Ka-myii folder to exclusions
-   - **Permissions**: Script can't write to folder
-     - Solution: Right-click run.bat → Run as Administrator
-   - **Network proxy**: Pip can't download packages
-     - Solution: Check your internet connection / proxy settings
-   - **Corrupted pip**: Python installation is broken
-     - Solution: `python -m pip install --upgrade pip --user`
-
-3. **Manual install** (if batch file won't work):
-```cmd
-python -m venv venv
-venv\Scripts\activate.bat
-pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
-python app.py --dummy
-```
-
-#### "Python is not recognized" or "python: command not found"
-**Solution**: Python isn't in your PATH
-1. Download Python from [python.org](https://www.python.org/) (3.10 or newer)
-2. **Important**: Check "Add Python to PATH" during installation
-3. Restart your terminal/command prompt after installing
-
-#### "Scripts execution is disabled on this system" (PowerShell)
-**Solution**: PowerShell execution policy is restricted
-```powershell
-# Run PowerShell as Administrator, then:
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-Or use Command Prompt (`cmd.exe`) instead!
-
-#### "CUDA out of memory" errors
-**Solution**: Your GPU doesn't have enough VRAM
-1. Close other GPU-using apps (Chrome, games, etc.)
-2. Lower resolution: Try 512×768 or 640×896 in the Studio
-3. Set `KAMYII_CPU_OFFLOAD=true` in `.env` (slower but uses less VRAM)
-4. Use demo mode: `python app.py --dummy`
-
-#### Windows Defender / Antivirus blocking
-**Solution**: Add exception for Ka-myii folder
-- Windows Defender → Virus & threat protection → Manage settings → Add exclusion
-- Add the entire `Ka-myii` folder
-
-#### Firewall blocks the server
-**Solution**: Allow Python through Windows Firewall
-- When Windows asks "Allow Python to communicate?", click **Allow access**
-- Or manually: Windows Firewall → Allow an app → Python
-
-#### Very slow generation (no CUDA detected)
-**Solution**: PyTorch can't see your GPU
-1. Update NVIDIA drivers: [nvidia.com/drivers](https://www.nvidia.com/drivers)
-2. Restart PC after driver update
-3. Re-run `run.bat` to reinstall PyTorch with CUDA
-4. Check GPU: `python -c "import torch; print(torch.cuda.is_available())"`
-
-#### Port 5000 already in use
-**Solution**: Another app is using port 5000
-```cmd
-# Use a different port
-python app.py --port 5001
-
-# Or find what's using port 5000
-netstat -ano | findstr :5000
-taskkill /PID <PID_NUMBER> /F
-```
-
-#### Missing DLL errors (VCRUNTIME, msvcp)
-**Solution**: Install Visual C++ Redistributable
-- Download from [Microsoft](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
-- Install both x64 and x86 versions
-
----
-
-## 🚀 Hosting & Testing Options
-
-### For Local / Personal Use
-```bash
-python app.py                      # Local only (localhost:5000)
-python app.py --host 0.0.0.0       # Allow LAN access (same WiFi)
-```
-
-### For Quick Sharing / Remote Testing
-**ngrok** (free tier available):
-1. Start Ka-myii: `python app.py`
-2. In another terminal: `ngrok http 5000`
-3. Share the `https://xxxx.ngrok.io` URL anywhere!
-
-### For Production / Cloud Deployment
-
-Ka-myii can be deployed to:
-- **Hugging Face Spaces** (free GPU tier, best for demos)
-- **Railway / Render** (~$5-10/month, always-on)
-- **AWS / GCP / Azure** (full control, production)
-- **RunPod / Vast.ai** (cheap GPU hourly rates)
-- **Docker** (coming soon)
-
-**📖 Complete deployment guide**: See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step instructions, security checklists, and production configurations
-
----
-
-## 🧪 Tests
-
-```bash
-pip install pytest
-python -m pytest tests/ -q          # runs entirely in demo mode, no GPU
-node tests/preview_runtime.test.cjs # browser-runtime checks (optional, needs Node)
+python -m pytest tests -q            # GPU-free; demo mode + monkeypatched See-through
+node tests/preview_runtime.test.cjs  # browser-runtime checks (optional)
 node tests/tagcomplete.test.cjs
 ```
 
-## 📜 License
+```
+app.py                       Flask entry point
+config.py                    settings (.env overrides)
+src/api/generation.py        REST API: /generate (queues a job), /jobs, layers, artifacts
+src/pipeline/jobs.py         background job queue (one GPU job at a time, cancel, progress)
+src/pipeline/assembly_line.py  generate → separate → package
+src/core/image_generator.py  SDXL via diffusers (chunked prompts, LoRAs, samplers) + demo renderer
+src/core/asset_separator.py  layer decomposition and See-through post-processing
+src/core/seethrough.py       runs See-through in its own venv as a subprocess
+src/core/psd_exporter.py     layered PSD / ORA
+src/core/model_assembler.py  Cubism scaffold (model3 / cdi3 / physics3, guide)
+src/core/live_preview.py     preview PSD for the browser rig
+scripts/                     See-through installer and runner, rebuild_layers.py
+templates/, static/          Studio, Gallery and Live Preview
+```
 
-MIT — see [LICENSE](LICENSE).
+`AGENTS.md` holds the detailed engineering notes: architecture, hard-won facts and the backlog.
 
----
+## Credits
 
-*Ka-myii — from a prompt to a riggable VTuber, locally.*
+- [See-through](https://github.com/shitagaki-lab/see-through): Lin et al., SIGGRAPH 2026,
+  Apache-2.0. Downloaded by `scripts/install_seethrough.py` at a pinned commit, not vendored.
+- [Animagine XL 4.0](https://huggingface.co/cagliostrolab/animagine-xl-4.0): Cagliostro
+  Research Lab, CreativeML Open RAIL++-M. Downloaded on first use.
+- [anime-segmentation](https://github.com/SkyTNT/anime-segmentation) IS-Net weights
+  (`skytnt/anime-seg`): SkyTNT, Apache-2.0, run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
+- [Anime2.5DRig](https://github.com/852wa/Anime2.5DRig): 852wa, MIT. It is vendored with
+  local changes in `static/vendor/anime25d` (see `UPSTREAM.md`) and bundles
+  [ag-psd](https://github.com/Agamnentzar/ag-psd) (MIT) and MediaPipe FaceMesh (Apache-2.0).
+- Danbooru tag list from [a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete),
+  Dominik Reh, MIT.
+- Bootstrap 5.3 and Axios (MIT); Font Awesome Free 6.4 (icons CC BY 4.0, fonts SIL OFL 1.1).
+  The licenses are in `static/vendor/`.
+
+Generated images are subject to the license of the checkpoint you use.
+
+## License
+
+MIT; see [LICENSE](LICENSE). Third-party components keep their own licenses (above).

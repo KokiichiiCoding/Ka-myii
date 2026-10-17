@@ -141,6 +141,7 @@ def main():
         action='store_true',
         help='Use dummy generators (no GPU required, for testing)'
     )
+    parser.add_argument('--open', action='store_true', help='Open the Studio in the default browser')
 
     args = parser.parse_args()
 
@@ -161,6 +162,11 @@ def main():
         logger.warning("Running in DEMO mode - no actual AI generation")
         logger.warning("   This mode is for testing the pipeline without GPU")
 
+    if args.open:
+        import threading
+        import webbrowser
+        host = '127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host
+        threading.Timer(1.5, webbrowser.open, [f'http://{host}:{args.port}/generator']).start()
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 

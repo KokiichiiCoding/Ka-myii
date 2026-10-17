@@ -266,7 +266,7 @@ class ImageGenerator:
 
         if self.pipeline is None:
             if tracker:
-                tracker.update(0, f"Loading checkpoint {self.model_name} (about a minute)…")
+                tracker.update(0, self._loading_message())
             self.load_model()
 
         torch = self._torch
@@ -314,6 +314,17 @@ class ImageGenerator:
                 tracker.complete(f"Generation failed: {exc}", status="failed")
             logger.error("Generation failed: %s", exc)
             raise
+
+    def _loading_message(self) -> str:
+        if not self.custom_model_path:
+            try:
+                from huggingface_hub import try_to_load_from_cache
+
+                if not isinstance(try_to_load_from_cache(self.model_name, "unet/config.json"), str):
+                    return f"Downloading {self.model_name} from Hugging Face (first use only, ~7 GB)…"
+            except Exception:  # pragma: no cover - only changes the message
+                pass
+        return f"Loading checkpoint {self.model_name} (about a minute)…"
 
     def _sdxl_prompt_embeds(self, positive: str, negative: str) -> dict:
         """SDXL conditioning without CLIP's 77-token cut-off, the way A1111/ComfyUI do it.

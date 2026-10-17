@@ -13,7 +13,7 @@
   // name,category,count[,alias | ,"alias,alias"] — names never contain commas in this list.
   function parse(text) {
     const out = [];
-    for (const line of text.split('\n')) {
+    for (const line of text.split(/\r?\n/)) {
       if (!line) continue;
       const [name, cat, count, ...rest] = line.split(',');
       const aliases = rest.join(',').replace(/"/g, '').split(',').filter(Boolean);

@@ -43,7 +43,7 @@ outputs/
 
 # Third-party engines installed locally (See-through repo + its venv)
 engines/
-# User model weights (checkpoints/, loras/, vae/, embeddings/ â€¦) are never committed
+# User model weights (checkpoints/, loras/, vae/, embeddings/ ...) are never committed
 models/**
 !models/.gitkeep
 
