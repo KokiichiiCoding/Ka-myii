@@ -33,7 +33,7 @@ brief ──► SDXL artwork ──► See-through layers ──► Live Preview
 - **Bring your own artwork.** Upload a character you drew or commissioned and get the same
   layers, PSD, Cubism files and Live Preview, without generating anything.
 - **Background queue.** Line up several characters, reload or close the tab and come back.
-  Cancel works at any stage.
+  Cancel works at any stage, and unfinished jobs resume after a restart.
 - **Demo mode.** The whole pipeline (layers, PSD, Cubism files, Live Preview) runs on a
   procedurally drawn character with no GPU and no downloads.
 
@@ -48,8 +48,9 @@ brief ──► SDXL artwork ──► See-through layers ──► Live Preview
 | Disk | ~25 GB (PyTorch ~5 GB, Animagine XL 4.0 ~7 GB, See-through ~9 GB) | ~1 GB |
 | Python | 3.10 – 3.13 (3.12 recommended) | same |
 
-Tested on Windows 11 with an RTX 4070 Laptop (8 GB VRAM, 16 GB RAM). Linux should work with
-`run.sh` but hasn't been tested yet. macOS has no CUDA, so it supports demo mode only.
+Tested on Windows 11 with an RTX 4070 Laptop (8 GB VRAM, 16 GB RAM). On Linux, `run.sh` has
+been tested on Ubuntu 24.04 (WSL) in demo mode; real generation there should work but hasn't
+been tested yet. macOS has no CUDA, so it supports demo mode only.
 
 ## Quick start
 
@@ -70,6 +71,9 @@ changes. Keep the console window open while you work; closing it stops the serve
 ```bash
 ./run.sh
 ```
+
+On Debian/Ubuntu, install venv support first if needed: `sudo apt install python3.12-venv`
+(`run.sh` tells you when it's missing).
 
 ### Manual setup
 
@@ -119,6 +123,10 @@ Each character's `model/<name>/` folder (the **Live2D package** download) contai
   `ParamEyeLOpen`, `ParamMouthOpenY`, ...), `.physics3.json` (starter hair and cloth physics)
   and an idle motion.
 - `RIGGING_GUIDE.md`, a step-by-step walkthrough for the specific character.
+
+The JSON files validate against the schemas in Live2D's
+[CubismSpecs](https://github.com/Live2D/CubismSpecs). The physics drives the standard
+`ParamHairFront` / `ParamHairBack` (plus declared sway parameters for accessories and skirts).
 
 Open the PSD in **Cubism 5**, run *Modeling → Deformer → Auto Generation of Deformer* (5.1+)
 and *Auto generation of facial motion* from the Parameters palette (5.0+), then export for

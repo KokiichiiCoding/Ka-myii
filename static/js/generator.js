@@ -115,6 +115,7 @@
         }
         els.uploadFields.classList.toggle('hidden', source !== 'upload');
         els.promptFields.classList.toggle('hidden', source === 'upload');
+        setGenerateLabel(busy);
       };
     }
     els.artwork.onchange = () => {
@@ -323,7 +324,9 @@
   function setGenerateLabel(queueing) {
     els.generateBtn.innerHTML = queueing
       ? '<i class="fas fa-plus"></i> Add to queue'
-      : '<i class="fas fa-wand-magic-sparkles"></i> Create character';
+      : source === 'upload'
+        ? '<i class="fas fa-layer-group"></i> Separate layers'
+        : '<i class="fas fa-wand-magic-sparkles"></i> Create character';
   }
 
   // ---- generate ----

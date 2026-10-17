@@ -13,3 +13,12 @@ def _colour_key_cutouts(monkeypatch):
     from src.core import seethrough
 
     monkeypatch.setattr(seethrough, "available", lambda: False)
+
+
+
+@pytest.fixture(autouse=True)
+def _private_outputs(tmp_path, monkeypatch):
+    """Never touch the real outputs/ folder (the owner's characters, the persisted job queue)."""
+    import config
+
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")

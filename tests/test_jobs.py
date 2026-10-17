@@ -92,6 +92,35 @@ def test_failed_job_keeps_its_artwork_listed_and_drops_empty_folders(tmp_path):
     assert list(tmp_path.iterdir()) == [folder]
 
 
+def test_unfinished_jobs_survive_a_restart(tmp_path):
+    import json
+    state = tmp_path / "_queue.json"
+    gate = threading.Event()
+    first = JobQueue(lambda request, job_id: gate.wait(10) and "model", state_path=state)
+    running = first.submit(GenerationRequest(prompt="running one", seed=1))
+    queued = first.submit(GenerationRequest(prompt="queued one", loras=[{"id": "x.safetensors", "weight": 0.5}]))
+    for _ in range(100):
+        if running.state == "running":
+            break
+        time.sleep(0.01)
+    saved = json.loads(state.read_text())
+    assert [e["id"] for e in saved] == [running.id, queued.id] and saved[0]["state"] == "running"
+
+    # "Restart": a new queue on the same file picks both up in order, same ids, as queued.
+    blocked = threading.Event()
+    second = JobQueue(lambda request, job_id: blocked.wait(10) and "model", state_path=state)
+    restored = second.jobs()
+    assert [j.id for j in restored] == [running.id, queued.id]
+    assert restored[1].request.loras == [{"id": "x.safetensors", "weight": 0.5}] and restored[0].restarts == 1
+    gate.set(); blocked.set()
+
+    # A job that keeps dying with the server is dropped after two restarts; junk is ignored.
+    state.write_text(json.dumps([{"id": "gen_x", "state": "running", "restarts": 2, "request": {"prompt": "p"}}]))
+    assert JobQueue(lambda r, j: "m", state_path=state).jobs() == []
+    state.write_text("{not json")
+    assert JobQueue(lambda r, j: "m", state_path=state).jobs() == []
+
+
 def test_seethrough_progress_is_monotonic_across_body_and_head_passes():
     from src.core import seethrough
 

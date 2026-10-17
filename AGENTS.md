@@ -42,7 +42,7 @@ Read this whole file before changing anything. Keep it up to date when you finis
 | App venv | `.venv\` (Python 3.12; torch 2.8.0+cu128, diffusers 0.37.0, transformers 5.0.0, accelerate 1.13.0, peft, Flask, psd-tools, pytoshop). `run.bat` now prefers an existing `.venv\`, then `venv\`, and creates `.venv\` otherwise. |
 | See-through engine | `engines\see-through\` (git clone, pinned commit `df019de`), its own venv `engines\see-through\.venv\` (torch 2.8.0+cu128, bitsandbytes 0.49.2, diffusers 0.37.0, transformers 5.0.0) |
 | Model weights | See-through NF4 weights in the HF cache (`%USERPROFILE%\.cache\huggingface\hub`, repos `24yearsold/seethroughv0.0.2_layerdiff3d_nf4`, `24yearsold/seethroughv0.0.1_marigold_nf4`). SDXL checkpoint `models\checkpoints\novaAnimeXL_ilV140.safetensors` (Illustrious-based; a **hard link** to the owner's ComfyUI copy — never delete or modify it in place). |
-| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 33 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
+| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 35 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
 | Re-run layer post-processing on old results (no GPU) | `.\.venv\Scripts\python.exe scripts\rebuild_layers.py <model_id> [...]` — re-separates from the saved See-through PSD, regenerates PSD/ORA/Cubism/preview/metadata |
 | Demo mode (no GPU) | `.\.venv\Scripts\python.exe app.py --dummy --host 127.0.0.1 --port 5055` |
 | Real mode | `.\.venv\Scripts\python.exe app.py --port 5055` (add `--open` to launch the browser). Production + 127.0.0.1 are now the defaults; `FLASK_ENV=development` brings back the Werkzeug reloader, which **restarts the server (killing a running job) whenever you edit a file**. Templates are cached in production: restart after editing them. |
@@ -65,7 +65,8 @@ app.py                         Flask (no CORS, no SocketIO); Host-header check w
 config.py                      all settings; loads .env (python-dotenv)
 src/api/generation.py          REST: /generate (validated brief → job, 202), /upload (user artwork → job), /jobs, /jobs/<id>, /jobs/<id>/cancel,
                                /options, /layers, /layer (?crop=1), /artifact, /preview … — every URL model id goes through model_dir_for()
-src/pipeline/jobs.py           JobQueue: one daemon worker runs jobs in order; stage-weighted progress; cancel
+src/pipeline/jobs.py           JobQueue: one daemon worker runs jobs in order; stage-weighted progress; cancel;
+                               real mode persists unfinished jobs to outputs/_queue.json
 src/pipeline/assembly_line.py  orchestration: generate or import upload → (unload SDXL) → separate → assemble → preview;
                                stage + cancel checks; a failure with artwork is saved as status failed
 src/core/image_generator.py    diffusers SDXL; chunked long-prompt encoding; auto model-CPU-offload when VRAM < 12 GB; DummyImageGenerator for demo
@@ -177,16 +178,25 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
    (it loaded any path on disk), bounded numbers, and a Host-header check against DNS
    rebinding when bound to loopback. Uploads are re-encoded by PIL before anything uses them.
 
+21. **Cubism files are checked against Live2D's official JSON schemas** (embedded in the
+   markdown of github.com/Live2D/CubismSpecs, `FileFormats/*.json.md`; that repo has no license,
+   so they are not vendored). model3/cdi3/motion3 passed; physics3 lacked required Meta fields
+   and drove undeclared, invalid ids — fixed. `test_cubism_files_follow_the_specs_…` checks the
+   rules without the schemas; re-validate with them after changing the assembler.
+
 ## 6. Known limitations / backlog
 
 - Full-body characters still have small facial parts. Studio now defaults to upper-body framing;
   full-body remains selectable. Preview has a Face detail zoom; zoom does not add source pixels.
 - `handwear-l/-r` split sometimes fails (both arms + a skirt frill landed in `handwear-l`).
-- The job queue is in memory: a server restart forgets queued/running jobs (finished results
-  are on disk). The Studio says so when a polled job 404s.
+- Real mode persists unfinished jobs to `outputs/_queue.json` and restores them (same ids,
+  queued; an interrupted job restarts from scratch, at most twice). Demo mode keeps no state.
+  A crashed run's half-written output folder (no metadata.json) is not cleaned up automatically.
 - Output has never been opened in Live2D Cubism by a human — needs a real import check.
 - Physical webcam tracking in Live Preview has not been verified.
-- `run.sh` (Linux) has not been run. macOS can only use demo mode (no CUDA).
+- `run.sh` was run on Ubuntu 24.04 under WSL (2026-10-17): venv check message, torch 2.8 + pinned
+  requirements, demo server, a demo job with package + preview PSD downloads. Real generation /
+  See-through on Linux are untested. macOS can only use demo mode (no CUDA).
 - `run.bat`'s `set /p` prompts were only driven from a redirected file in the clean-clone test,
   where the See-through "n" answer did not register; a human should check them interactively.
 - The old expression editor / accessory generator / image editor were removed in M4 (they pasted
@@ -343,6 +353,7 @@ The owner asked for "a good initial product" to push to GitHub. Done:
 - **Use my artwork**: `/api/generation/upload` + Studio toggle; the job imports the image
   instead of running SDXL (`GenerationRequest.reference_image`, then saved as `"upload"`).
 - **Decomposition**: degenerate facial-detail filter (fact 17), leftover split (fact 18).
+- **Persistent queue**: unfinished real-mode jobs survive a restart (`outputs/_queue.json`).
 - **Failures** with artwork are saved as `failed` and shown in the Gallery with the error and a
   **Retry layers** button (`POST /api/generation/retry/<id>` re-queues the artwork as an upload).
 - Studio: LoRA weight slider (saved LoRA + weight restored on reopen), a notice when See-through
@@ -351,7 +362,7 @@ The owner asked for "a good initial product" to push to GitHub. Done:
 
 Verification (2026-10-17, owner's laptop):
 
-- 33 pytest (also in a fresh torch-free venv) + 2 node tests pass.
+- 35 pytest (also in a fresh torch-free venv) + 2 node tests pass.
 - Real run through the API with the default checkpoint (never loaded before):
   `b2189989-a5b9-4bb1-beca-6d829aedc8c3`, seed 20261017, Euler a, CFG 5, upper body —
   completed in 981 s (a clean-clone install was competing for disk/CPU; 653 s is the quiet
@@ -372,7 +383,6 @@ Verification (2026-10-17, owner's laptop):
 Ideas / next steps:
 
 - Human checks: Cubism import, physical webcam, `run.bat` prompts typed by hand, `run.sh` on Linux.
-- Persist the job queue (an overnight batch does not survive a restart).
 - More real runs (full body) to extend `ORDER_PRIORS`; thresholds still tuned on five images.
 
 ## 10. How to work in this repo

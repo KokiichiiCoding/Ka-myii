@@ -1,17 +1,19 @@
 """
 Background generation jobs.
 
-A real run takes ~15–20 minutes and needs the whole 8 GB GPU, so ``/generate`` only queues
+A real run takes ~11 minutes and needs the whole 8 GB GPU, so ``/generate`` only queues
 the request: one worker thread runs jobs strictly one at a time, and the browser polls
 ``/api/generation/jobs/<id>`` for state and progress (so a reloaded tab can re-attach).
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -42,27 +44,67 @@ class Job:
     created: float = field(default_factory=time.time)
     started: Optional[float] = None
     finished: Optional[float] = None
+    restarts: int = 0  # times the server stopped while this job was running
 
 
 class JobQueue:
     """FIFO of generation requests executed by a single daemon worker thread.
 
-    shortcut: jobs live in memory — a server restart forgets queued/running jobs (finished
-    models are still on disk); persist the queue if unattended overnight batches matter.
+    With ``state_path``, queued and running jobs are saved there and restored (as queued, same
+    ids) when the server starts again, so an overnight batch survives a restart; a job that was
+    interrupted mid-run starts over.
     """
 
-    def __init__(self, run: Callable[[GenerationRequest, str], str]):
+    def __init__(self, run: Callable[[GenerationRequest, str], str], state_path: Optional[Path] = None):
         # run(request, job_id) executes one job and returns the finished model id.
         self._run = run
         self._jobs: Dict[str, Job] = {}
         self._cv = threading.Condition()
+        self._state_path = state_path
+        for saved in self._load():
+            self._jobs[saved.id] = saved
+        if self._jobs:
+            logger.info("Restored %d unfinished job(s) from %s", len(self._jobs), state_path)
         threading.Thread(target=self._loop, name="kamyii-jobs", daemon=True).start()
+
+    def _load(self) -> List[Job]:
+        if not self._state_path or not self._state_path.exists():
+            return []
+        try:
+            known = {f.name for f in fields(GenerationRequest)}
+            jobs = []
+            for entry in json.loads(self._state_path.read_text(encoding="utf-8")):
+                restarts = entry.get("restarts", 0) + (entry.get("state") == "running")
+                if restarts > 2:  # it keeps dying with the server; don't crash-loop on it
+                    logger.warning("Dropping job %s: interrupted %d times", entry["id"], restarts)
+                    continue
+                request = GenerationRequest(**{k: v for k, v in entry["request"].items() if k in known})
+                jobs.append(Job(id=entry["id"], request=request, restarts=restarts))
+            return jobs
+        except Exception as exc:  # a damaged file must not stop the server
+            logger.warning("Ignoring unreadable job queue %s: %s", self._state_path, exc)
+            return []
+
+    def _save(self):
+        """Write the unfinished jobs (call with ``self._cv`` held)."""
+        if not self._state_path:
+            return
+        pending = [{"id": j.id, "state": j.state, "restarts": j.restarts, "request": asdict(j.request)}
+                   for j in self._jobs.values() if j.state in ACTIVE]
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(pending, indent=1), encoding="utf-8")
+            os.replace(tmp, self._state_path)
+        except OSError as exc:  # persistence is a convenience; the in-memory queue keeps working
+            logger.warning("Could not save the job queue: %s", exc)
 
     def submit(self, request: GenerationRequest) -> Job:
         job = Job(id=f"gen_{uuid.uuid4().hex[:8]}", request=request)
         with self._cv:
             self._jobs[job.id] = job
             self._prune()
+            self._save()
             self._cv.notify()
         logger.info("Queued job %s: %s", job.id, request.prompt[:60])
         return job
@@ -84,6 +126,7 @@ class JobQueue:
                 job.state, job.finished = "cancelled", time.time()
                 if job.request.reference_image:  # an upload that will now never be imported
                     Path(job.request.reference_image).unlink(missing_ok=True)
+                self._save()
             else:
                 # The running stage raises InterruptedError at its next check (diffusion step,
                 # See-through output line, or stage boundary).
@@ -140,6 +183,7 @@ class JobQueue:
                 while (job := self._next()) is None:
                     self._cv.wait()
                 job.state, job.started = "running", time.time()
+                self._save()
             try:
                 job.model_id = self._run(job.request, job.id)
                 state = "completed"
@@ -150,5 +194,6 @@ class JobQueue:
                 job.error, state = str(exc) or type(exc).__name__, "failed"
             with self._cv:
                 job.state, job.finished = state, time.time()
+                self._save()
             get_progress_manager().forget(job.id)
             logger.info("Job %s %s in %.0fs", job.id, state, job.finished - job.started)

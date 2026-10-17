@@ -35,7 +35,9 @@ def init_assembly_line(use_dummy: bool = False):
         output_base_dir=config.OUTPUT_DIR,
         use_dummy_generators=use_dummy
     )
-    job_queue = JobQueue(_run_job)
+    # Real runs take ~11 min each, so a queued batch is kept across restarts (not in demo mode,
+    # which must never pick up real jobs).
+    job_queue = JobQueue(_run_job, state_path=None if use_dummy else config.OUTPUT_DIR / "_queue.json")
     logger.info("Assembly line initialized")
 
 

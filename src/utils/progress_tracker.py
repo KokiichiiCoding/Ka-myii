@@ -30,6 +30,7 @@ class ProgressTracker:
         self.start_time = time.time()
         self.cancelled = False
         self.eta = 0.0
+        self._logged = None
 
         logger.info(f"Progress tracker initialized for task: {task_id}")
 
@@ -57,7 +58,10 @@ class ProgressTracker:
             eta = 0
         self.eta = eta
 
-        logger.info(f"Progress [{self.task_id}]: {progress:.1f}% - {message}")
+        # See-through's progress is re-sent every second (so a cancel lands); log changes only.
+        if (step, message, status) != self._logged:
+            self._logged = (step, message, status)
+            logger.info(f"Progress [{self.task_id}]: {progress:.1f}% - {message}")
 
     def increment(self, message: str = ""):
         """Increment progress by one step"""
