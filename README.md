@@ -198,7 +198,8 @@ decomposition, Live Preview, the queue, uploads, and the PSD/ORA/Cubism files (v
 Live2D's published JSON schemas). Not yet confirmed by a human:
 
 - importing a package into the Live2D Cubism Editor and running its auto-generation tools;
-- webcam face tracking in Live Preview (the code path is tested, a physical camera is not);
+- webcam tracking with a physical camera (it was verified in Edge with a synthetic camera feed:
+  face found, head tilt followed live);
 - real (GPU) generation on Linux.
 
 Layer quality depends on the artwork. Front-facing upper-body characters on plain backgrounds

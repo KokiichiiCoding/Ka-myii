@@ -193,7 +193,12 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
   queued; an interrupted job restarts from scratch, at most twice). Demo mode keeps no state.
   A crashed run's half-written output folder (no metadata.json) is not cleaned up automatically.
 - Output has never been opened in Live2D Cubism by a human — needs a real import check.
-- Physical webcam tracking in Live Preview has not been verified.
+- Webcam tracking was verified with a **synthetic camera** (2026-10-17): headless Edge via
+  playwright-core with `--use-fake-device-for-media-stream --use-file-for-fake-video-capture=<y4m>`
+  (a public-domain portrait rotated ±0.3 rad, 4 s period). Camera on, offline FaceMesh found the
+  face, tracked roll oscillated −0.47…+0.35 in phase with the video, the rig's head followed, the
+  `headwear` hat moved with the head, 51 fps, no console errors. Read state via
+  `window.Anime25D.state()` (`camLive`, `cam.az`, `pose.angleX`). A physical webcam is untried.
 - `run.sh` was run on Ubuntu 24.04 under WSL (2026-10-17): venv check message, torch 2.8 + pinned
   requirements, demo server, a demo job with package + preview PSD downloads. Real generation /
   See-through on Linux are untested. macOS can only use demo mode (no CUDA).
@@ -382,7 +387,7 @@ Verification (2026-10-17, owner's laptop):
 
 Ideas / next steps:
 
-- Human checks: Cubism import, physical webcam, `run.bat` prompts typed by hand, `run.sh` on Linux.
+- Human checks: Cubism import, a physical webcam, `run.bat` prompts typed by hand, GPU runs on Linux.
 - More real runs to extend `ORDER_PRIORS`; thresholds are tuned on six images. A full-body run
   (`4a66c60e-9805-4ae6-9b6d-460272d90ee9`, maid, seed 777, 806 s) decomposed well: arms L/R,
   skirt, bodice/apron, legs inpainted under the skirt; See-through put the arms under the
