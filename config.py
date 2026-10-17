@@ -119,6 +119,9 @@ MODEL_PRESETS = [
         "source": "huggingface",
         "tags": ["anime", "auto-download"],
         "note": "Anime SDXL (CreativeML Open RAIL++-M). Downloads ~7 GB from Hugging Face on first use.",
+        # The model card's score tags; added to the brief whenever this checkpoint is used.
+        "positive": "high score, great score",
+        "negative": "low score, bad score, average score",
     },
 ]
 

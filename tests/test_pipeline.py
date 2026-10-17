@@ -180,6 +180,8 @@ def test_seethrough_order_priors_keep_real_parts_and_leftovers(workdir, monkeypa
     layer((16, 10), (200, 150, 0, 255), "irides-l", 12, 30)     # wrongly below...
     layer((20, 10), (255, 255, 255, 255), "eyewhite-l", 10, 30)  # ...its eye white
     layer((2, 2), (90, 90, 90, 255), "eyewear", 40, 60)          # noise speck
+    layer((60, 25), (40, 40, 40, 255), "face", 0, 20)
+    layer((50, 20), (40, 40, 40, 255), "nose", 5, 22)            # degenerate: a copy of the face
     psd_path = workdir / "fake.psd"
     psd.save(psd_path)
 
@@ -187,7 +189,7 @@ def test_seethrough_order_priors_keep_real_parts_and_leftovers(workdir, monkeypa
     monkeypatch.setattr(seethrough, "decompose", lambda *a, **k: psd_path)
     assets = {a.layer_type: a for a in AssetSeparator().separate(src, workdir / "layers")}
 
-    assert "eyewear" not in assets
+    assert "eyewear" not in assets and "nose" not in assets and "face" in assets
     assert assets["eyewhite-l"].metadata["order"] < assets["irides-l"].metadata["order"]
     leftover = np.asarray(Image.open(assets["leftover"].file_path))
     assert assets["leftover"].metadata["order"] == 0
@@ -233,3 +235,30 @@ def test_ownership_cuts_overextended_parts_and_background_spill():
     assert (hair_alpha[:5] == 255).all() and (hair_alpha[6:] == 0).all()  # cut back to the real bangs
     assert np.asarray(blob)[..., 3].max() == 0  # spill over trusted background cleared
     assert tuple(np.asarray(face)[10, 10, :3]) == skin and covered[10, 10] and not covered[18, 18]
+
+
+def test_leftover_above_the_chin_becomes_headwear():
+    """Real runs left a witch hat / cat ears in `leftover`; the rig moves a layer with either
+    the head or the body, so ears plus hoodie scraps in one layer tore when the head turned."""
+    import numpy as np
+    from PIL import Image
+    from src.core.asset_separator import AssetSeparator
+
+    face = Image.new("RGBA", (100, 100), (0, 0, 0, 0)); face.paste((240, 200, 180, 255), (30, 20, 70, 60))
+    leftover = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    leftover.paste((90, 60, 40, 255), (30, 0, 70, 15))   # cat ears above the face
+    leftover.paste((200, 30, 30, 255), (10, 80, 90, 95))  # hoodie scrap below the chin
+
+    pieces = dict(AssetSeparator._split_leftover(leftover, [("face", face)]))
+    assert set(pieces) == {"headwear", "leftover"}
+    ears, scrap = (np.asarray(pieces[n])[..., 3] for n in ("headwear", "leftover"))
+    assert ears[5, 50] == 255 and ears[85, 50] == 0 and scrap[85, 50] == 255 and scrap[5, 50] == 0
+    assert [n for n, _ in AssetSeparator._split_leftover(leftover, [])] == ["leftover"]  # no face: no chin
+
+    # Placement: leftover above the back hair; above-chin pieces join a real headwear layer.
+    hat = Image.new("RGBA", (100, 100), (0, 0, 0, 0)); hat.paste((20, 20, 120, 255), (0, 0, 20, 10))
+    kept = [("back hair", Image.new("RGBA", (100, 100))), ("face", face), ("headwear", hat)]
+    AssetSeparator._place_leftover(kept, leftover)
+    assert [n for n, _ in kept] == ["back hair", "leftover", "face", "headwear"]
+    merged = np.asarray(kept[-1][1])[..., 3]
+    assert merged[5, 5] == 255 and merged[5, 50] == 255 and merged[85, 50] == 0  # stars + ears

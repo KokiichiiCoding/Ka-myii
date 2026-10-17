@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from src.models.vtuber_model import GenerationRequest
@@ -81,6 +82,8 @@ class JobQueue:
             job.cancel_requested = True
             if job.state == "queued":
                 job.state, job.finished = "cancelled", time.time()
+                if job.request.reference_image:  # an upload that will now never be imported
+                    Path(job.request.reference_image).unlink(missing_ok=True)
             else:
                 # The running stage raises InterruptedError at its next check (diffusion step,
                 # See-through output line, or stage boundary).

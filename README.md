@@ -30,6 +30,8 @@ brief ──► SDXL artwork ──► See-through layers ──► Live Preview
 - **A Studio that feels like a WebUI.** Your own SDXL checkpoints and LoRAs, sampler, CFG,
   seed and clip skip. Prompts longer than 77 tokens are encoded in chunks, not cut off.
   Danbooru tag autocomplete suggests 57k tags, most-used first.
+- **Bring your own artwork.** Upload a character you drew or commissioned and get the same
+  layers, PSD, Cubism files and Live Preview, without generating anything.
 - **Background queue.** Line up several characters, reload or close the tab and come back.
   Cancel works at any stage.
 - **Demo mode.** The whole pipeline (layers, PSD, Cubism files, Live Preview) runs on a
@@ -93,6 +95,8 @@ python app.py --open                   # or: python app.py --dummy --open
    LoRAs go in `models/loras/`.
 4. **Create.** Progress shows each of the three steps with an estimate, also in the tab title.
    While a job runs, the button becomes **Add to queue**.
+   To split existing art instead, choose **Use my artwork** and pick a PNG, JPG or WebP.
+   One character facing forward on a plain background works best.
 5. **Use the result.** Inspect the layers, open **Live Preview**, or download the **Live2D
    package**, **PSD** or **ORA**. Everything is saved under `outputs/<id>/` and listed in the
    **Gallery**, where a character can be reopened with its exact settings and seed.

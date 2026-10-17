@@ -27,6 +27,7 @@
       const name = document.createElement('h2'); name.textContent = model.name?.startsWith('model_') ? `Study ${model.name.slice(6).toUpperCase()}` : (model.name || `Character ${model.id.slice(0,8)}`);
       const details = document.createElement('p'); details.className = 'card-meta';
       details.textContent = `${model.assets?.filter(a=>a.layer_type!=='character').length || 0} layers · ${new Date(model.created_at).toLocaleDateString()}`;
+      if (model.status === 'failed') details.textContent = `Failed: ${model.error_message || 'unknown error'} · ${new Date(model.created_at).toLocaleDateString()}`;
       const actions = document.createElement('div'); actions.className = 'actions';
       const links = [[`/generator?model=${id}`, 'Artwork & layers', 'btn'], [`/api/generation/download/${id}`, 'Export', 'btn']];
       if (model.status === 'completed' && model.assets?.length) links.unshift([`/preview/${id}`, 'Live Preview ↗', 'btn btn-primary']);

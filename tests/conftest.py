@@ -8,3 +8,8 @@ def _colour_key_cutouts(monkeypatch):
     from src.core import asset_separator
 
     monkeypatch.setattr(asset_separator, "_anime_seg_mask", lambda image: None)
+    # ...and never start the real See-through engine (GPU, ~10 min) when it is installed;
+    # tests that exercise its post-processing monkeypatch `available` back on with a fake PSD.
+    from src.core import seethrough
+
+    monkeypatch.setattr(seethrough, "available", lambda: False)

@@ -29,9 +29,13 @@
     layerPanel: $('layerPanel'), layerGrid: $('layerGrid'), layerCount: $('layerCount'),
     errorPanel: $('errorPanel'), errorMsg: $('errorMsg'),
     modelNotice: $('modelNotice'),
+    sourceChips: $('sourceChips'), uploadFields: $('uploadFields'), promptFields: $('promptFields'),
+    artwork: $('artwork'), artworkThumb: $('artworkThumb'),
   };
 
   let selectedStyle = 'vtuber';
+  let configModel = null; // the checkpoint an empty model_id resolves to on the server
+  let source = 'prompt'; // or 'upload': decompose the user's own artwork instead of generating
 
   // ---- init ----
   document.addEventListener('DOMContentLoaded', async () => {
@@ -49,14 +53,15 @@
         if (data.success) {
           const saved = data.model.request;
           if (saved) {
-            els.prompt.value = saved.prompt || '';
+            els.prompt.value = saved.reference_image ? '' : (saved.prompt || '');
             els.negative.value = saved.negative_prompt || '';
             $('framing').value = saved.framing || 'full_body';
             if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
             for (const [key, value] of [['steps',saved.steps],['cfg',saved.guidance_scale],['width',saved.width],['height',saved.height],['clipSkip',saved.clip_skip]]) {
               if (value != null) { els[key].value=value; els[key+'Val'].textContent=value; }
             }
-            if ([...els.model.options].some(o=>o.value===saved.model_id)) els.model.value=saved.model_id;
+            const usedModel = saved.model_id || configModel;
+            if ([...els.model.options].some(o=>o.value===usedModel)) els.model.value=usedModel;
             if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
             const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
             if (resolution) els.resolution.value=resolution.value;
@@ -96,6 +101,22 @@
       }
     };
     els.model.onchange = updateModelHint;
+    for (const chip of els.sourceChips.children) {
+      chip.onclick = () => {
+        source = chip.dataset.source;
+        for (const c of els.sourceChips.children) {
+          c.classList.toggle('active', c === chip); c.setAttribute('aria-pressed', String(c === chip));
+        }
+        els.uploadFields.classList.toggle('hidden', source !== 'upload');
+        els.promptFields.classList.toggle('hidden', source === 'upload');
+      };
+    }
+    els.artwork.onchange = () => {
+      const file = els.artwork.files[0];
+      if (els.artworkThumb.src) URL.revokeObjectURL(els.artworkThumb.src);
+      els.artworkThumb.classList.toggle('hidden', !file);
+      if (file) els.artworkThumb.src = URL.createObjectURL(file);
+    };
     els.form.onsubmit = onGenerate;
     els.regenBtn.onclick = resetToForm;
     els.cancelBtn.onclick = async () => {
@@ -133,12 +154,12 @@
       els.model.innerHTML = '';
       data.checkpoints.forEach((c) => {
         const o = document.createElement('option');
-        o.value = c.id; o.textContent = c.name + (c.available === false ? ' (missing)' : '');
+        o.value = c.id; o.textContent = c.name;
         o.dataset.note = c.note || ''; o.dataset.source = c.source || '';
-        if (c.available === false) o.disabled = false; // selectable as a hint
         els.model.appendChild(o);
       });
       if (data.defaults.model) els.model.value = data.defaults.model;
+      configModel = data.defaults.config_model;
       updateModelHint();
 
       // samplers
@@ -303,14 +324,41 @@
   async function onGenerate(e) {
     e.preventDefault();
     if (submitting) return;
-    const prompt = els.prompt.value.trim();
-    if (!prompt) { els.prompt.focus(); return; }
+    let send;
+    if (source === 'upload') {
+      const file = els.artwork.files[0];
+      if (!file) { els.artwork.focus(); return; }
+      const form = new FormData();
+      form.append('image', file);
+      send = () => axios.post('/api/generation/upload', form);
+    } else {
+      const prompt = els.prompt.value.trim();
+      if (!prompt) { els.prompt.focus(); return; }
+      send = briefSender(prompt);
+    }
 
     // While a job is on the canvas, new briefs join the queue instead of replacing it.
     const queueing = busy;
     if (!queueing) { busy = true; showProgress(); }
     els.queueNote.textContent = '';
 
+    submitting = true;
+    els.generateBtn.disabled = true;
+    try {
+      const { data } = await send();
+      if (!data.success) throw new Error(data.error || 'Generation failed');
+      if (queueing) refreshQueue(); else track(data.job);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || String(err);
+      if (queueing) { els.queueNote.textContent = msg; refreshQueue(); }
+      else { endJob(); showError(msg); }
+    } finally {
+      submitting = false;
+      els.generateBtn.disabled = false;
+    }
+  }
+
+  function briefSender(prompt) {
     const seedRaw = parseInt(els.seed.value, 10);
     const payload = {
       prompt,
@@ -327,22 +375,8 @@
       seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
       loras: els.lora.value ? [{ id: els.lora.value, weight: 1.0 }] : null,
     };
-    if (!queueing) lastSeed = payload.seed;
-
-    submitting = true;
-    els.generateBtn.disabled = true;
-    try {
-      const { data } = await axios.post('/api/generation/generate', payload);
-      if (!data.success) throw new Error(data.error || 'Generation failed');
-      if (queueing) refreshQueue(); else track(data.job);
-    } catch (err) {
-      const msg = err.response?.data?.error || err.message || String(err);
-      if (queueing) { els.queueNote.textContent = msg; refreshQueue(); }
-      else { endJob(); showError(msg); }
-    } finally {
-      submitting = false;
-      els.generateBtn.disabled = false;
-    }
+    if (!busy) lastSeed = payload.seed;
+    return () => axios.post('/api/generation/generate', payload);
   }
 
   function showProgress() {

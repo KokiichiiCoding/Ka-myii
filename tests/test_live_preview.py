@@ -51,7 +51,8 @@ def test_preview_cache_reuses_then_invalidates_on_new_layer(tmp_path):
     assert ensure_preview_psd(tmp_path)==first
     assert first.stat().st_mtime_ns==stamp
     write_layer(tmp_path/'assets','02_mouth.png',(100,20,20,255),(40,60,60,65))
-    assert ensure_preview_psd(tmp_path)!=first
+    second=ensure_preview_psd(tmp_path)
+    assert second!=first and not first.exists() and second.exists()  # stale export removed
 
 
 def test_demo_names_and_empty_or_misaligned_layers(tmp_path):

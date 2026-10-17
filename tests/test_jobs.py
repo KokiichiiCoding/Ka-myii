@@ -69,6 +69,29 @@ def test_cancel_running_job_stops_assembly_line_and_removes_its_folder(tmp_path)
     assert not get_progress_manager().is_cancelled(job.id)  # forgotten once finished
 
 
+def test_failed_job_keeps_its_artwork_listed_and_drops_empty_folders(tmp_path):
+    import json
+    from src.pipeline.assembly_line import AssemblyLine
+
+    line = AssemblyLine(tmp_path, use_dummy_generators=True)
+
+    def out_of_memory(*args, **kwargs):
+        raise RuntimeError("CUDA out of memory")
+
+    line.asset_separator.separate = out_of_memory
+    with pytest.raises(RuntimeError):
+        line.generate_model(GenerationRequest(prompt="1girl", width=256, height=256, steps=2))
+    (folder,) = tmp_path.iterdir()  # the artwork survives, with metadata the Gallery can list
+    saved = json.loads((folder / "metadata.json").read_text())
+    assert saved["status"] == "failed" and "out of memory" in saved["error_message"]
+    assert (folder / "base_image.png").exists()
+
+    line.image_generator.generate = out_of_memory  # nothing worth keeping yet
+    with pytest.raises(RuntimeError):
+        line.generate_model(GenerationRequest(prompt="1girl", width=256, height=256, steps=2))
+    assert list(tmp_path.iterdir()) == [folder]
+
+
 def test_seethrough_progress_is_monotonic_across_body_and_head_passes():
     from src.core import seethrough
 

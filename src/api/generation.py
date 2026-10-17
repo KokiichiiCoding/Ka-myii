@@ -142,6 +142,45 @@ def generate_model():
     }), 202
 
 
+@generation_bp.route('/upload', methods=['POST'])
+def upload_artwork():
+    """Queue the decomposition of the user's own character art (multipart field "image").
+
+    Same response as /generate; the image stage imports the file instead of running SDXL.
+    """
+    import uuid
+    from PIL import Image, UnidentifiedImageError
+
+    upload = request.files.get('image')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': 'Choose an image to upload'}), 400
+    try:
+        with Image.open(upload.stream) as img:
+            img.load()
+            # Re-encoding as PNG keeps only pixels; transparency is flattened onto white like a sketch.
+            if img.mode in ('RGBA', 'LA', 'PA') or 'transparency' in img.info:
+                rgba = img.convert('RGBA')
+                image = Image.new('RGB', rgba.size, 'white')
+                image.paste(rgba, mask=rgba.getchannel('A'))
+            else:
+                image = img.convert('RGB')
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        return jsonify({'success': False, 'error': 'That file is not an image Ka-myii can read (PNG, JPG or WebP)'}), 400
+    if min(image.size) < 256:
+        return jsonify({'success': False, 'error': 'The image is too small; use at least 256 px on each side'}), 400
+    image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)  # See-through works at 1024-1280 anyway
+
+    uploads = config.OUTPUT_DIR / '_uploads'
+    uploads.mkdir(parents=True, exist_ok=True)
+    path = uploads / f'{uuid.uuid4().hex}.png'
+    image.save(path)
+    title = Path(upload.filename).stem.strip()[:60] or 'artwork'
+    job = job_queue.submit(GenerationRequest(
+        prompt=f'Uploaded artwork: {title}', width=image.width, height=image.height,
+        style='anime', framing='upper_body', reference_image=str(path)))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
+
+
 @generation_bp.route('/jobs', methods=['GET'])
 def list_jobs():
     """Recent and active jobs, newest first."""
@@ -450,6 +489,7 @@ def get_options():
                 'guidance_scale': igen['default_guidance_scale'],
                 'sampler': igen['default_sampler'],
                 'model': local[0]['id'] if local else igen['model_name'],
+                'config_model': igen['model_name'],  # what an empty model_id means
                 'negative_prompt': config.DEFAULT_NEGATIVE_PROMPT,
                 'clip_skip': igen.get('clip_skip', 2),
             },

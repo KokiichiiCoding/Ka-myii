@@ -70,6 +70,12 @@ ORDER_PRIORS = [
 # See-through emits near-empty accessory layers (a few noise pixels) when there is none;
 # each would still cost an ArtMesh in Cubism. Facial parts are legitimately tiny, so only these.
 ACCESSORY_TAGS = {"headwear", "eyewear", "earwear", "neckwear", "objects", "tail", "wings"}
+# Small features drawn on the face. On five real runs each covered at most 3 % of the face's
+# area; one run's "nose" was a 60 % copy of the whole upper face (eyes, bangs, cheeks), which
+# matches the source perfectly and so passed the colour check, then claimed the visible cheeks.
+FACE_DETAIL_TAGS = {"nose", "mouth", "eyebrow-l", "eyebrow-r", "eyelash-l", "eyelash-r",
+                    "irides-l", "irides-r", "eyewhite-l", "eyewhite-r"}
+MAX_FACE_DETAIL_SHARE = 0.20
 
 
 # SkyTNT's anime-segmentation IS-Net (Apache-2.0; the model rembg calls "isnet-anime"), run with
@@ -208,6 +214,7 @@ class AssetSeparator:
         # Where a layer is the visible top layer, it should reproduce the source pixels.
         # shortcut: thresholds tuned on See-through's sample image; revisit if real parts get dropped.
         src_rgb = np.asarray(source.convert("RGB")).astype(np.int16)
+        face_px = sum(int((np.asarray(c)[..., 3] > 128).sum()) for _, n, c in layers if n == "face")
         covered = np.zeros((h, w), dtype=bool)
         keep = set()
         for order, name, canvas in reversed(layers):  # front to back
@@ -217,6 +224,10 @@ class AssetSeparator:
                 continue
             if name in ACCESSORY_TAGS and alpha.sum() < 0.0005 * w * h:
                 logger.info("Dropping empty accessory layer %s (%d px)", name, int(alpha.sum()))
+                continue
+            if name in FACE_DETAIL_TAGS and face_px and (arr[..., 3] > 128).sum() > MAX_FACE_DETAIL_SHARE * face_px:
+                logger.info("Dropping degenerate %s layer (%.0f%% of the face's area)",
+                            name, 100 * (arr[..., 3] > 128).sum() / face_px)
                 continue
             visible = (arr[..., 3] > 128) & ~covered
             outside = float((alpha & ~silhouette).sum()) / alpha.sum()
@@ -237,10 +248,7 @@ class AssetSeparator:
         covered = self._resolve_ownership(kept, src_rgb, background)
         leftover = self._leftover_layer(source, fg_alpha, covered)
         if leftover is not None:
-            # Uncovered pixels look identical at any depth; just above the back hair suits the
-            # usual case (cat ears, ahoge, hair ornaments) when the head moves.
-            at = next((i + 1 for i, (name, _) in enumerate(kept) if name == "back hair"), 0)
-            kept.insert(at, ("leftover", leftover))
+            self._place_leftover(kept, leftover)
 
         assets: List[Asset] = []
         for order, (name, canvas) in enumerate(kept):
@@ -322,6 +330,49 @@ class AssetSeparator:
         layer.putalpha(Image.fromarray(np.minimum(np.asarray(mask), fg_alpha)))
         logger.info("Leftover layer keeps %d character px no part covered", area)
         return layer
+
+    @staticmethod
+    def _split_leftover(leftover: Image.Image, kept: list) -> list:
+        """Name what See-through missed by where it is. Seen: a witch hat, cat ears and a spiky
+        halo left in ``leftover``. The browser rig moves each layer with either the head or the
+        body, so one layer holding a halo and chest skin tore when the head turned, and Cubism
+        got no ``headwear``. Above the chin becomes ``headwear``; the rest stays ``leftover``."""
+        names = [name for name, _ in kept]
+        if "face" not in names:
+            return [("leftover", leftover)]
+        face = np.asarray(kept[names.index("face")][1].split()[-1]) > 128
+        rows = np.nonzero(face.any(axis=1))[0]
+        if not rows.size:
+            return [("leftover", leftover)]
+        chin = int(rows.max()) + 1
+        alpha = np.asarray(leftover.split()[-1])
+        min_px = 0.001 * alpha.size  # same floor as _leftover_layer
+        pieces = []
+        for name, keep_rows in (("headwear", slice(0, chin)), ("leftover", slice(chin, None))):
+            part = np.zeros_like(alpha)
+            part[keep_rows] = alpha[keep_rows]
+            if (part > 128).sum() >= min_px:
+                canvas = leftover.copy()
+                canvas.putalpha(Image.fromarray(part))
+                pieces.append((name, canvas))
+        return pieces or [("leftover", leftover)]
+
+    @staticmethod
+    def _place_leftover(kept: list, leftover: Image.Image):
+        """Add the leftover pieces to ``kept`` (bottom-to-top list of (name, canvas)) in place."""
+        for name, canvas in AssetSeparator._split_leftover(leftover, kept):
+            names = [n for n, _ in kept]
+            if name == "headwear" and "headwear" in names:
+                # Uncovered pixels never overlap a kept part's opaque ones: merging is lossless.
+                at = names.index("headwear")
+                kept[at] = ("headwear", Image.alpha_composite(canvas, kept[at][1]))
+            elif name == "headwear":
+                kept.append((name, canvas))  # front hair < headwear, as in ORDER_PRIORS
+            else:
+                # Uncovered pixels look identical at any depth; just above the back hair suits
+                # the usual case (hair ties, collars, skin in clothing gaps).
+                at = next((i + 1 for i, n in enumerate(names) if n == "back hair"), 0)
+                kept.insert(at, (name, canvas))
 
     def _separate_masks(self, image: Image.Image, image_path: Path, output_dir: Path, layers: List[str],
                         progress: Optional[Callable[[float, str], None]] = None) -> List[Asset]:

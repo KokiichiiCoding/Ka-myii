@@ -12,6 +12,21 @@
       <h3><span class="section-index">01</span> Character brief</h3>
 
       <div class="field">
+        <div class="chips" id="sourceChips" role="group" aria-label="Start from">
+          <button type="button" class="chip active" data-source="prompt" aria-pressed="true">Describe a character</button>
+          <button type="button" class="chip" data-source="upload" aria-pressed="false">Use my artwork</button>
+        </div>
+      </div>
+
+      <div class="field hidden" id="uploadFields">
+        <label for="artwork">Artwork</label>
+        <input type="file" id="artwork" accept="image/png,image/jpeg,image/webp">
+        <img id="artworkThumb" class="artwork-thumb hidden" alt="The artwork you chose">
+        <div class="hint">One character facing forward on a plain background works best. PNG, JPG or WebP up to 16 MB. It is split into layers as is, without SDXL.</div>
+      </div>
+
+      <div id="promptFields">
+      <div class="field">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" placeholder="1girl, silver hair, long twin tails, blue eyes, sailor uniform, gentle smile"></textarea>
         <div class="hint">Describe hair, eyes, outfit, and silhouette. Comma-separated tags work well.</div>
@@ -93,6 +108,7 @@
           <select id="lora"></select>
           <div class="hint">Drop <code>.safetensors</code> LoRAs into <code>models/loras</code>.</div>
         </div>
+      </div>
       </div>
 
       <div class="divider"></div>

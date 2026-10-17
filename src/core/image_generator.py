@@ -407,10 +407,13 @@ class ImageGenerator:
         if framing == "upper_body":
             style_prompt = style_prompt.replace("full body", "upper body").replace("reference sheet", "portrait")
             style_prompt += ", upper body, waist up, detailed face, both eyes visible, centered composition"
-        positive_parts = [request.prompt.strip(), style_prompt]
+        model_tags = {} if getattr(self, "custom_model_path", None) else next(
+            (m for m in config.MODEL_PRESETS if m["id"] == getattr(self, "model_name", None)), {})
+        positive_parts = [request.prompt.strip(), style_prompt, model_tags.get("positive", "")]
         positive = ", ".join(p for p in positive_parts if p)
 
-        negative_parts = [request.negative_prompt.strip(), preset.get("negative", ""), config.DEFAULT_NEGATIVE_PROMPT]
+        negative_parts = [request.negative_prompt.strip(), preset.get("negative", ""), config.DEFAULT_NEGATIVE_PROMPT,
+                          model_tags.get("negative", "")]
         negative = ", ".join(p for p in negative_parts if p)
         return positive, negative
 

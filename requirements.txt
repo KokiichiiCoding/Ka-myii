@@ -25,17 +25,19 @@ python-dotenv>=1.0.0
 # A CUDA GPU is strongly recommended. On Windows, run.bat installs the correct
 # CUDA build of PyTorch automatically.
 # ===========================================================================
-torch>=2.1.0
-diffusers>=0.27.0
-transformers>=4.38.0
-accelerate>=0.27.0
+# Pinned to the versions verified end to end on an 8 GB GPU; Ka-myii encodes SDXL prompts
+# itself and drives See-through's runner, so newer releases need a real run before bumping.
+torch>=2.1.0          # run.bat installs 2.8.0+cu128 first
+diffusers==0.37.0
+transformers==5.0.0
+accelerate==1.13.0
 safetensors>=0.4.0
-peft>=0.9.0           # LoRA support
+peft==0.21.2          # LoRA support
 
 # --- Character cut-out (recommended) ---
 # Runs SkyTNT's anime-segmentation IS-Net; scripts/install_seethrough.py fetches its weights.
 # (rembg also works if installed, but pulls ~200 MB of extra dependencies.)
-onnxruntime>=1.17.0
+onnxruntime==1.30.0
 
 # ===========================================================================
 # Optional advanced backends (install manually when needed):

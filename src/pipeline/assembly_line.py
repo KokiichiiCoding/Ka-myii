@@ -2,7 +2,9 @@
 Assembly line pipeline for automated VTuber model generation
 """
 import logging
+import shutil
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Callable, Dict
 import uuid
@@ -16,6 +18,7 @@ from src.models.vtuber_model import (
 from src.core.image_generator import ImageGenerator, DummyImageGenerator
 from src.core.asset_separator import AssetSeparator, DummyAssetSeparator
 from src.core.model_assembler import ModelAssembler, DummyModelAssembler
+from src.utils.helpers import save_json
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +110,7 @@ class AssemblyLine:
         start_time = time.time()
 
         # Resolve randomness once so the saved brief can reproduce this character.
-        if request.seed is None:
-            from dataclasses import replace
+        if request.seed is None and not request.reference_image:
             from secrets import randbits
             request = replace(request, seed=randbits(31))
 
@@ -135,8 +137,14 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._enter_stage(task_id, "image", "Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            self._ensure_generator(request)
-            base_image_path = self._generate_image(request, model_output_dir, task_id)
+            if request.reference_image:  # the user's own artwork, validated by the upload route
+                base_image_path = model_output_dir / "base_image.png"
+                shutil.move(request.reference_image, base_image_path)
+                model.request = request = replace(request, reference_image="upload")
+                model.metadata["source"] = "upload"
+            else:
+                self._ensure_generator(request)
+                base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
             logger.info(f"Base image generated: {base_image_path}")
 
@@ -184,8 +192,6 @@ class AssemblyLine:
 
         except InterruptedError:
             # Cancelled by the user: nothing in the half-built folder is wanted.
-            import shutil
-
             shutil.rmtree(model_output_dir, ignore_errors=True)
             logger.info("Generation %s cancelled; removed %s", task_id, model_output_dir)
             raise
@@ -194,6 +200,12 @@ class AssemblyLine:
             model.error_message = str(e)
             model.generation_time = time.time() - start_time
             logger.error(f"Model generation failed: {e}", exc_info=True)
+            if (model_output_dir / "base_image.png").exists():
+                # Keep the artwork (e.g. See-through ran out of memory): the Gallery lists it as
+                # failed, and it can be re-uploaded with "Use my artwork" or deleted.
+                save_json(model.to_dict(), model_output_dir / "metadata.json")
+            else:
+                shutil.rmtree(model_output_dir, ignore_errors=True)
             raise
 
     def _generate_image(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str] = None) -> Path:

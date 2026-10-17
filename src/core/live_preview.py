@@ -82,4 +82,10 @@ def ensure_preview_psd(model_dir: Path) -> Path:
             os.replace(temporary, output)
         finally:
             temporary.unlink(missing_ok=True)
+        for stale in out_dir.glob('preview-*.psd'):  # exports for older layer revisions
+            if stale != output:
+                try:
+                    stale.unlink()
+                except OSError:  # still being served on Windows; the next export retries
+                    pass
     return output
