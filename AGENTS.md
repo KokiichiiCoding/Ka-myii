@@ -383,7 +383,11 @@ Verification (2026-10-17, owner's laptop):
 Ideas / next steps:
 
 - Human checks: Cubism import, physical webcam, `run.bat` prompts typed by hand, `run.sh` on Linux.
-- More real runs (full body) to extend `ORDER_PRIORS`; thresholds still tuned on five images.
+- More real runs to extend `ORDER_PRIORS`; thresholds are tuned on six images. A full-body run
+  (`4a66c60e-9805-4ae6-9b6d-460272d90ee9`, maid, seed 777, 806 s) decomposed well: arms L/R,
+  skirt, bodice/apron, legs inpainted under the skirt; See-through put the arms under the
+  clothing, now fixed by `topwear/bottomwear < handwear` priors (still image unchanged, mean
+  error 0.35, p99 11; preview 25 animated parts, all facial checks).
 
 ## 10. How to work in this repo
 

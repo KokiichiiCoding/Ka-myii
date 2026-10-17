@@ -66,6 +66,10 @@ ORDER_PRIORS = [
     ("face", "front hair"), ("eyewhite", "front hair"), ("irides", "front hair"),
     ("eyelash", "front hair"), ("nose", "front hair"), ("mouth", "front hair"),
     ("front hair", "headwear"),
+    # Seen on a full-body run: arms under the bodice and skirt. Rigs keep arms in front of the
+    # torso (the preview's arm sliders slid them behind the apron); ownership still cuts any
+    # hidden arm pixels where the source shows clothing, so the still image is unchanged.
+    ("topwear", "handwear"), ("bottomwear", "handwear"),
 ]
 # See-through emits near-empty accessory layers (a few noise pixels) when there is none;
 # each would still cost an ArtMesh in Cubism. Facial parts are legitimately tiny, so only these.

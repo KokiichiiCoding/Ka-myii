@@ -191,6 +191,20 @@ Common ones:
 
 Logs are written to `logs/kamyii.log`.
 
+## Status and known limitations
+
+Ka-myii is an early release. What works and has been checked on real hardware: generation, See-through
+decomposition, Live Preview, the queue, uploads, and the PSD/ORA/Cubism files (validated against
+Live2D's published JSON schemas). Not yet confirmed by a human:
+
+- importing a package into the Live2D Cubism Editor and running its auto-generation tools;
+- webcam face tracking in Live Preview (the code path is tested, a physical camera is not);
+- real (GPU) generation on Linux.
+
+Layer quality depends on the artwork. Front-facing upper-body characters on plain backgrounds
+decompose best; arms, hands and complex poses are weaker, and parts See-through cannot name end up
+in `leftover` / `headwear`. Issues with example images are very welcome.
+
 ## Privacy and security
 
 Everything runs locally; nothing is uploaded and there is no telemetry. Internet is needed

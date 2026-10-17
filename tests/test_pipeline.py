@@ -166,6 +166,9 @@ def test_seethrough_order_priors_keep_real_parts_and_leftovers(workdir, monkeypa
     # Seen on a real run: bangs and a hat under the face (the bangs got baked into the face layer).
     assert apply_order_priors(["front hair", "headwear", "face", "eyebrow-l", "eyelash-l"]) == \
         ["face", "eyebrow-l", "eyelash-l", "front hair", "headwear"]
+    # Full body: See-through put both arms under the bodice and the skirt.
+    body = apply_order_priors(["legwear", "handwear-r", "handwear-l", "neck", "bottomwear", "topwear"])
+    assert body[:4] == ["legwear", "neck", "bottomwear", "topwear"] and set(body[4:]) == {"handwear-l", "handwear-r"}
 
     src = workdir / "portrait.png"
     portrait = Image.new("RGB", (100, 200), "white")  # square side 200, x-pad 50
