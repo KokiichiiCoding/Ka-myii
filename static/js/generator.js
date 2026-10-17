@@ -18,7 +18,7 @@
     seed: $('seed'), randSeed: $('randSeed'), reuseSeed: $('reuseSeed'),
     clipSkip: $('clipSkip'), clipSkipVal: $('clipSkipVal'),
     width: $('width'), widthVal: $('widthVal'), height: $('height'), heightVal: $('heightVal'),
-    lora: $('lora'), advToggle: $('advToggle'), advBody: $('advBody'), advChevron: $('advChevron'),
+    lora: $('lora'), loraWeight: $('loraWeight'), loraWeightVal: $('loraWeightVal'), advToggle: $('advToggle'), advBody: $('advBody'), advChevron: $('advChevron'),
     generateBtn: $('generateBtn'), cancelBtn: $('cancelBtn'),
     queuePanel: $('queuePanel'), queueList: $('queueList'), queueNote: $('queueNote'),
     canvasEmpty: $('canvasEmpty'), resultImg: $('resultImg'),
@@ -63,6 +63,11 @@
             const usedModel = saved.model_id || configModel;
             if ([...els.model.options].some(o=>o.value===usedModel)) els.model.value=usedModel;
             if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
+            const lora = saved.loras?.[0];
+            if (lora && [...els.lora.options].some(o=>o.value===(lora.id || lora.path))) {
+              els.lora.value = lora.id || lora.path;
+              els.loraWeight.value = lora.weight ?? 1; els.loraWeightVal.textContent = els.loraWeight.value;
+            }
             const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
             if (resolution) els.resolution.value=resolution.value;
             if (saved.style) selectedStyle=saved.style;
@@ -83,6 +88,7 @@
     els.steps.oninput = () => (els.stepsVal.textContent = els.steps.value);
     els.cfg.oninput = () => (els.cfgVal.textContent = els.cfg.value);
     els.clipSkip.oninput = () => (els.clipSkipVal.textContent = els.clipSkip.value);
+    els.loraWeight.oninput = () => (els.loraWeightVal.textContent = els.loraWeight.value);
     els.width.oninput = () => (els.widthVal.textContent = els.width.value);
     els.height.oninput = () => (els.heightVal.textContent = els.height.value);
     els.randSeed.onclick = () => (els.seed.value = Math.floor(Math.random() * 2147483647));
@@ -206,6 +212,7 @@
     try {
       const { data } = await axios.get('/api/generation/model-status');
       els.modelNotice.classList.toggle('hidden', !data.is_dummy);
+      $('seethroughNotice').classList.toggle('hidden', data.is_dummy || data.seethrough !== false);
     } catch (e) { /* ignore */ }
   }
 
@@ -373,7 +380,7 @@
       height: parseInt(els.height.value, 10),
       clip_skip: parseInt(els.clipSkip.value, 10),
       seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
-      loras: els.lora.value ? [{ id: els.lora.value, weight: 1.0 }] : null,
+      loras: els.lora.value ? [{ id: els.lora.value, weight: parseFloat(els.loraWeight.value) }] : null,
     };
     if (!busy) lastSeed = payload.seed;
     return () => axios.post('/api/generation/generate', payload);
@@ -409,7 +416,7 @@
     els.metaStatus.textContent = model.status || 'completed';
     els.metaLayers.textContent = (meta.layers || []).length || '—';
     els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
-    els.metaSeed.textContent = model.request?.seed ?? lastSeed ?? 'random';
+    els.metaSeed.textContent = model.request?.reference_image ? '—' : (model.request?.seed ?? lastSeed ?? 'random');
     els.resultMeta.classList.remove('hidden');
 
     $('livePreview').href = `/preview/${encodeURIComponent(mid)}`;

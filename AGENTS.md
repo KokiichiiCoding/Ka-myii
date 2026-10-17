@@ -25,15 +25,11 @@ Read this whole file before changing anything. Keep it up to date when you finis
 - Path: `C:\Users\Kokii\Ka-myii` — git clone of `github.com/KokiichiiCoding/Ka-myii`.
 - Branch: `claude/automated-vtuber-model-011CUg6gEfYhoWvMuuXdF2hJ` (the real development branch;
   the default branch `Ka-myii` is stale; there is no `main`).
-- **Milestone 1 is finished but UNCOMMITTED in the working tree** (~20 files, +570/−70 lines,
-  plus new files `src/core/seethrough.py`, `scripts/`, `requirements-seethrough.txt`, this file).
-  **Never run `git checkout .`, `git reset --hard`, `git stash` or `git clean` on this tree.**
-  Before starting new work, ask the owner whether to commit M1 (suggested message:
-  `Integrate See-through layer decomposition for 8 GB GPUs; fix layer/PSD bugs`). Commit or push
-  only when the owner says so. **On 2026-10-15 the owner explicitly chose to leave M1
-  uncommitted and continue M2. M2 is also uncommitted; do not ask again this session.**
-  On 2026-10-16 the owner told Claude to "use the remaining credits on further development";
-  M3 (section 8) was added on top, still uncommitted. Committing remains the owner's call.
+- **Everything is committed** (2026-10-17). The owner asked to make Ka-myii a good initial
+  product to push to GitHub; M1–M3 were committed as one baseline (`c113da1`) and M4 work
+  (section 9) as separate commits on top. Commit or push only when the owner asks.
+  **Never run `git checkout .`, `git reset --hard`, `git stash` or `git clean` on this tree**
+  (`outputs/` holds the owner's characters).
 - Never commit model weights, `outputs/`, `engines/`, venvs (all gitignored — keep it that way).
 
 ## 3. Environment & commands (Windows, PowerShell)
@@ -43,10 +39,10 @@ Read this whole file before changing anything. Keep it up to date when you finis
 | App venv | `.venv\` (Python 3.12; torch 2.8.0+cu128, diffusers 0.37.0, transformers 5.0.0, accelerate 1.13.0, peft, Flask, psd-tools, pytoshop). `run.bat` now prefers an existing `.venv\`, then `venv\`, and creates `.venv\` otherwise. |
 | See-through engine | `engines\see-through\` (git clone, pinned commit `df019de`), its own venv `engines\see-through\.venv\` (torch 2.8.0+cu128, bitsandbytes 0.49.2, diffusers 0.37.0, transformers 5.0.0) |
 | Model weights | See-through NF4 weights in the HF cache (`%USERPROFILE%\.cache\huggingface\hub`, repos `24yearsold/seethroughv0.0.2_layerdiff3d_nf4`, `24yearsold/seethroughv0.0.1_marigold_nf4`). SDXL checkpoint `models\checkpoints\novaAnimeXL_ilV140.safetensors` (Illustrious-based; a **hard link** to the owner's ComfyUI copy — never delete or modify it in place). |
-| Tests (no GPU) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 24 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp outputs/test-preview`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs` |
+| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 33 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
 | Re-run layer post-processing on old results (no GPU) | `.\.venv\Scripts\python.exe scripts\rebuild_layers.py <model_id> [...]` — re-separates from the saved See-through PSD, regenerates PSD/ORA/Cubism/preview/metadata |
 | Demo mode (no GPU) | `.\.venv\Scripts\python.exe app.py --dummy --host 127.0.0.1 --port 5055` |
-| Real mode | `$env:FLASK_ENV="production"; .\.venv\Scripts\python.exe app.py --host 127.0.0.1 --port 5055` — production disables the Werkzeug reloader, which otherwise **restarts the server (killing a 15-minute job) whenever you edit a file**. |
+| Real mode | `.\.venv\Scripts\python.exe app.py --port 5055` (add `--open` to launch the browser). Production + 127.0.0.1 are now the defaults; `FLASK_ENV=development` brings back the Werkzeug reloader, which **restarts the server (killing a running job) whenever you edit a file**. Templates are cached in production: restart after editing them. |
 | Run See-through alone | from `engines\see-through`: `.\.venv\Scripts\python.exe -u ..\..\scripts\seethrough_runner.py --srcp <img> --save_dir <dir> --resolution 1024 --tblr_split` |
 | GPU check | `nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv` |
 
@@ -62,14 +58,17 @@ re-generating. Other `outputs\` folders are demo-mode results.
 ## 4. Architecture
 
 ```
-app.py                         Flask + SocketIO (progress namespace /progress, event progress_update)
+app.py                         Flask (no CORS, no SocketIO); Host-header check when bound to loopback; --open, --dummy
 config.py                      all settings; loads .env (python-dotenv)
-src/api/generation.py          REST: /generate (queues a job, 202), /jobs, /jobs/<id>, /jobs/<id>/cancel, /options, /layers, /layer (?crop=1), /artifact, /preview …
+src/api/generation.py          REST: /generate (validated brief → job, 202), /upload (user artwork → job), /jobs, /jobs/<id>, /jobs/<id>/cancel,
+                               /options, /layers, /layer (?crop=1), /artifact, /preview … — every URL model id goes through model_dir_for()
 src/pipeline/jobs.py           JobQueue: one daemon worker runs jobs in order; stage-weighted progress; cancel
-src/pipeline/assembly_line.py  orchestration: generate → (unload SDXL) → separate → assemble → preview; stage + cancel checks
+src/pipeline/assembly_line.py  orchestration: generate or import upload → (unload SDXL) → separate → assemble → preview;
+                               stage + cancel checks; a failure with artwork is saved as status failed
 src/core/image_generator.py    diffusers SDXL; chunked long-prompt encoding; auto model-CPU-offload when VRAM < 12 GB; DummyImageGenerator for demo
 src/core/asset_separator.py    layer decomposition. Priority: demo region-map → See-through → SAM2 → geometric fallback.
-                               See-through path: draw-order priors → hallucination/speck filter → source colours → leftover layer
+                               See-through path: draw-order priors → speck / degenerate-face-detail / hallucination filters →
+                               per-pixel ownership + source colours → leftover split at the chin (above → headwear)
 scripts/rebuild_layers.py      re-run post-processing + exports for existing results from their saved See-through PSD
 static/js/tagcomplete.js       Danbooru tag autocomplete (data: static/vendor/tags, MIT, a1111-sd-webui-tagcomplete)
 src/core/seethrough.py         spawns the See-through runner as a subprocess; parses its stdout into progress
@@ -134,7 +133,8 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
 13. See-through emits few-pixel accessory specks (`headwear`/`eyewear`/`earwear`, 4–6 px at
    the same spot) when there is no accessory; they're dropped (< 0.05 % of the image, accessory
    tags only — facial parts are legitimately tiny). It can also assign real pixels to nothing
-   (seen: cat ears); those go to a `leftover` layer (live preview maps it to the rig's `objects`).
+   (seen: cat ears); those go to a `leftover` layer (live preview maps it to the rig's `objects`),
+   now split at the chin — see fact 18.
 14. **The character cut-out matters more than it looks** (silhouette for the hallucination check,
    the `leftover` layer, background clearing). The old median-colour key failed on upper-body
    crops (99.8 % "character"). Now: SkyTNT's anime-segmentation IS-Net via onnxruntime
@@ -144,15 +144,35 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
    and it still fails on gradient/vignette backgrounds — so per-pixel background clearing only
    runs when the model produced the mask (`cutout_backend == "anime-seg"`). Tests force the
    colour key via `tests/conftest.py`. rembg is not installed (its deps are ~200 MB).
-16. **Per-pixel ownership** (`_resolve_ownership`): See-through over-extends parts (bangs across
+15. **Per-pixel ownership** (`_resolve_ownership`): See-through over-extends parts (bangs across
    the cheeks). After whole-layer filtering, each pixel goes to the part whose predicted colour
    best matches the source (topmost within a margin of 30, so depth order wins when unclear);
    parts above it are cut there, then the owner gets the source colour. On four real results this
    lowered composite-vs-source error with identical masks (e.g. 3.50 → 3.40, 7.38 → 7.15), and it
    removed bangs that had been baked into face layers / skin baked into hair layers.
-15. Cancel latency: `seethrough._follow` reads output on a pump thread and re-calls `progress`
+16. Cancel latency: `seethrough._follow` reads output on a pump thread and re-calls `progress`
    every second, so a cancel lands even while the runner is silently loading weights.
    `atexit` kills in-flight runners (Windows does not kill children with the parent).
+17. **See-through can emit a degenerate facial-detail layer.** One real run's `nose` was a 60 %
+   copy of the upper face (eyes, bangs, cheeks); it matches the source, so the colour filter kept
+   it and ownership then gave it the visible cheeks. Across five runs every real nose / mouth /
+   brow / lash / iris / eye white was ≤ 3 % of the face's area, so such layers are dropped above
+   20 % (`MAX_FACE_DETAIL_SHARE`).
+18. **The browser rig moves each layer with either the head or the body** (an unknown/`objects`
+   layer goes by its centroid vs the face bottom). A single `leftover` holding a halo above the
+   head and chest skin below therefore tore somewhere. `_place_leftover` splits it at the chin:
+   above → `headwear` (merged into a real headwear layer — lossless, uncovered pixels never
+   overlap a kept part's opaque ones), below stays `leftover` above the back hair.
+19. **Fresh installs resolve the newest ML packages** (diffusers 0.41 / transformers 5.20 on
+   2026-10-17 vs the verified 0.37 / 5.0). `requirements.txt` pins diffusers, transformers,
+   accelerate, peft and onnxruntime to the verified versions; bump only after a real GPU run.
+   PyTorch 2.8 cu128 has no Python 3.14 wheels, so `run.bat` picks 3.10–3.13 via the `py`
+   launcher (`run.sh` likewise).
+20. **Local-server security.** Blanket CORS + an unvalidated model id meant any website could
+   `DELETE /api/generation/delete/..` (rmtree of the project). Now: no CORS, no SocketIO,
+   `model_dir_for()` for every URL id, `/generate` accepts only listed checkpoints/LoRAs
+   (it loaded any path on disk), bounded numbers, and a Host-header check against DNS
+   rebinding when bound to loopback. Uploads are re-encoded by PIL before anything uses them.
 
 ## 6. Known limitations / backlog
 
@@ -161,16 +181,15 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
 - `handwear-l/-r` split sometimes fails (both arms + a skirt frill landed in `handwear-l`).
 - The job queue is in memory: a server restart forgets queued/running jobs (finished results
   are on disk). The Studio says so when a polled job 404s.
-- `install_seethrough.py` was run from scratch into a temp root on 2026-10-16 (exit 0, 1075 s
-  with torch from pip cache and weights from the HF cache). The `run.bat` prompt step itself is
-  still unexercised.
-- `run.bat` now reuses `.venv\` and sets production/no-reloader mode. Clean-install execution
-  remains untested; no packages or weights were changed during M2.
 - Output has never been opened in Live2D Cubism by a human — needs a real import check.
-- Expression editor / accessory generator modules (`src/core/expression_*`, `accessory_generator.py`,
-  `image_editor.py`, `editor.html`) predate M1 and were not reviewed.
+- Physical webcam tracking in Live Preview has not been verified.
+- `run.sh` (Linux) has not been run. macOS can only use demo mode (no CUDA).
+- `run.bat`'s `set /p` prompts were only driven from a redirected file in the clean-clone test,
+  where the See-through "n" answer did not register; a human should check them interactively.
+- The old expression editor / accessory generator / image editor were removed in M4 (they pasted
+  clip-art shapes at guessed positions); Live Preview covers expressions.
 
-## 7. M2 — live preview + character workshop (complete, uncommitted)
+## 7. M2 — live preview + character workshop (complete)
 
 - Vendor: `static/vendor/anime25d/`, Anime2.5DRig MIT, pinned to
   `7ddbd9943ea3152561b3dc8348fd752c850f3e95`. Read `UPSTREAM.md`; licenses are included.
@@ -240,7 +259,7 @@ Verification (2026-10-15):
 
 (The 77-token truncation noted here during M2 is fixed in M3, see fact 11.)
 
-## 8. M3 — background jobs, prompt quality, decomposition fixes (complete, uncommitted, 2026-10-16)
+## 8. M3 — background jobs, prompt quality, decomposition fixes (complete, 2026-10-16)
 
 - **Background job queue** (`src/pipeline/jobs.py`): `/generate` returns 202 + job; one worker
   thread runs jobs in order. `GET /jobs`, `GET /jobs/<id>` (state, stage, overall progress, per-step
@@ -299,7 +318,61 @@ Ideas / next steps (owner hasn't prioritised these):
   (above the head → `headwear`), so the rig and Cubism get real part names.
 - The ownership margin (30) and the colour-error threshold (60) were tuned on four images.
 
-## 9. How to work in this repo
+## 9. M4 — release readiness (2026-10-17, committed)
+
+The owner asked for "a good initial product" to push to GitHub. Done:
+
+- **Security** (fact 20): no CORS/SocketIO, validated model ids everywhere, validated briefs,
+  Host check, production + 127.0.0.1 defaults. `tests/test_api.py`.
+- **Removed** the pre-M1 expression/accessory editor (+ its API, `main.js`), and modules nothing
+  imported (`live2d_exporter`, `sam_segmentation`, `rigging` placeholder, `model_versioning`,
+  `prompt_history`, `controlnet_expression`, `expression_animator`), `run-simple.bat`,
+  `download_model.py`, `DEPLOYMENT.md`, `TROUBLESHOOTING.md` (described UI that no longer exists,
+  SD 1.5, and exposing this auth-less server publicly). Dropped flask-cors, flask-socketio,
+  python-socketio, opencv-python, pydantic.
+- **Install**: `run.bat` rewritten (Python 3.10–3.13 via `py`, reinstall when requirements.txt
+  changes — marker `.venv\kamyii-requirements.txt`, See-through offer remembered via
+  `engines\see-through.skip`, `--open`); `run.sh` to match; `.gitattributes` (bat CRLF, sh LF,
+  vendor byte-exact); ML stack pinned (fact 19); GitHub Actions CI.
+- **Default checkpoint Animagine XL 4.0** (diffusers format, 18 files, 6.9 GB, 366 s download);
+  its model-card score tags are added only for it (`MODEL_PRESETS[...]["positive"/"negative"]`).
+  The Studio says "Downloading … (first use only, ~7 GB)" when the repo isn't cached.
+- **Use my artwork**: `/api/generation/upload` + Studio toggle; the job imports the image
+  instead of running SDXL (`GenerationRequest.reference_image`, then saved as `"upload"`).
+- **Decomposition**: degenerate facial-detail filter (fact 17), leftover split (fact 18).
+- **Failures** with artwork are saved as `failed` and shown in the Gallery with the error and a
+  **Retry layers** button (`POST /api/generation/retry/<id>` re-queues the artwork as an upload).
+- Studio: LoRA weight slider (saved LoRA + weight restored on reopen), a notice when See-through
+  isn't installed (`/model-status` → `seethrough`), reopened results select the checkpoint used.
+- README rewritten with screenshots (`docs/images/`).
+
+Verification (2026-10-17, owner's laptop):
+
+- 33 pytest (also in a fresh torch-free venv) + 2 node tests pass.
+- Real run through the API with the default checkpoint (never loaded before):
+  `b2189989-a5b9-4bb1-beca-6d829aedc8c3`, seed 20261017, Euler a, CFG 5, upper body —
+  completed in 981 s (a clean-clone install was competing for disk/CPU; 653 s is the quiet
+  baseline). No fp16-VAE black image. Its See-through `nose` was the degenerate case of fact 17.
+- All five real results rebuilt with the M4 post-processing: composite-vs-source mean error
+  0.26–0.50 (p99 ≤ 15) over the composite's opaque pixels; Live Preview 19–23 animated parts,
+  every facial diagnostic detected.
+- Clean clone (`git clone` into a temp dir, `run.bat` with redirected input): `.venv` with
+  `py -3.12`, CUDA torch + requirements, See-through installed from scratch, server healthy in
+  real mode with Animagine as default. Pulling the pinning commit and re-running reinstalled
+  exactly the pinned packages, skipped torch and the See-through prompt, and started.
+  (Redirected input never reached `set /p`, so the prompts took their defaults — see section 6.)
+- Studio upload flow in the browser (re-uploading run C's artwork): toggle, thumbnail, the job
+  skipped the image stage and completed in 723 s → 18 layers, the witch hat now `headwear`.
+- Gallery retry on a staged failed result: queued, Studio re-attached, cancelled during
+  See-through start-up; no files left in `outputs/_uploads`, GPU back to idle.
+
+Ideas / next steps:
+
+- Human checks: Cubism import, physical webcam, `run.bat` prompts typed by hand, `run.sh` on Linux.
+- Persist the job queue (an overnight batch does not survive a restart).
+- More real runs (full body) to extend `ORDER_PRIORS`; thresholds still tuned on five images.
+
+## 10. How to work in this repo
 
 - Smallest complete change; reuse existing code and libraries; no speculative abstractions.
 - Every non-trivial logic change gets a small GPU-free pytest (monkeypatch GPU parts like

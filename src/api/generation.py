@@ -148,7 +148,6 @@ def upload_artwork():
 
     Same response as /generate; the image stage imports the file instead of running SDXL.
     """
-    import uuid
     from PIL import Image, UnidentifiedImageError
 
     upload = request.files.get('image')
@@ -169,14 +168,36 @@ def upload_artwork():
     if min(image.size) < 256:
         return jsonify({'success': False, 'error': 'The image is too small; use at least 256 px on each side'}), 400
     image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)  # See-through works at 1024-1280 anyway
+    title = Path(upload.filename).stem.strip()[:60] or 'artwork'
+    return _queue_artwork(image, f'Uploaded artwork: {title}')
+
+
+@generation_bp.route('/retry/<model_id>', methods=['POST'])
+def retry_model(model_id: str):
+    """Queue a fresh decomposition of a saved result's artwork (e.g. after a failed run)."""
+    from PIL import Image
+
+    model_dir = model_dir_for(model_id)
+    base = model_dir / 'base_image.png' if model_dir else None
+    if not base or not base.is_file():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    metadata_path = model_dir / 'metadata.json'
+    saved = (load_json(metadata_path).get('request') or {}) if metadata_path.exists() else {}
+    with Image.open(base) as img:
+        image = img.convert('RGB')
+    return _queue_artwork(image, saved.get('prompt') or f'Artwork of {model_id[:8]}')
+
+
+def _queue_artwork(image, prompt: str):
+    """Queue a job that decomposes ``image`` as is (its image stage imports instead of generating)."""
+    import uuid
 
     uploads = config.OUTPUT_DIR / '_uploads'
     uploads.mkdir(parents=True, exist_ok=True)
     path = uploads / f'{uuid.uuid4().hex}.png'
     image.save(path)
-    title = Path(upload.filename).stem.strip()[:60] or 'artwork'
     job = job_queue.submit(GenerationRequest(
-        prompt=f'Uploaded artwork: {title}', width=image.width, height=image.height,
+        prompt=prompt, width=image.width, height=image.height,
         style='anime', framing='upper_body', reference_image=str(path)))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
@@ -393,6 +414,7 @@ def get_model_status():
             })
 
         # Check real model
+        from src.core import seethrough
         model_loaded = assembly_line.image_generator.pipeline is not None
 
         return jsonify({
@@ -401,6 +423,7 @@ def get_model_status():
             'device': assembly_line.image_generator.device,
             'model_name': assembly_line.image_generator.model_name,
             'is_dummy': False,
+            'seethrough': seethrough.available(),
             'message': 'Model loaded and ready' if model_loaded else 'Model not loaded yet - will load on first generation'
         })
 

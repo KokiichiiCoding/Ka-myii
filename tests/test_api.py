@@ -122,3 +122,18 @@ def test_cancelling_a_queued_upload_deletes_its_file(tmp_path):
     queue.cancel(job.id)
     gate.set()
     assert job.state == "cancelled" and not art.exists()
+
+
+def test_retry_requeues_a_saved_results_artwork(client, tmp_path):
+    import json
+    from PIL import Image
+
+    folder = tmp_path / "outputs" / "abc-123"
+    Image.new("RGB", (400, 600), "white").save(folder / "base_image.png")
+    (folder / "metadata.json").write_text(json.dumps({"status": "failed", "request": {"prompt": "1girl, witch"}}))
+    r = client.post("/api/generation/retry/abc-123")
+    assert r.status_code == 202
+    req = client.submitted[-1]
+    assert req.prompt == "1girl, witch" and req.reference_image and (req.width, req.height) == (400, 600)
+    assert client.post("/api/generation/retry/..").status_code == 404
+    assert client.post("/api/generation/retry/missing").status_code == 404

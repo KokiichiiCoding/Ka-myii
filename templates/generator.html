@@ -108,6 +108,10 @@
           <select id="lora"></select>
           <div class="hint">Drop <code>.safetensors</code> LoRAs into <code>models/loras</code>.</div>
         </div>
+        <div class="field">
+          <div class="slider-head"><label for="loraWeight">LoRA weight</label><span class="val" id="loraWeightVal">1</span></div>
+          <input type="range" id="loraWeight" min="0" max="2" value="1" step="0.05">
+        </div>
       </div>
       </div>
 
@@ -127,6 +131,14 @@
     <!-- ============ RIGHT: canvas + results ============ -->
     <div>
       <!-- Demo / model notice -->
+      <div id="seethroughNotice" class="alert-km alert-warn hidden" style="margin-bottom:16px;">
+        <i class="fas fa-circle-info"></i>
+        <div style="flex:1;">
+          <strong>See-through isn't installed.</strong> Characters will get a rough geometric split
+          instead of clean, inpainted layers. Install it (8 GB+ NVIDIA GPU, ~9 GB) with
+          <code>.venv\Scripts\python.exe scripts\install_seethrough.py</code>, then restart Ka-myii.
+        </div>
+      </div>
       <div id="modelNotice" class="alert-km alert-warn hidden" style="margin-bottom:16px;">
         <i class="fas fa-circle-info"></i>
         <div style="flex:1;">

@@ -23,7 +23,7 @@
       art.append(image);
       const body = document.createElement('div'); body.className = 'model-card-body';
       const status = document.createElement('span'); status.className = 'eyebrow';
-      status.textContent = model.status === 'completed' ? 'CHARACTER / READY' : `CHARACTER / ${model.status || 'UNKNOWN'}`;
+      status.textContent = model.status === 'completed' ? 'CHARACTER / READY' : `CHARACTER / ${(model.status || 'unknown').toUpperCase()}`;
       const name = document.createElement('h2'); name.textContent = model.name?.startsWith('model_') ? `Study ${model.name.slice(6).toUpperCase()}` : (model.name || `Character ${model.id.slice(0,8)}`);
       const details = document.createElement('p'); details.className = 'card-meta';
       details.textContent = `${model.assets?.filter(a=>a.layer_type!=='character').length || 0} layers · ${new Date(model.created_at).toLocaleDateString()}`;
@@ -33,6 +33,22 @@
       if (model.status === 'completed' && model.assets?.length) links.unshift([`/preview/${id}`, 'Live Preview ↗', 'btn btn-primary']);
       for (const [href,label,cls] of links) {
         const link = document.createElement('a'); link.href=href;link.textContent=label;link.className=cls;actions.append(link);
+      }
+      if (model.status === 'failed') {
+        // Decompose the saved artwork again as a new character (e.g. after running out of memory).
+        const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-primary'; retry.textContent = 'Retry layers';
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          try {
+            const {data} = await axios.post(`/api/generation/retry/${id}`);
+            if (!data.success) throw new Error(data.error);
+            location.href = '/generator';  // the Studio re-attaches to the queued job
+          } catch (error) {
+            $('galleryError').textContent = 'Could not queue a retry. Is the server still running?';
+            $('galleryError').hidden = false; retry.disabled = false;
+          }
+        });
+        actions.prepend(retry);
       }
       const more = document.createElement('details'); more.className = 'model-more';
       const summary = document.createElement('summary'); summary.textContent = 'More options';
