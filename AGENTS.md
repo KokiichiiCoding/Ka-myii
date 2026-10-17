@@ -198,7 +198,9 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
   (a public-domain portrait rotated ±0.3 rad, 4 s period). Camera on, offline FaceMesh found the
   face, tracked roll oscillated −0.47…+0.35 in phase with the video, the rig's head followed, the
   `headwear` hat moved with the head, 51 fps, no console errors. Read state via
-  `window.Anime25D.state()` (`camLive`, `cam.az`, `pose.angleX`). A physical webcam is untried.
+  `window.Anime25D.state()` (`camLive`, `cam.az`, `pose.angleX`). The same fake device's beeping
+  microphone drove lip sync (mouth 0 until the mic started, then 0.4–0.99 with the beeps).
+  A physical webcam/microphone is untried.
 - `run.sh` was run on Ubuntu 24.04 under WSL (2026-10-17): venv check message, torch 2.8 + pinned
   requirements, demo server, a demo job with package + preview PSD downloads. Real generation /
   See-through on Linux are untested. macOS can only use demo mode (no CUDA).
