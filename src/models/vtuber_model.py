@@ -17,6 +17,7 @@ class GenerationStatus(Enum):
     MODEL_ASSEMBLY = "model_assembly"
     RIGGING = "rigging"
     COMPLETED = "completed"
+    SKETCH = "sketch"  # artwork only; its layers can be separated later
     FAILED = "failed"
 
 
@@ -56,7 +57,9 @@ class GenerationRequest:
     # Advanced options
     include_rigging: bool = False
     custom_layers: Optional[List[str]] = None
-    reference_image: Optional[str] = None
+    reference_image: Optional[str] = None  # server-side path of artwork to import instead of generating
+    sketch: bool = False  # stop after the artwork (~1 min) instead of separating layers
+    source: str = "prompt"  # prompt | upload (the user's file) | artwork (re-separating saved artwork)
 
 
 @dataclass

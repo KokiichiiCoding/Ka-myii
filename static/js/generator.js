@@ -31,7 +31,9 @@
     modelNotice: $('modelNotice'),
     sourceChips: $('sourceChips'), uploadFields: $('uploadFields'), promptFields: $('promptFields'),
     artwork: $('artwork'), artworkThumb: $('artworkThumb'),
+    sketchBtn: $('sketchBtn'), separateBtn: $('separateBtn'),
   };
+  let shownModelId = null; // the result on the canvas
 
   let selectedStyle = 'vtuber';
   let configModel = null; // the checkpoint an empty model_id resolves to on the server
@@ -53,7 +55,7 @@
         if (data.success) {
           const saved = data.model.request;
           if (saved) {
-            els.prompt.value = saved.reference_image ? '' : (saved.prompt || '');
+            els.prompt.value = saved.source === 'upload' ? '' : (saved.prompt || '');
             els.negative.value = saved.negative_prompt || '';
             $('framing').value = saved.framing || 'full_body';
             if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
@@ -115,6 +117,7 @@
         }
         els.uploadFields.classList.toggle('hidden', source !== 'upload');
         els.promptFields.classList.toggle('hidden', source === 'upload');
+        els.sketchBtn.classList.toggle('hidden', source === 'upload');
         setGenerateLabel(busy);
       };
     }
@@ -126,6 +129,15 @@
     };
     els.form.onsubmit = onGenerate;
     els.regenBtn.onclick = resetToForm;
+    els.separateBtn.onclick = async () => {
+      if (!shownModelId) return;
+      els.separateBtn.disabled = true;
+      try {
+        const { data } = await axios.post(`/api/generation/retry/${encodeURIComponent(shownModelId)}`);
+        if (busy) refreshQueue(); else track(data.job);
+      } catch (err) { showError(err.response?.data?.error || 'Could not queue the separation'); }
+      finally { els.separateBtn.disabled = false; }
+    };
     els.cancelBtn.onclick = async () => {
       if (!currentTaskId) return;
       els.cancelBtn.disabled = true;
@@ -345,7 +357,7 @@
     } else {
       const prompt = els.prompt.value.trim();
       if (!prompt) { els.prompt.focus(); return; }
-      send = briefSender(prompt);
+      send = briefSender(prompt, e.submitter === els.sketchBtn);
     }
 
     // While a job is on the canvas, new briefs join the queue instead of replacing it.
@@ -369,7 +381,7 @@
     }
   }
 
-  function briefSender(prompt) {
+  function briefSender(prompt, sketch) {
     const seedRaw = parseInt(els.seed.value, 10);
     const payload = {
       prompt,
@@ -385,6 +397,7 @@
       clip_skip: parseInt(els.clipSkip.value, 10),
       seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
       loras: els.lora.value ? [{ id: els.lora.value, weight: parseFloat(els.loraWeight.value) }] : null,
+      sketch,
     };
     if (!busy) lastSeed = payload.seed;
     return () => axios.post('/api/generation/generate', payload);
@@ -420,7 +433,12 @@
     els.metaStatus.textContent = model.status || 'completed';
     els.metaLayers.textContent = (meta.layers || []).length || '—';
     els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
-    els.metaSeed.textContent = model.request?.reference_image ? '—' : (model.request?.seed ?? lastSeed ?? 'random');
+    els.metaSeed.textContent = model.request?.source === 'upload' ? '—' : (model.request?.seed ?? lastSeed ?? 'random');
+    // A sketch has artwork only: offer to separate it instead of the layer downloads.
+    shownModelId = mid;
+    const sketch = model.status === 'sketch';
+    els.separateBtn.classList.toggle('hidden', !sketch);
+    for (const el of [$('livePreview'), els.dlPackage, els.dlPsd, els.dlOra]) el.classList.toggle('hidden', sketch);
     els.resultMeta.classList.remove('hidden');
 
     $('livePreview').href = `/preview/${encodeURIComponent(mid)}`;
@@ -429,7 +447,7 @@
     els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
 
     els.generateBtn.disabled = false;
-    await loadLayers(mid);
+    if (sketch) els.layerPanel.classList.add('hidden'); else await loadLayers(mid);
   }
 
   async function loadLayers(mid) {

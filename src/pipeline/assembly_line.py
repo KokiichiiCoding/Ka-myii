@@ -110,7 +110,7 @@ class AssemblyLine:
         start_time = time.time()
 
         # Resolve randomness once so the saved brief can reproduce this character.
-        if request.seed is None and not request.reference_image:
+        if request.seed is None and request.source == "prompt":
             from secrets import randbits
             request = replace(request, seed=randbits(31))
 
@@ -137,15 +137,21 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._enter_stage(task_id, "image", "Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            if request.reference_image:  # the user's own artwork, validated by the upload route
+            if request.reference_image:  # artwork the upload/separate routes validated and staged
                 base_image_path = model_output_dir / "base_image.png"
                 shutil.move(request.reference_image, base_image_path)
-                model.request = request = replace(request, reference_image="upload")
-                model.metadata["source"] = "upload"
+                model.request = request = replace(request, reference_image=None)
+                model.metadata["source"] = request.source
             else:
                 self._ensure_generator(request)
                 base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
+            if request.sketch:
+                # No preview.png: the Gallery and Studio fall back to the artwork itself.
+                model.status = GenerationStatus.SKETCH
+                model.generation_time = time.time() - start_time
+                logger.info("Sketch %s ready in %.0fs", model.id, model.generation_time)
+                return model
             logger.info(f"Base image generated: {base_image_path}")
 
             # Stage 2: Asset Separation

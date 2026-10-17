@@ -42,7 +42,7 @@ Read this whole file before changing anything. Keep it up to date when you finis
 | App venv | `.venv\` (Python 3.12; torch 2.8.0+cu128, diffusers 0.37.0, transformers 5.0.0, accelerate 1.13.0, peft, Flask, psd-tools, pytoshop). `run.bat` now prefers an existing `.venv\`, then `venv\`, and creates `.venv\` otherwise. |
 | See-through engine | `engines\see-through\` (git clone, pinned commit `df019de`), its own venv `engines\see-through\.venv\` (torch 2.8.0+cu128, bitsandbytes 0.49.2, diffusers 0.37.0, transformers 5.0.0) |
 | Model weights | See-through NF4 weights in the HF cache (`%USERPROFILE%\.cache\huggingface\hub`, repos `24yearsold/seethroughv0.0.2_layerdiff3d_nf4`, `24yearsold/seethroughv0.0.1_marigold_nf4`). SDXL checkpoint `models\checkpoints\novaAnimeXL_ilV140.safetensors` (Illustrious-based; a **hard link** to the owner's ComfyUI copy — never delete or modify it in place). |
-| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 35 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
+| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests -q` → 37 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
 | Re-run layer post-processing on old results (no GPU) | `.\.venv\Scripts\python.exe scripts\rebuild_layers.py <model_id> [...]` — re-separates from the saved See-through PSD, regenerates PSD/ORA/Cubism/preview/metadata |
 | Demo mode (no GPU) | `.\.venv\Scripts\python.exe app.py --dummy --host 127.0.0.1 --port 5055` |
 | Real mode | `.\.venv\Scripts\python.exe app.py --port 5055` (add `--open` to launch the browser). Production + 127.0.0.1 are now the defaults; `FLASK_ENV=development` brings back the Werkzeug reloader, which **restarts the server (killing a running job) whenever you edit a file**. Templates are cached in production: restart after editing them. |
@@ -362,6 +362,13 @@ The owner asked for "a good initial product" to push to GitHub. Done:
   instead of running SDXL (`GenerationRequest.reference_image`, then saved as `"upload"`).
 - **Decomposition**: degenerate facial-detail filter (fact 17), leftover split (fact 18).
 - **Persistent queue**: unfinished real-mode jobs survive a restart (`outputs/_queue.json`).
+- **Sketches**: `sketch: true` stops a job after the artwork (status `sketch`, no preview.png, the
+  Gallery/Studio show base_image). **Separate layers** = `POST /retry/<id>`, which re-queues the
+  saved artwork with the original brief (seed, checkpoint, sampler…) as `source: "artwork"`.
+  `GenerationRequest.source` is `prompt | upload | artwork`; the Studio hides the prompt only for
+  uploads. 99 s for a sketch including a cold checkpoint load.
+- **Rename**: `POST /rename/<id>` stores `display_name` in metadata.json (Gallery inline edit,
+  Live Preview title); package file names never change.
 - **Failures** with artwork are saved as `failed` and shown in the Gallery with the error and a
   **Retry layers** button (`POST /api/generation/retry/<id>` re-queues the artwork as an upload).
 - Studio: LoRA weight slider (saved LoRA + weight restored on reopen), a notice when See-through
@@ -370,7 +377,7 @@ The owner asked for "a good initial product" to push to GitHub. Done:
 
 Verification (2026-10-17, owner's laptop):
 
-- 35 pytest (also in a fresh torch-free venv) + 2 node tests pass.
+- 37 pytest (also in a fresh torch-free venv) + 2 node tests pass.
 - Real run through the API with the default checkpoint (never loaded before):
   `b2189989-a5b9-4bb1-beca-6d829aedc8c3`, seed 20261017, Euler a, CFG 5, upper body —
   completed in 981 s (a clean-clone install was competing for disk/CPU; 653 s is the quiet

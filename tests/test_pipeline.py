@@ -266,6 +266,20 @@ def test_leftover_above_the_chin_becomes_headwear():
     merged = np.asarray(kept[-1][1])[..., 3]
     assert merged[5, 5] == 255 and merged[5, 50] == 255 and merged[85, 50] == 0  # stars + ears
 
+    # Headphones resting on a hoodie cross the chin; the piece is kept whole (it follows the body).
+    hoodie = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    hoodie.paste((200, 30, 30, 255), (0, 70, 100, 100))
+    hoodie.paste((20, 20, 20, 255), (20, 50, 30, 75))  # headphone cup reaching above the chin (60)
+    pieces = dict(AssetSeparator._split_leftover(hoodie, [("face", face)]))
+    assert set(pieces) == {"leftover"} and np.asarray(pieces["leftover"])[55, 25, 3] == 255
+    # ...and when it outweighs See-through's topwear (seen: just the drawstrings), it IS the top.
+    strings = Image.new("RGBA", (100, 100), (0, 0, 0, 0)); strings.paste((220, 40, 40, 255), (45, 75, 48, 95))
+    kept = [("back hair", Image.new("RGBA", (100, 100))), ("topwear", strings), ("face", face)]
+    AssetSeparator._place_leftover(kept, hoodie)
+    assert [n for n, _ in kept] == ["back hair", "topwear", "face"]
+    top = np.asarray(kept[1][1])[..., 3]
+    assert top[90, 10] == 255 and top[80, 46] == 255
+
 
 def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     """physics3.json lacked Meta.EffectiveForces / PhysicsDictionary (required by Live2D's schema)
@@ -298,3 +312,22 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     assert used <= declared and all(re.fullmatch(r"[A-Za-z0-9_]+", p) for p in declared)
     assert {o["Destination"]["Id"] for s in settings for o in s["Output"]} == \
         {"ParamHairBack", "ParamHairFront", "ParamAccessorySway"}  # no physics for the real ears
+
+
+
+def test_large_leftover_is_kept_when_the_segmentation_mask_is_trusted():
+    """See-through gave a red hoodie (45 % of the image) to no layer; the leftover then exceeded
+    the 25 % cap meant for colour-key failures and the body vanished from the layers."""
+    import numpy as np
+    from PIL import Image
+    from src.core.asset_separator import AssetSeparator
+
+    source = Image.new("RGBA", (100, 100), (255, 255, 255, 255))
+    source.paste((200, 30, 30, 255), (0, 40, 100, 100))  # hoodie: 60 % of the canvas, most of the border
+    source.paste((255, 255, 255, 255), (48, 50, 52, 54))  # background seen through a gap
+    fg = np.zeros((100, 100), np.uint8); fg[40:] = 255
+    covered = np.zeros((100, 100), bool)
+    assert AssetSeparator._leftover_layer(source, fg, covered) is None  # colour key: distrust
+    layer = np.asarray(AssetSeparator._leftover_layer(source, fg, covered, trust_mask=True))[..., 3]
+    assert layer[70, 20] == 255 and layer[10, 50] == 0  # the hoodie is kept...
+    assert layer[52, 50] == 0  # ...but not the white gap: the mask's background says white

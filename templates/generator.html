@@ -119,6 +119,9 @@
       <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
         <i class="fas fa-wand-magic-sparkles"></i> Create character
       </button>
+      <button type="submit" class="btn btn-lg" id="sketchBtn" style="margin-top:10px;" title="Artwork only, about a minute. Separate its layers later from the result or the Gallery.">
+        <i class="fas fa-pencil"></i> Sketch artwork only
+      </button>
       <button type="button" class="btn btn-lg hidden" id="cancelBtn" style="margin-top:10px;">
         <i class="fas fa-stop"></i> Cancel
       </button>
@@ -177,6 +180,7 @@
             <div class="meta-card"><div class="k">Seed</div><div class="v" id="metaSeed">—</div></div>
           </div>
           <div class="result-actions">
+            <button type="button" class="btn btn-primary hidden" id="separateBtn"><i class="fas fa-layer-group"></i> Separate layers</button>
             <a class="btn btn-primary" id="livePreview">Live Preview ↗</a>
             <a class="btn" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
             <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>

@@ -84,6 +84,7 @@ def test_upload_queues_the_users_artwork(client, tmp_path):
     assert r.status_code == 202
     req = client.submitted[-1]
     assert req.prompt == "Uploaded artwork: my oc" and (req.width, req.height) == (2048, 1024)
+    assert req.source == "upload" and not req.sketch
     with Image.open(req.reference_image) as saved:
         assert saved.mode == "RGB" and saved.getpixel((5, 5)) == (255, 255, 255)  # transparency → white
 
@@ -103,10 +104,10 @@ def test_uploaded_artwork_runs_the_pipeline_without_sdxl(tmp_path):
     Image.new("RGB", (320, 480), "white").save(art)
     line = AssemblyLine(output_base_dir=tmp_path / "out", use_dummy_generators=True)
     line.image_generator.generate = None  # must not be called
-    model = line.generate_model(GenerationRequest(prompt="Uploaded artwork: oc", reference_image=str(art)))
+    model = line.generate_model(GenerationRequest(prompt="Uploaded artwork: oc", reference_image=str(art), source="upload"))
     assert model.status.value == "completed" and not art.exists()
     assert (tmp_path / "out" / model.id / "base_image.png").exists()
-    assert model.request.reference_image == "upload" and model.request.seed is None
+    assert model.request.reference_image is None and model.request.seed is None
     assert model.metadata["source"] == "upload"
 
 
@@ -131,11 +132,14 @@ def test_retry_requeues_a_saved_results_artwork(client, tmp_path):
 
     folder = tmp_path / "outputs" / "abc-123"
     Image.new("RGB", (400, 600), "white").save(folder / "base_image.png")
-    (folder / "metadata.json").write_text(json.dumps({"status": "failed", "request": {"prompt": "1girl, witch"}}))
+    (folder / "metadata.json").write_text(json.dumps({"status": "sketch", "request": {
+        "prompt": "1girl, witch", "seed": 42, "sampler": "Euler a", "sketch": True, "not_a_field": 1}}))
     r = client.post("/api/generation/retry/abc-123")
     assert r.status_code == 202
     req = client.submitted[-1]
     assert req.prompt == "1girl, witch" and req.reference_image and (req.width, req.height) == (400, 600)
+    # The separated character keeps the sketch's brief, but is a full run now.
+    assert req.seed == 42 and req.sampler == "Euler a" and req.source == "artwork" and not req.sketch
     assert client.post("/api/generation/retry/..").status_code == 404
     assert client.post("/api/generation/retry/missing").status_code == 404
 
@@ -151,3 +155,15 @@ def test_rename_sets_and_clears_a_display_name(client, tmp_path):
     assert "display_name" not in json.loads(meta.read_text())
     assert client.post("/api/generation/rename/..", json={"name": "x"}).status_code == 404
     assert len(client.post("/api/generation/rename/abc-123", json={"name": "x" * 500}).get_json()["display_name"]) == 60
+
+
+def test_sketch_stops_after_the_artwork(tmp_path):
+    from src.models.vtuber_model import GenerationRequest
+    from src.pipeline.assembly_line import AssemblyLine
+
+    line = AssemblyLine(output_base_dir=tmp_path / "out", use_dummy_generators=True)
+    line.asset_separator.separate = None  # must not be called
+    model = line.generate_model(GenerationRequest(prompt="1girl", width=256, height=384, steps=2, sketch=True))
+    folder = tmp_path / "out" / model.id
+    assert model.status.value == "sketch" and isinstance(model.request.seed, int)
+    assert (folder / "base_image.png").exists() and not (folder / "preview.png").exists() and not (folder / "assets").exists()

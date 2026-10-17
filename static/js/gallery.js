@@ -29,15 +29,17 @@
       const details = document.createElement('p'); details.className = 'card-meta';
       details.textContent = `${model.assets?.filter(a=>a.layer_type!=='character').length || 0} layers · ${new Date(model.created_at).toLocaleDateString()}`;
       if (model.status === 'failed') details.textContent = `Failed: ${model.error_message || 'unknown error'} · ${new Date(model.created_at).toLocaleDateString()}`;
+      if (model.status === 'sketch') details.textContent = `Sketch · ${new Date(model.created_at).toLocaleDateString()}`;
       const actions = document.createElement('div'); actions.className = 'actions';
       const links = [[`/generator?model=${id}`, 'Artwork & layers', 'btn'], [`/api/generation/download/${id}`, 'Export', 'btn']];
       if (model.status === 'completed' && model.assets?.length) links.unshift([`/preview/${id}`, 'Live Preview ↗', 'btn btn-primary']);
       for (const [href,label,cls] of links) {
         const link = document.createElement('a'); link.href=href;link.textContent=label;link.className=cls;actions.append(link);
       }
-      if (model.status === 'failed') {
-        // Decompose the saved artwork again as a new character (e.g. after running out of memory).
-        const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-primary'; retry.textContent = 'Retry layers';
+      if (model.status === 'failed' || model.status === 'sketch') {
+        // Separate the saved artwork as a new character (a sketch, or after running out of memory).
+        const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-primary';
+        retry.textContent = model.status === 'sketch' ? 'Separate layers' : 'Retry layers';
         retry.addEventListener('click', async () => {
           retry.disabled = true;
           try {
