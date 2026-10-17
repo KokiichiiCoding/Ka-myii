@@ -387,6 +387,24 @@ def delete_model(model_id: str):
         }), 500
 
 
+@generation_bp.route('/rename/<model_id>', methods=['POST'])
+def rename_model(model_id: str):
+    """Set (or with an empty name, clear) a character's display name. Files keep their names."""
+    model_dir = model_dir_for(model_id)
+    metadata_path = model_dir / 'metadata.json' if model_dir else None
+    if not metadata_path or not metadata_path.exists():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    data = request.get_json(silent=True) or {}
+    name = ' '.join(''.join(ch for ch in str(data.get('name') or '') if ch.isprintable()).split())[:60]
+    metadata = load_json(metadata_path)
+    if name:
+        metadata['display_name'] = name
+    else:
+        metadata.pop('display_name', None)
+    save_json(metadata, metadata_path)
+    return jsonify({'success': True, 'display_name': name or None})
+
+
 @generation_bp.route('/model-status', methods=['GET'])
 def get_model_status():
     """

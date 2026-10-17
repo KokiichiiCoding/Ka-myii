@@ -85,7 +85,8 @@ def create_app(use_dummy_generators: bool = False):
             abort(404)
         from src.utils.helpers import load_json
         metadata_path = model_dir / 'metadata.json'
-        name = load_json(metadata_path).get('name', model_id[:8]) if metadata_path.exists() else model_id[:8]
+        metadata = load_json(metadata_path) if metadata_path.exists() else {}
+        name = metadata.get('display_name') or metadata.get('name', model_id[:8])
         if name.startswith('model_'):
             name = 'Study ' + name[6:].upper()
         return render_template('preview.html', model_id=model_id, character_name=name,

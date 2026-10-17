@@ -179,3 +179,5 @@ footer.km-foot span{max-width:180px;text-align:right}
 .tc-series span:first-child{color:var(--accent-3)}
 .tc-character span:first-child{color:var(--good)}
 .tc-meta span:first-child{color:var(--warn)}
+
+.rename-input{width:100%;font:inherit;font-size:22px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:3px;padding:4px 8px;margin:4px 0}

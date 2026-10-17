@@ -3,9 +3,10 @@
   'use strict';
   const $ = id => document.getElementById(id);
   let models = [];
+  const displayName = (m) => m.display_name || (m.name?.startsWith('model_') ? `Study ${m.name.slice(6).toUpperCase()}` : (m.name || `Character ${m.id.slice(0,8)}`));
   function render() {
     const query = $('searchInput').value.trim().toLowerCase();
-    const shown = models.filter(m => `${m.name} ${m.id} ${m.status} ${m.request?.prompt || ''}`.toLowerCase().includes(query));
+    const shown = models.filter(m => `${displayName(m)} ${m.name} ${m.id} ${m.status} ${m.request?.prompt || ''}`.toLowerCase().includes(query));
     const grid = $('galleryGrid');
     grid.replaceChildren();
     $('collectionCount').textContent = `${shown.length} of ${models.length} characters`;
@@ -24,7 +25,7 @@
       const body = document.createElement('div'); body.className = 'model-card-body';
       const status = document.createElement('span'); status.className = 'eyebrow';
       status.textContent = model.status === 'completed' ? 'CHARACTER / READY' : `CHARACTER / ${(model.status || 'unknown').toUpperCase()}`;
-      const name = document.createElement('h2'); name.textContent = model.name?.startsWith('model_') ? `Study ${model.name.slice(6).toUpperCase()}` : (model.name || `Character ${model.id.slice(0,8)}`);
+      const name = document.createElement('h2'); name.textContent = displayName(model);
       const details = document.createElement('p'); details.className = 'card-meta';
       details.textContent = `${model.assets?.filter(a=>a.layer_type!=='character').length || 0} layers · ${new Date(model.created_at).toLocaleDateString()}`;
       if (model.status === 'failed') details.textContent = `Failed: ${model.error_message || 'unknown error'} · ${new Date(model.created_at).toLocaleDateString()}`;
@@ -65,7 +66,26 @@
           $('galleryError').hidden=false; remove.disabled=false;
         }
       });
-      more.append(summary,remove);
+      const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
+      rename.addEventListener('click', () => {
+        const input = document.createElement('input'); input.type = 'text'; input.maxLength = 60;
+        input.value = displayName(model); input.className = 'rename-input'; input.setAttribute('aria-label', 'Character name');
+        name.replaceWith(input); input.focus(); input.select();
+        let done = false;
+        const finish = async (save) => {
+          if (done) return; done = true;
+          if (save && input.value.trim() !== displayName(model)) {
+            try {
+              const {data} = await axios.post(`/api/generation/rename/${id}`, {name: input.value});
+              if (data.success) model.display_name = data.display_name;
+            } catch (error) { $('galleryError').textContent = 'Could not rename the character.'; $('galleryError').hidden = false; }
+          }
+          render();
+        };
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); });
+        input.addEventListener('blur', () => finish(true));
+      });
+      more.append(summary,rename,remove);
       body.append(status,name,details,actions,more);card.append(art,body);grid.append(card);
     }
     if (models.length && !shown.length) {

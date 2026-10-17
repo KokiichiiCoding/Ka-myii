@@ -138,3 +138,16 @@ def test_retry_requeues_a_saved_results_artwork(client, tmp_path):
     assert req.prompt == "1girl, witch" and req.reference_image and (req.width, req.height) == (400, 600)
     assert client.post("/api/generation/retry/..").status_code == 404
     assert client.post("/api/generation/retry/missing").status_code == 404
+
+
+def test_rename_sets_and_clears_a_display_name(client, tmp_path):
+    import json
+    meta = tmp_path / "outputs" / "abc-123" / "metadata.json"
+    meta.write_text(json.dumps({"id": "abc-123", "name": "model_abcd1234"}))
+    r = client.post("/api/generation/rename/abc-123", json={"name": "  Mira \n the\x00 witch  "})
+    assert r.status_code == 200 and r.get_json()["display_name"] == "Mira the witch"
+    assert json.loads(meta.read_text())["display_name"] == "Mira the witch"
+    client.post("/api/generation/rename/abc-123", json={"name": ""})
+    assert "display_name" not in json.loads(meta.read_text())
+    assert client.post("/api/generation/rename/..", json={"name": "x"}).status_code == 404
+    assert len(client.post("/api/generation/rename/abc-123", json={"name": "x" * 500}).get_json()["display_name"]) == 60
