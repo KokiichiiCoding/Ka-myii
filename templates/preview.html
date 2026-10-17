@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base href="{{ url_for('static', filename='vendor/anime25d/') }}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Local animated character preview">
+<title>Ka-myii — Live Preview</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23421827'/%3E%3Ctext x='16' y='23' font-size='20' font-family='sans-serif' font-weight='800' text-anchor='middle' fill='%23ff9cb0'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="lib/app.css?v=m2">
+<link rel="stylesheet" href="/static/css/preview.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/gallery"><span class="brand-mark" aria-hidden="true">K</span><div><h1>Ka-myii</h1><span>LIVE PREVIEW / <span id="appVersion">v2.0</span></span></div></a>
+  <div class="sample-actions" role="group" aria-label="サンプルを読み込む">
+    
+    
+  </div>
+  <span id="modelName">Loading character…</span>
+  <button class="obs-chip" type="button" id="obsChip" hidden title="OBS連携の設定を開く">OBS</button>
+  <a class="collection-link" href="/generator?model={{ model_id }}">← Artwork & exports</a><div class="header-actions">
+    <button class="btn primary" type="button" id="btnOpen" title="Open PSD（Ctrl+O）">Open PSD</button>
+    <div class="btn-group" role="group" aria-label="履歴">
+      <button class="btn icon" type="button" id="btnUndo" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+      <button class="btn icon" type="button" id="btnRedo" disabled title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+    </div>
+    <button class="btn" type="button" id="btnPause" data-model-action disabled aria-pressed="false" title="Pause（Space）">Pause</button>
+    <button class="btn" type="button" id="btnPng" data-model-action disabled title="現在のポーズをTransparentPNGで保存">Save PNG</button>
+    <button class="btn" type="button" id="btnRecord" data-model-action disabled title="モーションを動画で保存">Record</button>
+    <button class="btn" type="button" id="btnReadme">Help</button>
+  </div>
+</header>
+<div id="main">
+  <div id="stage" class="checker">
+    <div id="viewport">
+      <canvas id="cv" aria-label="アバターのプレビュー"></canvas>
+      <svg id="overlay" aria-hidden="true"></svg>
+    </div>
+    <div id="stageLabel">PREVIEW <span>Checkerboard is not included in exports</span></div>
+    <div id="stageTools">
+      <span id="recBadge" hidden>● REC</span>
+      <button class="stage-btn" type="button" id="btnAnchorMode" data-model-action disabled aria-pressed="false" title="Edit anchors（E）">Edit anchors</button>
+      <button class="stage-btn" type="button" id="btnZoom" title="ホイールで拡大、ドラッグで移動。クリックでFit表示（F）">Fit</button>
+      <span id="fps" aria-hidden="true"></span>
+    </div>
+    <div id="anchorHint" hidden>Drag anchors to adjust. Arrow keys: 1px; Shift: 10px. Esc to finish.</div>
+    <div id="camPreview" hidden>
+      <canvas id="camCanvas" width="192" height="144" aria-label="カメラ映像のプレビュー"></canvas>
+      <button type="button" id="camPreviewClose" aria-label="カメラ映像を隠す" title="カメラ映像を隠す">✕</button>
+    </div>
+    <div id="appStatus" role="status" aria-live="polite">PSDを読み込むと編集を始められます</div>
+    <div id="drop">
+      <div class="drop-symbol" aria-hidden="true">＋</div><p class="eyebrow">YOUR ART, IN MOTION</p>
+      <h2>Preparing your character.</h2>
+      <p>Your artwork is being prepared for motion.<br>Eyes, mouth and hair are rigged locally in your browser.</p>
+      <p class="drop-hint">RGB / 8-bit PSD · up to 128 MB<br>You can also drop a layered PSD here.</p>
+      <div class="btns drop-actions">
+        <button class="btn primary" type="button" id="btnFile">Choose a local PSD</button>
+        
+        
+        <button class="btn" type="button" id="btnReadme2">Engine documentation</button>
+      </div>
+      <div class="progress" id="loadProgress" hidden><span></span></div>
+      <p id="dropStatus"></p>
+      <button class="btn" type="button" id="btnCancelLoad" hidden>Cancel loading</button>
+      <input type="file" id="fileInput" accept=".psd,.json,application/json" hidden>
+    </div>
+  </div>
+  <div id="panel">
+    <div class="preview-note">All motion runs on your device. Camera and microphone stay off until you enable them.</div><div class="panel-head"><div><p class="eyebrow">WORKSPACE</p><h2>Bring it to life</h2></div>
+      <div class="panel-head-actions"><button class="btn compact" type="button" id="btnShortcuts" title="Keyboard shortcuts（?）">Shortcuts</button><button class="btn compact" type="button" id="btnCollapse">Collapse all</button></div></div>
+    <label class="search-box">Search controls<input type="search" id="controlSearch" placeholder="Eyes, hair, mouth, layers…" autocomplete="off"></label>
+    <p id="searchEmpty" hidden>No matching controls</p>
+
+    <section class="sec" data-sec="auto"><h2>Animation</h2>
+      <div class="toggles">
+        <button type="button" class="tg on" id="tgIdle">Breathing</button>
+        <button type="button" class="tg on" id="tgBlink">Auto blink</button>
+        <button type="button" class="tg on" id="tgRand">Look around</button>
+        <button type="button" class="tg on" id="tgTalk">Demo speech</button>
+        <button type="button" class="tg" id="tgCam">Use camera</button>
+        <button type="button" class="tg" id="tgMouse">Follow pointer</button>
+        <button type="button" class="tg" id="tgMic">Use microphone</button>
+        <button type="button" class="tg on" id="tgPhys">Hair physics</button>
+      </div>
+    </section>
+    <section class="sec" data-sec="preset"><h2>Expressions</h2>
+      <div class="btns presets">
+        <button class="btn" type="button" data-preset="neutral">Neutral<kbd>1</kbd></button>
+        <button class="btn" type="button" data-preset="smile">Smile<kbd>2</kbd></button>
+        <button class="btn" type="button" data-preset="usume">Soft eyes<kbd>3</kbd></button>
+        <button class="btn" type="button" data-preset="surprise">Surprised<kbd>4</kbd></button>
+        <button class="btn" type="button" data-preset="jito">Unimpressed<kbd>5</kbd></button>
+        <button class="btn" type="button" data-preset="winkL">Wink left<kbd>6</kbd></button>
+        <button class="btn" type="button" data-preset="winkR">Wink right<kbd>7</kbd></button>
+      </div>
+      <p class="section-hint">Press the same expression again to clear.<kbd>0</kbd>  clears the expression.</p>
+    </section>
+    <section class="sec" data-sec="head"><h2>Head pose</h2>
+      <div class="row"><label>Turn</label><input type="range" id="pAngleX" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Nod</label><input type="range" id="pAngleY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Tilt</label><input type="range" id="pAngleZ" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="eyes"><h2>Eyes</h2>
+      <div class="row"><label>Left eye open</label><input type="range" id="pEyeL" min="0" max="1" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Right eye open</label><input type="range" id="pEyeR" min="0" max="1" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Look sideways</label><input type="range" id="pEyeX" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Look up / down</label><input type="range" id="pEyeY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Iris scale</label><input type="range" id="pIrisScale" min="0.5" max="1.3" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Closed eye scale / L</label><input type="range" id="pEyeScaleL" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Closed eye scale / R</label><input type="range" id="pEyeScaleR" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Close threshold</label><input type="range" id="pEyeEase" min="0" max="1" step="0.01" value="0.3"><span class="val"></span></div>
+      <div class="row"><label>Closed eye height</label><input type="range" id="pEyeCY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Closed eye angle</label><input type="range" id="pEyeCAng" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="brow"><h2>Brows</h2>
+      <div class="row"><label>Brow height</label><input type="range" id="pBrow" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Symmetric brow angle</label><input type="range" id="pBrowAngSym" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Left brow angle</label><input type="range" id="pBrowAngL" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Right brow angle</label><input type="range" id="pBrowAngR" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="mouth"><h2>Mouth</h2>
+      <div class="row"><label>Open</label><input type="range" id="pMouthOpen" min="0" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Smile</label><input type="range" id="pMouthForm" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Closed mouth height</label><input type="range" id="pMouthCY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Close threshold</label><input type="range" id="pMouthEase" min="0" max="1" step="0.01" value="0.72"><span class="val"></span></div>
+      <div class="row"><label>Closed mouth angle</label><input type="range" id="pMouthCAng" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Mouth scale</label><input type="range" id="pMouthScale" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="bangs"><h2>Front hair</h2>
+      <div class="row"><label>Sway</label><input type="range" id="pFhAmp" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
+      <div class="row"><label>Softness</label><input type="range" id="pFhSoft" min="0" max="2" step="0.01" value="0.4"><span class="val"></span></div>
+      <div class="row"><label>Left section</label><input type="range" id="pBangL" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Center section</label><input type="range" id="pBangC" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Right section</label><input type="range" id="pBangR" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="body"><h2>Body & physics</h2>
+      <div class="row"><label>Body tilt</label><input type="range" id="pBody" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Arm height</label><input type="range" id="pArmY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Arm position</label><input type="range" id="pArmPos" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Breathing sway</label><input type="range" id="pBust" min="0" max="4" step="0.01" value="2.5"><span class="val"></span></div>
+      <div class="row"><label>Breathing origin</label><input type="range" id="pBustY" min="-3" max="3" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Back hair sway</label><input type="range" id="pPhysAmp" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
+      <div class="row"><label>Back hair softness</label><input type="range" id="pSoft" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
+      <div class="row"><label>Accessory sway</label><input type="range" id="pAccAmp" min="0" max="3" step="0.01" value="1"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="anchors"><h2>Reference points</h2>
+      <p class="section-hint">Drag reference points on the artwork to refine the eye, mouth and neck placement.</p>
+      <div class="btns">
+        <button class="btn" type="button" id="btnAnchorMode2" data-model-action disabled aria-pressed="false">Edit anchors<kbd>E</kbd></button>
+        <button class="btn" type="button" id="btnResetAnchors" data-model-action disabled>Reset anchors</button>
+      </div>
+      <p class="section-hint" id="anchorSummary"></p>
+    </section>
+    <section class="sec" data-sec="tracking"><h2>Camera & microphone</h2>
+      <p class="section-hint">Camera tracking follows your head, eyes, mouth, eyebrows and smile. Video stays in this browser.</p>
+      <div class="btns">
+        <button class="btn" type="button" id="btnCalibrate" disabled title="Look forward with a relaxed expression while tracking is on">Calibrate neutral pose</button>
+        <button class="btn" type="button" id="btnClearCalibration" disabled>Clear calibration</button>
+      </div>
+      <p class="section-hint" id="calibrationStatus">Using default calibration</p>
+      <label class="check-row"><input type="checkbox" id="prefLinkEyes"> Link both eyes (off allows winking)</label>
+      <label class="check-row"><input type="checkbox" id="prefTrackBrow"> Track eyebrows</label>
+      <label class="check-row"><input type="checkbox" id="prefTrackSmile"> Track smile</label>
+      <label class="check-row"><input type="checkbox" id="prefCamPreview"> Show camera thumbnail</label>
+      <div class="row"><label>Head sensitivity</label><input type="range" id="prefHeadGain" min="0.3" max="2" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Blink sensitivity</label><input type="range" id="prefEyeGain" min="0.5" max="2" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Mouth sensitivity</label><input type="range" id="prefMouthGain" min="0.5" max="2.5" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Brow sensitivity</label><input type="range" id="prefBrowGain" min="0" max="2" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Gaze sensitivity</label><input type="range" id="prefGazeGain" min="0" max="2" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Smoothing</label><input type="range" id="prefSmoothing" min="0" max="1" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Mic gain</label><input type="range" id="prefMicGain" min="0.25" max="4" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Noise gate</label><input type="range" id="prefMicGate" min="0" max="0.5" step="0.01"><span class="val"></span></div>
+      <div class="meter" id="micMeter" title="Microphone level; line shows noise gate"><span class="meter-level"></span><span class="meter-gate"></span></div>
+    </section>
+    <section class="sec" data-sec="obs"><h2>OBS連携</h2>
+      <p class="section-hint" id="obsStatus">start_obs.bat（obs_server.py）で開くと、このブラウザで開いたPSD・調整・表情がOBSへAnimationで反映されます。</p>
+      <label class="check-row"><input type="checkbox" id="prefObsSync"> OBS表示へ同期する</label>
+      <div class="copy-row"><input type="text" id="obsUrl" readonly aria-label="OBSのブラウザソースURL"><button class="btn compact" type="button" id="btnCopyObsUrl">コピー</button></div>
+      <p class="section-hint">OBSの「ブラウザ」ソースに上のURLを設定します。幅・高さはPSDのサイズに合わせてください。</p>
+    </section>
+    <section class="sec" data-sec="export"><h2>Export</h2>
+      <div class="field-row"><label for="prefExportBg">Background</label><select id="prefExportBg"><option value="transparent">Transparent</option><option value="green">Green screen</option><option value="dark">Dark</option></select></div>
+      <div class="field-row"><label for="prefRecSeconds">Recording length</label><select id="prefRecSeconds"><option value="3">3s</option><option value="5">5s</option><option value="10">10s</option><option value="15">15s</option><option value="30">30s</option><option value="60">60s</option></select></div>
+      <div class="field-row"><label for="prefRecFps">Frame rate</label><select id="prefRecFps"><option value="30">30fps</option><option value="60">60fps</option></select></div>
+      <div class="field-row"><label for="prefRecFormat">Format</label><select id="prefRecFormat"></select></div>
+      <div class="btns">
+        <button class="btn" type="button" id="btnPng2" data-model-action disabled>Save PNG</button>
+        <button class="btn" type="button" id="btnRecord2" data-model-action disabled>Start recording</button>
+      </div>
+      <p class="section-hint" id="recordStatus">Record at the original artwork size. Transparent WebM works in Chrome and Edge.</p>
+    </section>
+    <section class="sec" data-sec="save"><h2>Save & settings</h2>
+      <div class="btns">
+        <button class="btn" type="button" id="btnSaveSettings" data-model-action disabled title="Save in this browser (Ctrl+S)">Save adjustments</button>
+        <button class="btn" type="button" id="btnRestoreSettings" data-model-action disabled>Restore saved settings</button>
+        <button class="btn" type="button" id="btnExportSettings" data-model-action disabled>Export settings</button>
+        <button class="btn" type="button" id="btnImportSettings" data-model-action disabled>Import settings</button>
+        <button class="btn" type="button" id="btnReset">Reset sliders</button>
+        <button class="btn" type="button" id="btnSavePsd" data-model-action disabled>Save cleaned PSD</button>
+      </div>
+      <p class="section-hint">Save adjustments in this browser, or export a settings file to use elsewhere.</p>
+      <input type="file" id="settingsInput" accept=".json,application/json" hidden>
+      <div id="utilStatus" role="status" aria-live="polite"></div>
+    </section>
+    <section class="sec" data-sec="background"><h2>Background</h2>
+      <div class="btns">
+        <button class="btn" type="button" data-bg="checker">Transparent</button>
+        <button class="btn" type="button" data-bg="green">GB</button>
+        <button class="btn" type="button" data-bg="dark">Dark</button>
+      </div>
+    </section>
+    <section class="sec" data-sec="layers"><h2>Layers</h2><p class="section-hint">Back to front. Drag to reorder; expand a layer to adjust opacity and depth.</p><button class="btn compact" type="button" id="btnResetLayers" data-model-action disabled>Reset layers</button><div id="layers"><p class="section-hint">Layers appear after loading</p></div></section>
+    <section class="sec" data-sec="info"><h2>Model diagnostics</h2><div id="rigInfo">Loading character…</div><ul id="diagnostics"></ul></section>
+  </div>
+</div>
+<div class="overlay-dialog" id="readmeOverlay" role="dialog" aria-modal="true" aria-labelledby="readmeTitle"><div class="dialog-win">
+  <div class="dialog-head"><b id="readmeTitle">Help</b><button class="btn" type="button" id="readmeClose" aria-label="Close help">✕</button></div>
+  <div class="dialog-body" id="readmeBody"></div>
+</div></div>
+<div class="overlay-dialog" id="shortcutOverlay" role="dialog" aria-modal="true" aria-labelledby="shortcutTitle"><div class="dialog-win narrow">
+  <div class="dialog-head"><b id="shortcutTitle">Keyboard shortcuts</b><button class="btn" type="button" id="shortcutClose" aria-label="Close shortcuts">✕</button></div>
+  <div class="dialog-body"><table class="shortcut-table" id="shortcutTable"></table></div>
+</div></div>
+<script>window.KamyiiPreview = {psd: {{ preview_psd|tojson }}, name: {{ character_name|tojson }}};</script>
+<script src="lib/ag-psd.min.js"></script>
+<script src="lib/rigger.js"></script>
+<script src="lib/genericparts.js"></script>
+<script src="lib/runtime.js"></script>
+<script src="lib/face-features.js"></script>
+<script src="lib/renderer.js"></script>
+<script src="lib/devices.js"></script>
+<script src="lib/recorder.js"></script>
+<script src="lib/obs-sync.js"></script>
+<script src="lib/app.js?v=m2"></script>
+</body>
+</html>

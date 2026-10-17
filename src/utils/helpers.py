@@ -18,19 +18,24 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[Path] = None):
         log_level: Logging level
         log_file: Optional log file path
     """
+    from logging.handlers import RotatingFileHandler
+
     level = getattr(logging, log_level.upper(), logging.INFO)
 
     handlers = [logging.StreamHandler()]
 
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file))
+        handlers.append(RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"))
 
     logging.basicConfig(
         level=level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=handlers
     )
+    # The Studio polls its job every second; those request lines would bury everything else.
+    logging.getLogger("werkzeug").addFilter(
+        lambda record: not ("GET /api/generation/jobs" in record.getMessage() and '" 200 ' in record.getMessage()))
 
 
 def save_json(data: Dict[str, Any], file_path: Path):

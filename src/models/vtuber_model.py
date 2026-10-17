@@ -1,7 +1,7 @@
 """
 Data models for VTuber generation
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -38,12 +38,20 @@ class GenerationRequest:
     """Request for generating a VTuber model"""
     prompt: str
     negative_prompt: str = ""
-    style: str = "anime"
-    width: int = 512
-    height: int = 512
-    steps: int = 30
-    guidance_scale: float = 7.5
+    style: str = "vtuber"
+    width: int = 832
+    height: int = 1216
+    steps: int = 28
+    guidance_scale: float = 6.5
     seed: Optional[int] = None
+
+    # Modern generation controls (Stable-Diffusion-WebUI style)
+    model_id: Optional[str] = None      # checkpoint id / path; None = config default
+    sampler: Optional[str] = None       # e.g. "DPM++ 2M Karras"
+    clip_skip: Optional[int] = None
+    loras: Optional[List[Dict]] = None  # [{"path"/"id": str, "weight": float}]
+    batch_size: int = 1
+    framing: str = "full_body"  # upper_body gives facial parts more pixels
 
     # Advanced options
     include_rigging: bool = False
@@ -84,6 +92,7 @@ class VTuberModel:
         """Convert to dictionary for JSON serialization"""
         return {
             "id": self.id,
+            "request": asdict(self.request) if self.request else None,
             "name": self.name,
             "created_at": self.created_at.isoformat(),
             "status": self.status.value,
@@ -111,6 +120,11 @@ class VTuberModel:
             created_at=datetime.fromisoformat(data["created_at"]) if "created_at" in data else datetime.now(),
             status=GenerationStatus(data.get("status", "pending")),
         )
+
+        if data.get("request"):
+            from dataclasses import fields
+            keys = {f.name for f in fields(GenerationRequest)}
+            model.request = GenerationRequest(**{k: v for k, v in data["request"].items() if k in keys})
 
         if data.get("base_image_path"):
             model.base_image_path = Path(data["base_image_path"])

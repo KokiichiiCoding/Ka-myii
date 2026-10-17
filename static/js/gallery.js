@@ -1,248 +1,89 @@
-// Gallery Page JavaScript
-
-const api = window.KamyiiAPI;
-const utils = window.KamyiiUtils;
-
-// UI Elements
-const loadingGallery = document.getElementById('loadingGallery');
-const emptyGallery = document.getElementById('emptyGallery');
-const galleryGrid = document.getElementById('galleryGrid');
-const searchInput = document.getElementById('searchInput');
-const refreshBtn = document.getElementById('refreshBtn');
-
-// Stats elements
-const totalModelsSpan = document.getElementById('totalModels');
-const completedModelsSpan = document.getElementById('completedModels');
-const totalSizeSpan = document.getElementById('totalSize');
-const systemStatusSpan = document.getElementById('systemStatus');
-
-// State
-let allModels = [];
-
-// Load gallery on page load
-document.addEventListener('DOMContentLoaded', function() {
-    loadGallery();
-    loadStats();
-});
-
-// Refresh button
-refreshBtn.addEventListener('click', function() {
-    loadGallery();
-    loadStats();
-});
-
-// Search functionality
-searchInput.addEventListener('input', function() {
-    const query = this.value.toLowerCase();
-    filterModels(query);
-});
-
-// Load gallery
-async function loadGallery() {
-    showLoading();
-
-    try {
-        const result = await api.listModels();
-
-        if (result.success) {
-            allModels = result.models || [];
-
-            if (allModels.length === 0) {
-                showEmpty();
-            } else {
-                displayModels(allModels);
-            }
-        } else {
-            throw new Error(result.error || 'Failed to load models');
+/* The collection shares the same saved models and preview adapter as Studio. */
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  let models = [];
+  function render() {
+    const query = $('searchInput').value.trim().toLowerCase();
+    const shown = models.filter(m => `${m.name} ${m.id} ${m.status} ${m.request?.prompt || ''}`.toLowerCase().includes(query));
+    const grid = $('galleryGrid');
+    grid.replaceChildren();
+    $('collectionCount').textContent = `${shown.length} of ${models.length} characters`;
+    $('emptyGallery').hidden = models.length > 0;
+    grid.hidden = !models.length;
+    for (const model of shown) {
+      const id = encodeURIComponent(model.id);
+      const card = document.createElement('article');
+      card.className = 'model-card';
+      const art = document.createElement('a');
+      art.className = 'model-art'; art.href = `/generator?model=${id}`;
+      const image = document.createElement('img');
+      image.src = `/api/generation/preview/${id}`;
+      image.alt = model.name || 'Character artwork'; image.loading = 'lazy';
+      art.append(image);
+      const body = document.createElement('div'); body.className = 'model-card-body';
+      const status = document.createElement('span'); status.className = 'eyebrow';
+      status.textContent = model.status === 'completed' ? 'CHARACTER / READY' : `CHARACTER / ${(model.status || 'unknown').toUpperCase()}`;
+      const name = document.createElement('h2'); name.textContent = model.name?.startsWith('model_') ? `Study ${model.name.slice(6).toUpperCase()}` : (model.name || `Character ${model.id.slice(0,8)}`);
+      const details = document.createElement('p'); details.className = 'card-meta';
+      details.textContent = `${model.assets?.filter(a=>a.layer_type!=='character').length || 0} layers · ${new Date(model.created_at).toLocaleDateString()}`;
+      if (model.status === 'failed') details.textContent = `Failed: ${model.error_message || 'unknown error'} · ${new Date(model.created_at).toLocaleDateString()}`;
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const links = [[`/generator?model=${id}`, 'Artwork & layers', 'btn'], [`/api/generation/download/${id}`, 'Export', 'btn']];
+      if (model.status === 'completed' && model.assets?.length) links.unshift([`/preview/${id}`, 'Live Preview ↗', 'btn btn-primary']);
+      for (const [href,label,cls] of links) {
+        const link = document.createElement('a'); link.href=href;link.textContent=label;link.className=cls;actions.append(link);
+      }
+      if (model.status === 'failed') {
+        // Decompose the saved artwork again as a new character (e.g. after running out of memory).
+        const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'btn btn-primary'; retry.textContent = 'Retry layers';
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          try {
+            const {data} = await axios.post(`/api/generation/retry/${id}`);
+            if (!data.success) throw new Error(data.error);
+            location.href = '/generator';  // the Studio re-attaches to the queued job
+          } catch (error) {
+            $('galleryError').textContent = 'Could not queue a retry. Is the server still running?';
+            $('galleryError').hidden = false; retry.disabled = false;
+          }
+        });
+        actions.prepend(retry);
+      }
+      const more = document.createElement('details'); more.className = 'model-more';
+      const summary = document.createElement('summary'); summary.textContent = 'More options';
+      const remove = document.createElement('button'); remove.type='button'; remove.textContent='Delete character';
+      remove.addEventListener('click', async () => {
+        if (!confirm(`Delete ${name.textContent} and all its generated files? This cannot be undone.`)) return;
+        remove.disabled=true;
+        try {
+          const {data}=await axios.delete(`/api/generation/delete/${id}`);
+          if (!data.success) throw new Error(data.error);
+          models=models.filter(m=>m.id!==model.id); render();
+        } catch (error) {
+          $('galleryError').textContent='Could not delete the character. Try refreshing the collection.';
+          $('galleryError').hidden=false; remove.disabled=false;
         }
-    } catch (error) {
-        console.error('Failed to load gallery:', error);
-        alert('Failed to load gallery: ' + error);
-        showEmpty();
+      });
+      more.append(summary,remove);
+      body.append(status,name,details,actions,more);card.append(art,body);grid.append(card);
     }
-}
-
-// Load stats
-async function loadStats() {
+    if (models.length && !shown.length) {
+      const message=document.createElement('p');message.textContent='No characters match your search.';grid.append(message);
+    }
+  }
+  async function load() {
+    $('loadingGallery').hidden = false;$('galleryError').hidden = true;
     try {
-        const result = await api.getStats();
-
-        if (result.success) {
-            const stats = result.stats;
-
-            totalModelsSpan.textContent = stats.total_models || 0;
-            completedModelsSpan.textContent = stats.status_distribution?.completed || 0;
-            totalSizeSpan.textContent = utils.formatFileSize(stats.total_size_mb || 0);
-            systemStatusSpan.innerHTML = '<span class="badge bg-success">Online</span>';
-        }
+      const {data} = await axios.get('/api/generation/list');
+      if (!data.success) throw new Error(data.error || 'Could not open the collection.');
+      models = data.models || [];render();
     } catch (error) {
-        console.error('Failed to load stats:', error);
-        systemStatusSpan.innerHTML = '<span class="badge bg-danger">Error</span>';
-    }
-}
-
-// Show loading state
-function showLoading() {
-    loadingGallery.style.display = 'block';
-    emptyGallery.style.display = 'none';
-    galleryGrid.style.display = 'none';
-}
-
-// Show empty state
-function showEmpty() {
-    loadingGallery.style.display = 'none';
-    emptyGallery.style.display = 'block';
-    galleryGrid.style.display = 'none';
-}
-
-// Display models
-function displayModels(models) {
-    loadingGallery.style.display = 'none';
-    emptyGallery.style.display = 'none';
-    galleryGrid.style.display = 'flex';
-
-    galleryGrid.innerHTML = '';
-
-    models.forEach(function(model) {
-        const card = createModelCard(model);
-        galleryGrid.appendChild(card);
-    });
-}
-
-// Create model card
-function createModelCard(model) {
-    const col = document.createElement('div');
-    col.className = 'col-md-4 fade-in';
-
-    const previewUrl = api.getPreviewUrl(model.id);
-    const downloadUrl = api.getDownloadUrl(model.id);
-
-    col.innerHTML = `
-        <div class="card h-100">
-            <img src="${previewUrl}" class="card-img-top" alt="Model Preview"
-                 style="height: 250px; object-fit: cover;"
-                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27100%27 height=%27100%27%3E%3Crect fill=%27%23ddd%27 width=%27100%27 height=%27100%27/%3E%3Ctext fill=%27%23999%27 x=%2750%25%27 y=%2750%25%27 text-anchor=%27middle%27 dy=%27.3em%27%3ENo Preview%3C/text%3E%3C/svg%3E'">
-            <div class="card-body">
-                <h6 class="card-title">${model.name || 'Model ' + model.id.substring(0, 8)}</h6>
-                <p class="card-text">
-                    <small class="text-muted">
-                        <i class="fas fa-clock"></i> ${new Date(model.created_at).toLocaleDateString()}
-                    </small>
-                </p>
-                <p class="card-text">
-                    <span class="badge ${utils.getStatusBadge(model.status)}">
-                        ${utils.getStatusName(model.status)}
-                    </span>
-                </p>
-                <p class="card-text">
-                    <small>
-                        <i class="fas fa-layer-group"></i> ${model.assets?.length || 0} assets
-                        <br>
-                        <i class="fas fa-stopwatch"></i> ${utils.formatDuration(model.generation_time)}
-                    </small>
-                </p>
-            </div>
-            <div class="card-footer bg-white border-0">
-                <div class="btn-group w-100 mb-2" role="group">
-                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="viewModel('${model.id}')">
-                        <i class="fas fa-eye"></i> View
-                    </button>
-                    <a href="/editor/${model.id}" class="btn btn-sm btn-outline-info">
-                        <i class="fas fa-edit"></i> Edit
-                    </a>
-                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteModel('${model.id}')">
-                        <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-                <a href="${downloadUrl}" class="btn btn-sm btn-success w-100">
-                    <i class="fas fa-download"></i> Download Model
-                </a>
-            </div>
-        </div>
-    `;
-
-    return col;
-}
-
-// Filter models
-function filterModels(query) {
-    if (!query) {
-        displayModels(allModels);
-        return;
-    }
-
-    const filtered = allModels.filter(function(model) {
-        return (
-            model.id.toLowerCase().includes(query) ||
-            (model.name && model.name.toLowerCase().includes(query)) ||
-            model.status.toLowerCase().includes(query)
-        );
-    });
-
-    if (filtered.length === 0) {
-        galleryGrid.innerHTML = `
-            <div class="col-12 text-center py-5">
-                <i class="fas fa-search fa-3x text-muted mb-3"></i>
-                <p class="text-muted">No models found matching "${query}"</p>
-            </div>
-        `;
-    } else {
-        displayModels(filtered);
-    }
-}
-
-// View model details
-window.viewModel = async function(modelId) {
-    try {
-        const result = await api.getModelStatus(modelId);
-
-        if (result.success) {
-            const model = result.model;
-
-            let details = `
-Model Details
-═════════════
-
-ID: ${model.id}
-Name: ${model.name || 'N/A'}
-Status: ${utils.getStatusName(model.status)}
-Created: ${new Date(model.created_at).toLocaleString()}
-Generation Time: ${utils.formatDuration(model.generation_time)}
-
-Assets: ${model.assets?.length || 0}
-${model.assets?.map(a => `  • ${a.layer_type}`).join('\n') || ''}
-
-Base Image: ${model.base_image_path ? '✓' : '✗'}
-Final Model: ${model.final_model_path ? '✓' : '✗'}
-            `.trim();
-
-            alert(details);
-        }
-    } catch (error) {
-        alert('Failed to load model details: ' + error);
-    }
-};
-
-// Delete model
-window.deleteModel = async function(modelId) {
-    if (!confirm('Are you sure you want to delete this model? This cannot be undone.')) {
-        return;
-    }
-
-    try {
-        const result = await api.deleteModel(modelId);
-
-        if (result.success) {
-            alert('Model deleted successfully');
-            loadGallery();
-            loadStats();
-        } else {
-            throw new Error(result.error || 'Failed to delete model');
-        }
-    } catch (error) {
-        alert('Failed to delete model: ' + error);
-    }
-};
-
-// Initialize
-console.log('Gallery page initialized');
+      $('galleryError').textContent = 'Could not open your collection. Check that the local server is running, then refresh.';
+      $('galleryError').hidden = false;
+    } finally { $('loadingGallery').hidden = true; }
+  }
+  $('searchInput').addEventListener('input',render);
+  $('refreshBtn').addEventListener('click',load);
+  load();
+})();

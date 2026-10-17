@@ -1,404 +1,494 @@
-// Generator Page JavaScript
+// Ka-myii Studio — generation controls, live progress, layer studio, downloads.
+(function () {
+  'use strict';
 
-const api = window.KamyiiAPI;
-const utils = window.KamyiiUtils;
+  const $ = (id) => document.getElementById(id);
+  let currentTaskId = null;
+  let pollTimer = null;
+  const pageTitle = document.title;
+  let lastSeed = null;
+  let busy = false;
 
-// State
-let currentModelId = null;
-let socket = null;
-let currentTaskId = null;
+  // ---- element refs ----
+  const els = {
+    form: $('genForm'), prompt: $('prompt'), negative: $('negative'),
+    styleChips: $('styleChips'), model: $('model'), modelHint: $('modelHint'),
+    sampler: $('sampler'), resolution: $('resolution'),
+    steps: $('steps'), stepsVal: $('stepsVal'), cfg: $('cfg'), cfgVal: $('cfgVal'),
+    seed: $('seed'), randSeed: $('randSeed'), reuseSeed: $('reuseSeed'),
+    clipSkip: $('clipSkip'), clipSkipVal: $('clipSkipVal'),
+    width: $('width'), widthVal: $('widthVal'), height: $('height'), heightVal: $('heightVal'),
+    lora: $('lora'), loraWeight: $('loraWeight'), loraWeightVal: $('loraWeightVal'), advToggle: $('advToggle'), advBody: $('advBody'), advChevron: $('advChevron'),
+    generateBtn: $('generateBtn'), cancelBtn: $('cancelBtn'),
+    queuePanel: $('queuePanel'), queueList: $('queueList'), queueNote: $('queueNote'),
+    canvasEmpty: $('canvasEmpty'), resultImg: $('resultImg'),
+    overlay: $('progressOverlay'), pLabel: $('progressLabel'), pFill: $('progressFill'), pEta: $('progressEta'),
+    resultMeta: $('resultMeta'), metaStatus: $('metaStatus'), metaLayers: $('metaLayers'),
+    metaTime: $('metaTime'), metaSeed: $('metaSeed'),
+    dlPackage: $('dlPackage'), dlPsd: $('dlPsd'), dlOra: $('dlOra'), regenBtn: $('regenBtn'),
+    layerPanel: $('layerPanel'), layerGrid: $('layerGrid'), layerCount: $('layerCount'),
+    errorPanel: $('errorPanel'), errorMsg: $('errorMsg'),
+    modelNotice: $('modelNotice'),
+    sourceChips: $('sourceChips'), uploadFields: $('uploadFields'), promptFields: $('promptFields'),
+    artwork: $('artwork'), artworkThumb: $('artworkThumb'),
+  };
 
-// Initialize WebSocket connection for progress updates
-try {
-    if (typeof io !== 'undefined') {
-        socket = io('/progress');
+  let selectedStyle = 'vtuber';
+  let configModel = null; // the checkpoint an empty model_id resolves to on the server
+  let source = 'prompt'; // or 'upload': decompose the user's own artwork instead of generating
 
-        socket.on('connect', function() {
-            console.log('Connected to progress tracking');
-        });
-
-        socket.on('disconnect', function() {
-            console.log('Disconnected from progress tracking');
-        });
-
-        socket.on('progress_update', function(data) {
-            updateProgress(data);
-        });
-
-        console.log('WebSocket progress tracking initialized');
-    } else {
-        console.warn('Socket.IO not available - progress tracking disabled');
+  // ---- init ----
+  document.addEventListener('DOMContentLoaded', async () => {
+    bindControls();
+    await loadOptions();
+    await refreshModelNotice();
+    addUIEnhancements();
+    refreshQueue();
+    setInterval(refreshQueue, 3000);
+    if (await resumeActiveJob()) return;
+    const savedId = new URLSearchParams(location.search).get('model');
+    if (savedId) {
+      try {
+        const {data} = await axios.get(`/api/generation/status/${encodeURIComponent(savedId)}`);
+        if (data.success) {
+          const saved = data.model.request;
+          if (saved) {
+            els.prompt.value = saved.reference_image ? '' : (saved.prompt || '');
+            els.negative.value = saved.negative_prompt || '';
+            $('framing').value = saved.framing || 'full_body';
+            if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
+            for (const [key, value] of [['steps',saved.steps],['cfg',saved.guidance_scale],['width',saved.width],['height',saved.height],['clipSkip',saved.clip_skip]]) {
+              if (value != null) { els[key].value=value; els[key+'Val'].textContent=value; }
+            }
+            const usedModel = saved.model_id || configModel;
+            if ([...els.model.options].some(o=>o.value===usedModel)) els.model.value=usedModel;
+            if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
+            const lora = saved.loras?.[0];
+            if (lora && [...els.lora.options].some(o=>o.value===(lora.id || lora.path))) {
+              els.lora.value = lora.id || lora.path;
+              els.loraWeight.value = lora.weight ?? 1; els.loraWeightVal.textContent = els.loraWeight.value;
+            }
+            const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
+            if (resolution) els.resolution.value=resolution.value;
+            if (saved.style) selectedStyle=saved.style;
+            for (const chip of els.styleChips.children) {
+              const active=chip.textContent===selectedStyle;
+              chip.classList.toggle('active',active); chip.setAttribute('aria-pressed',String(active));
+            }
+            updateModelHint();
+          }
+          els.canvasEmpty.classList.add('hidden');
+          await showResult({model_id:savedId, model:data.model});
+        }
+      } catch (err) { showError('This character could not be opened. Return to the collection and try again.'); }
     }
-} catch (error) {
-    console.warn('Failed to initialize WebSocket:', error);
-}
+  });
 
-// UI Elements
-const form = document.getElementById('generationForm');
-const generateBtn = document.getElementById('generateBtn');
+  function bindControls() {
+    els.steps.oninput = () => (els.stepsVal.textContent = els.steps.value);
+    els.cfg.oninput = () => (els.cfgVal.textContent = els.cfg.value);
+    els.clipSkip.oninput = () => (els.clipSkipVal.textContent = els.clipSkip.value);
+    els.loraWeight.oninput = () => (els.loraWeightVal.textContent = els.loraWeight.value);
+    els.width.oninput = () => (els.widthVal.textContent = els.width.value);
+    els.height.oninput = () => (els.heightVal.textContent = els.height.value);
+    els.randSeed.onclick = () => (els.seed.value = Math.floor(Math.random() * 2147483647));
+    els.reuseSeed.onclick = () => { if (lastSeed != null) els.seed.value = lastSeed; };
+    els.advToggle.onclick = () => {
+      els.advBody.classList.toggle('hidden');
+      els.advToggle.setAttribute('aria-expanded', String(!els.advBody.classList.contains('hidden')));
+      els.advChevron.classList.toggle('fa-chevron-down');
+      els.advChevron.classList.toggle('fa-chevron-up');
+    };
+    els.resolution.onchange = () => {
+      const opt = els.resolution.selectedOptions[0];
+      if (opt && opt.dataset.w) {
+        els.width.value = opt.dataset.w; els.widthVal.textContent = opt.dataset.w;
+        els.height.value = opt.dataset.h; els.heightVal.textContent = opt.dataset.h;
+      }
+    };
+    els.model.onchange = updateModelHint;
+    for (const chip of els.sourceChips.children) {
+      chip.onclick = () => {
+        source = chip.dataset.source;
+        for (const c of els.sourceChips.children) {
+          c.classList.toggle('active', c === chip); c.setAttribute('aria-pressed', String(c === chip));
+        }
+        els.uploadFields.classList.toggle('hidden', source !== 'upload');
+        els.promptFields.classList.toggle('hidden', source === 'upload');
+        setGenerateLabel(busy);
+      };
+    }
+    els.artwork.onchange = () => {
+      const file = els.artwork.files[0];
+      if (els.artworkThumb.src) URL.revokeObjectURL(els.artworkThumb.src);
+      els.artworkThumb.classList.toggle('hidden', !file);
+      if (file) els.artworkThumb.src = URL.createObjectURL(file);
+    };
+    els.form.onsubmit = onGenerate;
+    els.regenBtn.onclick = resetToForm;
+    els.cancelBtn.onclick = async () => {
+      if (!currentTaskId) return;
+      els.cancelBtn.disabled = true;
+      els.pLabel.textContent = 'Cancelling…';
+      try { await axios.post(`/api/generation/jobs/${currentTaskId}/cancel`); }
+      catch (e) { els.cancelBtn.disabled = false; }
+    };
+  }
 
-// State containers
-const initialState = document.getElementById('initialState');
-const loadingState = document.getElementById('loadingState');
-const resultState = document.getElementById('resultState');
-const errorState = document.getElementById('errorState');
+  async function loadOptions() {
+    try {
+      const { data } = await axios.get('/api/generation/options');
+      if (!data.success) return;
 
-// Form inputs
-const promptInput = document.getElementById('prompt');
-const negativePromptInput = document.getElementById('negativePrompt');
-const styleSelect = document.getElementById('style');
-const widthInput = document.getElementById('width');
-const heightInput = document.getElementById('height');
-const stepsInput = document.getElementById('steps');
-const guidanceScaleInput = document.getElementById('guidanceScale');
-const seedInput = document.getElementById('seed');
-const includeRiggingInput = document.getElementById('includeRigging');
+      // styles
+      els.styleChips.innerHTML = '';
+      data.styles.forEach((s) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip' + (s === selectedStyle ? ' active' : '');
+        chip.textContent = s;
+        chip.setAttribute('aria-pressed', String(s === selectedStyle));
+        chip.onclick = () => {
+          selectedStyle = s;
+          [...els.styleChips.children].forEach((c) => { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
+          chip.classList.add('active');
+          chip.setAttribute('aria-pressed', 'true');
+        };
+        els.styleChips.appendChild(chip);
+      });
 
-// Range value displays
-const stepsValue = document.getElementById('stepsValue');
-const guidanceScaleValue = document.getElementById('guidanceScaleValue');
+      // checkpoints
+      els.model.innerHTML = '';
+      data.checkpoints.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.id; o.textContent = c.name;
+        o.dataset.note = c.note || ''; o.dataset.source = c.source || '';
+        els.model.appendChild(o);
+      });
+      if (data.defaults.model) els.model.value = data.defaults.model;
+      configModel = data.defaults.config_model;
+      updateModelHint();
 
-// Result elements
-const previewImage = document.getElementById('previewImage');
-const modelIdSpan = document.getElementById('modelId');
-const modelStatusSpan = document.getElementById('modelStatus');
-const generationTimeSpan = document.getElementById('generationTime');
-const assetCountSpan = document.getElementById('assetCount');
+      // samplers
+      els.sampler.innerHTML = '';
+      data.samplers.forEach((s) => {
+        const o = document.createElement('option'); o.value = s; o.textContent = s;
+        els.sampler.appendChild(o);
+      });
+      els.sampler.value = data.defaults.sampler;
 
-// Buttons
-const downloadBtn = document.getElementById('downloadBtn');
-const viewDetailsBtn = document.getElementById('viewDetailsBtn');
-const generateAnotherBtn = document.getElementById('generateAnotherBtn');
-const retryBtn = document.getElementById('retryBtn');
+      // resolutions
+      els.resolution.innerHTML = '';
+      data.resolutions.forEach((r) => {
+        const o = document.createElement('option');
+        o.value = r.label; o.textContent = r.label; o.dataset.w = r.width; o.dataset.h = r.height;
+        els.resolution.appendChild(o);
+      });
 
-// Update range value displays
-stepsInput.addEventListener('input', function() {
-    stepsValue.textContent = this.value;
-});
+      // loras
+      els.lora.innerHTML = '<option value="">None</option>';
+      (data.loras || []).forEach((l) => {
+        const o = document.createElement('option'); o.value = l.id; o.textContent = l.name;
+        els.lora.appendChild(o);
+      });
 
-guidanceScaleInput.addEventListener('input', function() {
-    guidanceScaleValue.textContent = this.value;
-});
+      // defaults
+      els.steps.value = data.defaults.steps; els.stepsVal.textContent = data.defaults.steps;
+      els.cfg.value = data.defaults.guidance_scale; els.cfgVal.textContent = data.defaults.guidance_scale;
+      els.width.value = data.defaults.width; els.widthVal.textContent = data.defaults.width;
+      els.height.value = data.defaults.height; els.heightVal.textContent = data.defaults.height;
+      els.clipSkip.value = data.defaults.clip_skip; els.clipSkipVal.textContent = data.defaults.clip_skip;
+      els.negative.placeholder = (data.defaults.negative_prompt || '').slice(0, 90) + '…';
+    } catch (e) {
+      console.error('Failed to load options', e);
+    }
+  }
 
-// Form submission
-form.addEventListener('submit', async function(e) {
+  function updateModelHint() {
+    const opt = els.model.selectedOptions[0];
+    els.modelHint.textContent = opt ? (opt.dataset.note || '') : '';
+  }
+
+  async function refreshModelNotice() {
+    try {
+      const { data } = await axios.get('/api/generation/model-status');
+      els.modelNotice.classList.toggle('hidden', !data.is_dummy);
+      $('seethroughNotice').classList.toggle('hidden', data.is_dummy || data.seethrough !== false);
+      $('gpuNotice').classList.toggle('hidden', data.is_dummy || data.device === 'cuda');
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- background job tracking ----
+  // Generation runs as a server-side job; polling (not the socket) is the single source of truth,
+  // so a reloaded or reopened tab re-attaches to the running job.
+  async function resumeActiveJob() {
+    try {
+      const { data } = await axios.get('/api/generation/jobs');
+      const jobs = data.jobs || [];
+      const active = jobs.find((j) => j.state === 'running') || jobs.find((j) => j.state === 'queued');
+      if (!active) return false;
+      if (active.prompt && !els.prompt.value) els.prompt.value = active.prompt;
+      track(active);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function track(job) {
+    currentTaskId = job.id;
+    busy = true;
+    showProgress();
+    renderJob(job);
+    clearTimeout(pollTimer);
+    const tick = async () => {
+      if (currentTaskId !== job.id) return;
+      try {
+        const { data } = await axios.get(`/api/generation/jobs/${job.id}`);
+        const j = data.job;
+        renderJob(j);
+        if (j.state === 'completed') {
+          endJob();
+          const status = await axios.get(`/api/generation/status/${encodeURIComponent(j.model_id)}`);
+          await showResult({ model_id: j.model_id, model: status.data.model });
+          return;
+        }
+        if (j.state === 'failed') { endJob(); showError(j.error || 'Generation failed'); return; }
+        if (j.state === 'cancelled') { endJob(); els.overlay.classList.add('hidden'); resetToForm(); return; }
+      } catch (err) {
+        if (err.response?.status === 404) {
+          endJob();
+          showError('The server no longer knows this job — it was probably restarted. Finished characters are in the Gallery.');
+          return;
+        }
+        // Transient network hiccup: keep polling.
+      }
+      pollTimer = setTimeout(tick, 1000);
+    };
+    pollTimer = setTimeout(tick, 1000);
+  }
+
+  function renderJob(j) {
+    els.pFill.style.width = (j.progress || 0) + '%';
+    // A real run takes ~15 min; show progress on the tab while the user is elsewhere.
+    document.title = (j.state === 'queued' ? 'Queued' : Math.floor(j.progress || 0) + '%') + ' · ' + pageTitle;
+    if (j.state === 'queued') {
+      els.pLabel.textContent = j.position ? `Waiting in queue — ${j.position} ahead` : 'Waiting for the GPU…';
+    } else if (j.message) {
+      const step = { image: 'Step 1 of 3 · ', separate: 'Step 2 of 3 · ', assemble: 'Step 3 of 3 · ' }[j.stage] || '';
+      els.pLabel.textContent = step + j.message;
+    }
+    if (j.eta && j.eta > 1) {
+      const s = Math.round(j.eta);
+      els.pEta.textContent = (s >= 60 ? `about ${Math.floor(s / 60)}m ${s % 60}s` : `about ${s}s`) + ' left in this step';
+    } else { els.pEta.textContent = ''; }
+    els.cancelBtn.disabled = !!j.cancel_requested;
+  }
+
+  function endJob() {
+    clearTimeout(pollTimer);
+    document.title = pageTitle;
+    busy = false;
+    setGenerateLabel(false);
+    els.cancelBtn.classList.add('hidden');
+    els.cancelBtn.disabled = false;
+  }
+
+  // Every job except the one on the canvas, so several characters can be lined up overnight.
+  async function refreshQueue() {
+    let jobs;
+    try { jobs = (await axios.get('/api/generation/jobs')).data.jobs || []; } catch (e) { return; }
+    const others = jobs.filter((j) => (j.state === 'queued' || j.state === 'running') && j.id !== currentTaskId)
+      .sort((a, b) => (a.state === 'running' ? -1 : 0) - (b.state === 'running' ? -1 : 0) || (a.position ?? 0) - (b.position ?? 0));
+    els.queueList.innerHTML = '';
+    for (const j of others) {
+      const li = document.createElement('li');
+      li.className = 'queue-item';
+      const label = document.createElement('span');
+      label.className = 'q-prompt'; label.textContent = j.prompt; label.title = j.prompt;
+      const state = document.createElement('span');
+      state.className = 'q-state';
+      state.textContent = j.state === 'running' ? `${Math.floor(j.progress)}%` : `#${(j.position ?? 0) + 1}`;
+      const watch = document.createElement('button');
+      watch.type = 'button'; watch.title = 'Watch this job'; watch.setAttribute('aria-label', 'Watch ' + j.prompt);
+      watch.innerHTML = '<i class="fas fa-eye"></i>';
+      watch.onclick = () => { els.prompt.value = j.prompt; track(j); refreshQueue(); };
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.title = 'Cancel'; cancel.setAttribute('aria-label', 'Cancel ' + j.prompt);
+      cancel.innerHTML = '<i class="fas fa-xmark"></i>';
+      cancel.disabled = j.cancel_requested;
+      cancel.onclick = async () => { cancel.disabled = true; await axios.post(`/api/generation/jobs/${j.id}/cancel`).catch(() => {}); refreshQueue(); };
+      li.append(label, state, watch, cancel);
+      els.queueList.appendChild(li);
+    }
+    els.queuePanel.classList.toggle('hidden', !others.length && !els.queueNote.textContent);
+  }
+
+  function setGenerateLabel(queueing) {
+    els.generateBtn.innerHTML = queueing
+      ? '<i class="fas fa-plus"></i> Add to queue'
+      : source === 'upload'
+        ? '<i class="fas fa-layer-group"></i> Separate layers'
+        : '<i class="fas fa-wand-magic-sparkles"></i> Create character';
+  }
+
+  // ---- generate ----
+  let submitting = false;
+  async function onGenerate(e) {
     e.preventDefault();
-    await generateModel();
-});
-
-// Generate model
-async function generateModel() {
-    // Get form values
-    const params = {
-        prompt: promptInput.value.trim(),
-        negative_prompt: negativePromptInput.value.trim(),
-        style: styleSelect.value,
-        width: parseInt(widthInput.value),
-        height: parseInt(heightInput.value),
-        steps: parseInt(stepsInput.value),
-        guidance_scale: parseFloat(guidanceScaleInput.value),
-        seed: seedInput.value ? parseInt(seedInput.value) : null,
-        include_rigging: includeRiggingInput.checked
-    };
-
-    // Validate
-    if (!params.prompt) {
-        alert('Please enter a character description');
-        return;
+    if (submitting) return;
+    let send;
+    if (source === 'upload') {
+      const file = els.artwork.files[0];
+      if (!file) { els.artwork.focus(); return; }
+      const form = new FormData();
+      form.append('image', file);
+      send = () => axios.post('/api/generation/upload', form);
+    } else {
+      const prompt = els.prompt.value.trim();
+      if (!prompt) { els.prompt.focus(); return; }
+      send = briefSender(prompt);
     }
 
-    // Show loading state
-    showLoadingState();
+    // While a job is on the canvas, new briefs join the queue instead of replacing it.
+    const queueing = busy;
+    if (!queueing) { busy = true; showProgress(); }
+    els.queueNote.textContent = '';
 
+    submitting = true;
+    els.generateBtn.disabled = true;
     try {
-        // Call API
-        const result = await api.generateModel(params);
-
-        if (result.success) {
-            currentModelId = result.model_id;
-            // Store task_id for progress tracking
-            if (result.task_id) {
-                currentTaskId = result.task_id;
-                console.log('Tracking progress for task:', currentTaskId);
-            }
-            showResultState(result.model);
-        } else {
-            throw new Error(result.error || 'Generation failed');
-        }
-    } catch (error) {
-        showErrorState(error.toString());
-        // Clear task ID on error
-        currentTaskId = null;
+      const { data } = await send();
+      if (!data.success) throw new Error(data.error || 'Generation failed');
+      if (queueing) refreshQueue(); else track(data.job);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message || String(err);
+      if (queueing) { els.queueNote.textContent = msg; refreshQueue(); }
+      else { endJob(); showError(msg); }
+    } finally {
+      submitting = false;
+      els.generateBtn.disabled = false;
     }
-}
+  }
 
-// Show loading state
-function showLoadingState() {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'block';
-    resultState.style.display = 'none';
-    errorState.style.display = 'none';
-
-    generateBtn.disabled = true;
-
-    // Reset progress bar
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-    progressBar.style.width = '0%';
-    loadingMessage.textContent = 'Starting generation...';
-
-    // Use real-time progress tracking if available, otherwise simulate
-    simulateProgress();
-}
-
-// Update progress from WebSocket
-function updateProgress(data) {
-    // Check if this update is for the current task
-    if (currentTaskId && data.task_id !== currentTaskId) {
-        return; // Ignore updates for other tasks
-    }
-
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-
-    // Update progress bar
-    if (data.progress !== undefined) {
-        progressBar.style.width = data.progress + '%';
-        progressBar.setAttribute('aria-valuenow', data.progress);
-    }
-
-    // Update message
-    if (data.message) {
-        let displayMessage = data.message;
-
-        // Add ETA if available
-        if (data.eta && data.eta > 1) {
-            const etaSeconds = Math.round(data.eta);
-            const etaMinutes = Math.floor(etaSeconds / 60);
-            const remainingSeconds = etaSeconds % 60;
-
-            if (etaMinutes > 0) {
-                displayMessage += ` (ETA: ${etaMinutes}m ${remainingSeconds}s)`;
-            } else {
-                displayMessage += ` (ETA: ${etaSeconds}s)`;
-            }
-        }
-
-        loadingMessage.textContent = displayMessage;
-    }
-
-    // Handle completion states
-    if (data.status === 'completed' || data.status === 'complete') {
-        console.log('Generation completed');
-        progressBar.style.width = '100%';
-        loadingMessage.textContent = data.message || 'Generation complete!';
-    } else if (data.status === 'failed') {
-        console.error('Generation failed:', data.message);
-        showErrorState(data.message || 'Generation failed');
-    } else if (data.status === 'cancelled') {
-        console.log('Generation cancelled');
-        showErrorState('Generation was cancelled');
-    }
-}
-
-// Fallback: Simulate progress if WebSocket is not available
-function simulateProgress() {
-    if (socket && socket.connected) {
-        // WebSocket available, don't simulate
-        console.log('Using real-time progress tracking');
-        return;
-    }
-
-    console.log('WebSocket not available, simulating progress');
-
-    const progressBar = document.getElementById('progressBar');
-    const loadingMessage = document.getElementById('loadingMessage');
-
-    const stages = [
-        { message: 'Initializing...', progress: 10 },
-        { message: 'Generating base image...', progress: 30 },
-        { message: 'Separating assets...', progress: 60 },
-        { message: 'Assembling model...', progress: 80 },
-        { message: 'Finalizing...', progress: 95 }
-    ];
-
-    let currentStage = 0;
-
-    const interval = setInterval(function() {
-        if (currentStage < stages.length) {
-            const stage = stages[currentStage];
-            loadingMessage.textContent = stage.message;
-            progressBar.style.width = stage.progress + '%';
-            currentStage++;
-        } else {
-            clearInterval(interval);
-        }
-    }, 3000);
-}
-
-// Show result state
-function showResultState(model) {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'block';
-    errorState.style.display = 'none';
-
-    generateBtn.disabled = false;
-
-    // Update UI with model data
-    previewImage.src = api.getPreviewUrl(model.id);
-    modelIdSpan.textContent = model.id;
-    modelStatusSpan.textContent = utils.getStatusName(model.status);
-    modelStatusSpan.className = 'badge ' + utils.getStatusBadge(model.status);
-    generationTimeSpan.textContent = utils.formatDuration(model.generation_time);
-    assetCountSpan.textContent = model.assets?.length || 0;
-
-    // Set up download button
-    downloadBtn.onclick = function() {
-        window.location.href = api.getDownloadUrl(model.id);
+  function briefSender(prompt) {
+    const seedRaw = parseInt(els.seed.value, 10);
+    const payload = {
+      prompt,
+      negative_prompt: els.negative.value.trim(),
+      style: selectedStyle,
+      framing: $('framing').value,
+      model_id: els.model.value,
+      sampler: els.sampler.value,
+      steps: parseInt(els.steps.value, 10),
+      guidance_scale: parseFloat(els.cfg.value),
+      width: parseInt(els.width.value, 10),
+      height: parseInt(els.height.value, 10),
+      clip_skip: parseInt(els.clipSkip.value, 10),
+      seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
+      loras: els.lora.value ? [{ id: els.lora.value, weight: parseFloat(els.loraWeight.value) }] : null,
     };
+    if (!busy) lastSeed = payload.seed;
+    return () => axios.post('/api/generation/generate', payload);
+  }
 
-    // Set up edit expressions button
-    const editExpressionsBtn = document.getElementById('editExpressionsBtn');
-    if (editExpressionsBtn) {
-        editExpressionsBtn.href = `/editor/${model.id}`;
-        editExpressionsBtn.style.display = 'block';
-    }
+  function showProgress() {
+    els.errorPanel.classList.add('hidden');
+    els.resultMeta.classList.add('hidden');
+    els.layerPanel.classList.add('hidden');
+    els.canvasEmpty.classList.add('hidden');
+    els.resultImg.classList.add('hidden');
+    els.overlay.classList.remove('hidden');
+    els.pFill.style.width = '0%';
+    els.pLabel.textContent = 'Starting…';
+    els.pEta.textContent = '';
+    setGenerateLabel(true);
+    els.cancelBtn.classList.remove('hidden');
+  }
 
-    // Set up view details button
-    viewDetailsBtn.onclick = function() {
-        showModelDetails(model);
+  async function showResult(data) {
+    const model = data.model || {};
+    const meta = model.metadata || {};
+    const mid = data.model_id;
+    if (model.request?.seed != null) lastSeed = model.request.seed;
+
+    els.resultImg.src = `/api/generation/preview/${mid}?t=${Date.now()}`;
+    els.resultImg.onload = () => {
+      els.overlay.classList.add('hidden');
+      els.resultImg.classList.remove('hidden');
     };
-}
+    els.resultImg.onerror = () => { els.overlay.classList.add('hidden'); };
 
-// Show error state
-function showErrorState(errorMessage) {
-    initialState.style.display = 'none';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'none';
-    errorState.style.display = 'block';
+    els.metaStatus.textContent = model.status || 'completed';
+    els.metaLayers.textContent = (meta.layers || []).length || '—';
+    els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
+    els.metaSeed.textContent = model.request?.reference_image ? '—' : (model.request?.seed ?? lastSeed ?? 'random');
+    els.resultMeta.classList.remove('hidden');
 
-    generateBtn.disabled = false;
+    $('livePreview').href = `/preview/${encodeURIComponent(mid)}`;
+    els.dlPackage.href = `/api/generation/artifact/${mid}/package`;
+    els.dlPsd.href = `/api/generation/artifact/${mid}/psd`;
+    els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
 
-    document.getElementById('errorMessage').textContent = errorMessage;
-}
+    els.generateBtn.disabled = false;
+    await loadLayers(mid);
+  }
 
-// Show model details
-function showModelDetails(model) {
-    let details = `
-Model Details:
---------------
-ID: ${model.id}
-Name: ${model.name || 'N/A'}
-Status: ${model.status}
-Created: ${model.created_at}
-Generation Time: ${utils.formatDuration(model.generation_time)}
-
-Assets (${model.assets?.length || 0}):
-${model.assets?.map(a => `- ${a.layer_type}: ${a.file_path}`).join('\n') || 'None'}
-
-Base Image: ${model.base_image_path || 'N/A'}
-Final Model: ${model.final_model_path || 'N/A'}
-    `.trim();
-
-    alert(details);
-}
-
-// Generate another model
-generateAnotherBtn.addEventListener('click', function() {
-    initialState.style.display = 'block';
-    loadingState.style.display = 'none';
-    resultState.style.display = 'none';
-    errorState.style.display = 'none';
-
-    currentModelId = null;
-    currentTaskId = null;  // Clear task ID
-    form.reset();
-
-    // Reset range displays
-    stepsValue.textContent = stepsInput.value;
-    guidanceScaleValue.textContent = guidanceScaleInput.value;
-});
-
-// Retry on error
-retryBtn.addEventListener('click', function() {
-    generateModel();
-});
-
-// Model Status Checking
-async function checkModelStatus() {
-    const statusAlert = document.getElementById('modelStatusAlert');
-    const statusMessage = document.getElementById('modelStatusMessage');
-    const preloadBtn = document.getElementById('preloadModelBtn');
-
+  async function loadLayers(mid) {
     try {
-        const response = await axios.get('/api/generation/model-status');
+      const { data } = await axios.get(`/api/generation/layers/${mid}`);
+      if (!data.success || !data.count) return;
+      els.layerGrid.innerHTML = '';
+      data.layers.forEach((l) => {
+        const card = document.createElement('div');
+        card.className = 'layer-card';
+        card.innerHTML = `<div class="layer-thumb"><img loading="lazy" src="${l.url}?crop=1" alt="${l.name}"></div>
+                          <div class="layer-name">${l.name}</div>`;
+        els.layerGrid.appendChild(card);
+      });
+      els.layerCount.textContent = data.count + ' parts';
+      els.layerPanel.classList.remove('hidden');
+    } catch (e) { console.warn('layers load failed', e); }
+  }
 
-        if (response.data.success) {
-            const { model_loaded, device, is_dummy, message } = response.data;
+  function showError(msg) {
+    els.overlay.classList.add('hidden');
+    els.canvasEmpty.classList.remove('hidden');
+    els.errorMsg.textContent = msg;
+    els.errorPanel.classList.remove('hidden');
+    els.generateBtn.disabled = false;
+  }
 
-            statusAlert.style.display = 'block';
+  function resetToForm() {
+    els.resultMeta.classList.add('hidden');
+    els.layerPanel.classList.add('hidden');
+    els.resultImg.classList.add('hidden');
+    els.canvasEmpty.classList.remove('hidden');
+  }
 
-            if (is_dummy) {
-                statusAlert.className = 'alert alert-warning';
-                statusMessage.textContent = message;
-                preloadBtn.style.display = 'none';
-            } else if (model_loaded) {
-                statusAlert.className = 'alert alert-success';
-                statusMessage.textContent = `${message} (${device.toUpperCase()})`;
-                preloadBtn.style.display = 'none';
-            } else {
-                statusAlert.className = 'alert alert-warning';
-                statusMessage.textContent = message + '. Click the button to download it now (4-5 GB, takes 10-30 min).';
-                preloadBtn.style.display = 'inline-block';
-            }
-        }
-    } catch (error) {
-        console.error('Failed to check model status:', error);
-        statusAlert.style.display = 'block';
-        statusAlert.className = 'alert alert-danger';
-        statusMessage.textContent = 'Could not check model status';
-    }
-}
+  // ---- UI enhancements ----
+  function addUIEnhancements() {
+    // Add smooth scrolling for form controls
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const val = (e.target.value - e.target.min) / (e.target.max - e.target.min);
+        e.target.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+      });
+      // Initialize
+      const val = (slider.value - slider.min) / (slider.max - slider.min);
+      slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
+    });
 
-// Preload Model
-async function preloadModel() {
-    const preloadBtn = document.getElementById('preloadModelBtn');
-    const preloadProgress = document.getElementById('preloadProgress');
-    const statusMessage = document.getElementById('modelStatusMessage');
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + Enter to generate
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        els.generateBtn.click();
+      }
+      // Escape to reset
+      if (e.key === 'Escape' && !busy) {
+        resetToForm();
+      }
+    });
 
-    preloadBtn.disabled = true;
-    preloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Downloading...';
-    preloadProgress.style.display = 'block';
-
-    try {
-        statusMessage.textContent = 'Downloading Stable Diffusion model... Please wait (this may take 10-30 minutes)';
-
-        const response = await axios.post('/api/generation/preload-model');
-
-        if (response.data.success) {
-            preloadProgress.style.display = 'none';
-            statusMessage.textContent = 'Model loaded successfully! You can now generate models.';
-            document.getElementById('modelStatusAlert').className = 'alert alert-success';
-            preloadBtn.style.display = 'none';
-        } else {
-            throw new Error(response.data.message || 'Model loading failed');
-        }
-    } catch (error) {
-        preloadProgress.style.display = 'none';
-        statusMessage.textContent = 'Model download failed: ' + error.message;
-        document.getElementById('modelStatusAlert').className = 'alert alert-danger';
-        preloadBtn.disabled = false;
-        preloadBtn.innerHTML = '<i class="fas fa-download"></i> Try Again';
-        preloadBtn.style.display = 'inline-block';
-    }
-}
-
-// Attach preload button click
-document.getElementById('preloadModelBtn').addEventListener('click', preloadModel);
-
-// Initialize
-console.log('Generator page initialized');
-
-// Check model status on page load
-checkModelStatus();
+  }
+})();

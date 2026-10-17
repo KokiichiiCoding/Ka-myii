@@ -1,44 +1,54 @@
-# Ka-myii - Automated VTuber Model Generation System
-# Python Dependencies
+# Ka-myii — Automated VTuber Model Studio
+# ---------------------------------------------------------------------------
+# Install everything:           pip install -r requirements.txt
+# Minimum to run the WebUI in demo mode (no GPU):
+#   pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
+# ---------------------------------------------------------------------------
 
-# Core Framework
-Flask==3.0.0
-flask-cors==4.0.0
+# --- Core web framework (required) ---
+Flask>=3.0.0
 
-# AI/ML - Image Generation
-torch>=2.0.0
-diffusers>=0.25.0
-transformers>=4.35.0
-accelerate>=0.25.0
-safetensors>=0.4.0
-
-# Image Processing
-Pillow>=10.0.0
-opencv-python>=4.8.0
+# --- Image + numerics (required) ---
+Pillow>=10.2.0
 numpy>=1.24.0
 
-# Background Removal (optional but recommended)
-rembg>=2.0.50
+# --- Layered document export (required for rig-ready PSD/ORA output) ---
+psd-tools>=1.25.0     # read PSDs and write the live-preview document
+pytoshop>=1.2.0       # write layered PSDs
+six>=1.16.0           # pytoshop runtime dependency
 
-# Advanced Features (Optional)
-# Segment Anything Model for better segmentation
-# segment-anything>=1.0  # Install separately: pip install git+https://github.com/facebookresearch/segment-anything.git
-
-# ControlNet for advanced expression generation
-# controlnet-aux>=0.0.6  # Uncomment for ControlNet support
-
-# WebSocket for real-time progress
-flask-socketio>=5.3.0
-python-socketio>=5.10.0
-
-# Utilities
-pydantic>=2.5.0
+# --- Utilities ---
 python-dotenv>=1.0.0
 
-# Development
-pytest>=7.4.0
-black>=23.12.0
-flake8>=6.1.0
+# ===========================================================================
+# AI image generation (heavy — install for real, high-quality generation).
+# A CUDA GPU is strongly recommended. On Windows, run.bat installs the correct
+# CUDA build of PyTorch automatically.
+# ===========================================================================
+# Pinned to the versions verified end to end on an 8 GB GPU; Ka-myii encodes SDXL prompts
+# itself and drives See-through's runner, so newer releases need a real run before bumping.
+torch>=2.1.0          # run.bat installs 2.8.0+cu128 first
+diffusers==0.37.0
+transformers==5.0.0
+accelerate==1.13.0
+safetensors>=0.4.0
+peft==0.21.2          # LoRA support
 
-# Optional: GPU acceleration
-# xformers>=0.0.22  # Uncomment if you have a compatible GPU
+# --- Character cut-out (recommended) ---
+# Runs SkyTNT's anime-segmentation IS-Net; scripts/install_seethrough.py fetches its weights.
+# (rembg also works if installed, but pulls ~200 MB of extra dependencies.)
+onnxruntime==1.30.0
+
+# ===========================================================================
+# Optional advanced backends (install manually when needed):
+#
+#   Segment Anything 2 (best automatic decomposition):
+#     pip install sam2
+#     # then set KAMYII_SAM2_CHECKPOINT to a downloaded .pt checkpoint
+#
+#   xformers (extra VRAM savings on compatible GPUs):
+#     pip install xformers
+# ===========================================================================
+
+# --- Development ---
+pytest>=7.4.0

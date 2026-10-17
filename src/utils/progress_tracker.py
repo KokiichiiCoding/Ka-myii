@@ -1,6 +1,5 @@
 """
-Real-time Progress Tracking System
-Provides WebSocket-based progress updates for long-running operations
+Progress tracking for long-running jobs (read by the job queue, polled by the Studio)
 """
 import logging
 from typing import Optional, Callable, Dict
@@ -9,26 +8,19 @@ import time
 
 logger = logging.getLogger(__name__)
 
-try:
-    from flask_socketio import SocketIO, emit
-    SOCKETIO_AVAILABLE = True
-except ImportError:
-    SOCKETIO_AVAILABLE = False
-
 
 class ProgressTracker:
     """
     Track progress of long-running operations with real-time updates
     """
 
-    def __init__(self, task_id: str, total_steps: int, socketio: Optional['SocketIO'] = None):
+    def __init__(self, task_id: str, total_steps: int):
         """
         Initialize progress tracker
 
         Args:
             task_id: Unique task identifier
             total_steps: Total number of steps
-            socketio: SocketIO instance for real-time updates
         """
         self.task_id = task_id
         self.total_steps = total_steps
@@ -36,8 +28,9 @@ class ProgressTracker:
         self.status = "starting"
         self.message = ""
         self.start_time = time.time()
-        self.socketio = socketio
         self.cancelled = False
+        self.eta = 0.0
+        self._logged = None
 
         logger.info(f"Progress tracker initialized for task: {task_id}")
 
@@ -63,35 +56,20 @@ class ProgressTracker:
             eta = (elapsed / self.current_step) * (self.total_steps - self.current_step)
         else:
             eta = 0
+        self.eta = eta
 
-        # Prepare progress data
-        progress_data = {
-            "task_id": self.task_id,
-            "step": self.current_step,
-            "total_steps": self.total_steps,
-            "progress": round(progress, 1),
-            "message": message,
-            "status": status,
-            "elapsed": round(elapsed, 1),
-            "eta": round(eta, 1)
-        }
-
-        # Emit via WebSocket if available
-        if self.socketio and SOCKETIO_AVAILABLE:
-            try:
-                self.socketio.emit('progress_update', progress_data, namespace='/progress')
-            except Exception as e:
-                logger.warning(f"Failed to emit progress update: {e}")
-
-        logger.info(f"Progress [{self.task_id}]: {progress:.1f}% - {message}")
+        # See-through's progress is re-sent every second (so a cancel lands); log changes only.
+        if (step, message, status) != self._logged:
+            self._logged = (step, message, status)
+            logger.info(f"Progress [{self.task_id}]: {progress:.1f}% - {message}")
 
     def increment(self, message: str = ""):
         """Increment progress by one step"""
         self.update(self.current_step + 1, message)
 
-    def complete(self, message: str = "Completed"):
-        """Mark task as completed"""
-        self.update(self.total_steps, message, "completed")
+    def complete(self, message: str = "Completed", status: str = "completed"):
+        """Mark task as finished (``status`` may also be "cancelled" or "failed")"""
+        self.update(self.total_steps, message, status)
 
     def error(self, message: str):
         """Mark task as errored"""
@@ -112,10 +90,12 @@ class ProgressManager:
     Manage multiple progress trackers
     """
 
-    def __init__(self, socketio: Optional['SocketIO'] = None):
+    def __init__(self):
         """Initialize progress manager"""
         self.trackers: Dict[str, ProgressTracker] = {}
-        self.socketio = socketio
+        self.stages: Dict[str, str] = {}
+        # Cancellation outlives any one tracker: each pipeline stage creates a fresh one.
+        self.cancelled: set = set()
         logger.info("ProgressManager initialized")
 
     def create_tracker(self, task_id: str, total_steps: int) -> ProgressTracker:
@@ -129,9 +109,28 @@ class ProgressManager:
         Returns:
             ProgressTracker instance
         """
-        tracker = ProgressTracker(task_id, total_steps, self.socketio)
+        tracker = ProgressTracker(task_id, total_steps)
+        tracker.cancelled = task_id in self.cancelled
         self.trackers[task_id] = tracker
         return tracker
+
+    def set_stage(self, task_id: str, stage: str):
+        """Enter a pipeline stage; the previous stage's finished tracker no longer describes it."""
+        self.stages[task_id] = stage
+        self.trackers.pop(task_id, None)
+
+    def cancel(self, task_id: str):
+        self.cancelled.add(task_id)
+        if task_id in self.trackers:
+            self.trackers[task_id].cancelled = True
+
+    def is_cancelled(self, task_id: str) -> bool:
+        return task_id in self.cancelled
+
+    def forget(self, task_id: str):
+        self.trackers.pop(task_id, None)
+        self.stages.pop(task_id, None)
+        self.cancelled.discard(task_id)
 
     def get_tracker(self, task_id: str) -> Optional[ProgressTracker]:
         """Get a progress tracker by ID"""
@@ -166,13 +165,6 @@ def get_progress_manager() -> ProgressManager:
     if _progress_manager is None:
         _progress_manager = ProgressManager()
     return _progress_manager
-
-
-def init_progress_manager(socketio: 'SocketIO'):
-    """Initialize the global progress manager with SocketIO"""
-    global _progress_manager
-    _progress_manager = ProgressManager(socketio)
-    logger.info("Global progress manager initialized with SocketIO")
 
 
 class DiffusionProgressCallback:

@@ -1,506 +1,261 @@
-# Ka-myii 🎨✨
+# Ka-myii
 
-**Automated VTuber Model Generation System**
+**Type a character brief, get a layered, rig-ready VTuber model, all on your own PC.**
 
-Ka-myii is a Python-based web application that automates the creation of high-quality Live2D style VTuber models using AI-powered generation, intelligent asset separation, and automated model assembly.
+Ka-myii is a local web studio that turns a prompt into an anime character, splits it into
+20+ clean, named, transparent parts with [See-through](https://github.com/shitagaki-lab/see-through)
+(SIGGRAPH 2026), lets you watch it blink, talk and follow your webcam in the browser, and
+packages everything for Live2D Cubism: a layered PSD, an OpenRaster file and a Cubism project
+scaffold.
 
-![Status](https://img.shields.io/badge/status-alpha-orange)
-![Python](https://img.shields.io/badge/python-3.9+-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Studio with a finished character and its decomposed layers](docs/images/studio.jpg)
 
-## 🌟 Features
+```
+brief ──► SDXL artwork ──► See-through layers ──► Live Preview ──► PSD / ORA + Cubism scaffold
+          (~1–2 min)        (~10 min, 8 GB GPU)    (webcam, blink)   (finish rigging in Cubism 5)
+```
 
-### Core Generation
-- **AI-Powered Image Generation**: Uses Stable Diffusion models to generate high-quality character images
-- **Intelligent Asset Separation**: Automatically separates characters into layered components (body, head, eyes, mouth, hair, etc.)
-- **Live2D Model Assembly**: Combines separated assets into Live2D-compatible model formats
-- **Assembly Line Pipeline**: Streamlined workflow from prompt to finished model
+## Highlights
 
-### Expression & Emotion System 😊😢😠
-- **15+ VTuber Expressions**: Happy, sad, angry, surprised, cry, frustrated, smug, heart eyes, blush, shocked, sleepy, embarrassed, determined, pouty, wink, worried, excited, and more!
-- **Live Expression Toggle**: Switch between expressions in real-time to preview your character
-- **Automatic Expression Generation**: AI-generated eyes, mouth, eyebrows, blush, and tears for each emotion
-- **Expression Preview**: See exactly how each expression looks before exporting
+- **Runs on an 8 GB laptop GPU.** See-through's 4-bit weights with block swapping peak at about
+  4.6 GB. A character takes about 11 minutes on an RTX 4070 Laptop.
+- **Real layer decomposition.** Front and back hair, face, eye whites, irises, lashes and
+  brows (left and right), ears, nose, mouth, neck, clothing, accessories. Hidden areas are
+  genuinely inpainted, so hair can move without leaving holes. Ka-myii also corrects
+  See-through's draw-order mistakes, trims over-extended parts to what the artwork actually
+  shows, drops hallucinated layers and keeps any unclaimed pixels in a `leftover` layer.
+- **Live Preview.** WebGL animation with breathing, auto-blink, expressions and hair physics,
+  plus optional webcam face tracking and microphone lip sync. Camera and audio never leave
+  the browser.
+- **A Studio that feels like a WebUI.** Your own SDXL checkpoints and LoRAs, sampler, CFG,
+  seed and clip skip. Prompts longer than 77 tokens are encoded in chunks, not cut off.
+  Danbooru tag autocomplete suggests 57k tags, most-used first.
+- **Bring your own artwork.** Upload a character you drew or commissioned and get the same
+  layers, PSD, Cubism files and Live Preview, without generating anything.
+- **Background queue.** Line up several characters, reload or close the tab and come back.
+  Cancel works at any stage, and unfinished jobs resume after a restart.
+- **Demo mode.** The whole pipeline (layers, PSD, Cubism files, Live Preview) runs on a
+  procedurally drawn character with no GPU and no downloads.
 
-### Accessory System 👑🎀
-- **20+ Accessory Types**: Cat ears, bunny ears, glasses, bows, halos, horns, crowns, headbands, chokers, and more
-- **Preset Themes**: Cute, Cool, Elegant, Fantasy, and Casual accessory sets
-- **Special Effects**: Sparkles, hearts, stars, and other decorative elements
-- **Customizable**: Adjust colors, sizes, and positions
+![Live Preview of a generated character](docs/images/preview.jpg)
 
-### Image Editing Tools 🎨
-- **Brightness/Contrast/Saturation**: Fine-tune image appearance
-- **Filters**: Blur, sharpen, smooth, edge enhance, emboss, and more
-- **Transformations**: Rotate, flip, crop, and resize
-- **Background Removal**: AI-powered background removal
-- **Auto-Enhance**: Automatic quality improvement
+## Requirements
 
-### Advanced AI Features 🤖
-- **ControlNet Expression Generation**: Enhanced expression generation using ControlNet for better control
-- **Segment Anything (SAM)**: Superior automatic segmentation for cleaner, more precise layers
-- **Expression Variations**: Generate multiple variations of each expression automatically
-- **AI-Powered Segmentation**: Intelligent layer detection and classification
+| | Real generation | Demo mode |
+|---|---|---|
+| GPU | NVIDIA, **8 GB+ VRAM** (CUDA 12.8 driver) | none |
+| RAM | 16 GB | 4 GB |
+| Disk | ~25 GB (PyTorch ~5 GB, Animagine XL 4.0 ~7 GB, See-through ~9 GB) | ~1 GB |
+| Python | 3.10 – 3.13 (3.12 recommended) | same |
 
-### Professional Export & Integration 📦
-- **Live2D Cubism Export**: Generate complete Live2D packages with proper model3.json structure
-- **Auto Physics Setup**: Automatically generate physics3.json based on detected hair/clothing parts
-- **Expression Animations**: Create GIF/WebM previews of blink, talking, and expression transitions
-- **VRM Support**: Framework for VRM conversion (coming soon)
+Tested on Windows 11 with an RTX 4070 Laptop (8 GB VRAM, 16 GB RAM). On Linux, `run.sh` has
+been tested on Ubuntu 24.04 (WSL) in demo mode; real generation there should work but hasn't
+been tested yet. macOS has no CUDA, so it supports demo mode only.
 
-### Workflow & History 📊
-- **Prompt History System**: Store all generations with thumbnails, seeds, and parameters for easy re-use
-- **Model Versioning**: Auto-versioning with full reproducibility tracking (config.json, seed, hash)
-- **Favorites & Search**: Save and search through your prompt history
-- **Statistics Dashboard**: Track usage patterns and popular prompts
+## Quick start
 
-### Interface & Management
-- **Web-Based Interface**: Beautiful, intuitive web UI built with Flask and Bootstrap
-- **Real-Time Progress Tracking**: Live progress bar with ETA for generation tasks (like Stable Diffusion UI)
-- **WebSocket Updates**: See exactly what step is running and how long until completion
-- **Expression Editor**: Dedicated interface for managing expressions and accessories
-- **Gallery Management**: View, download, and manage all your generated models
-- **Batch Processing**: Generate multiple models in sequence
-- **Live Preview**: Real-time preview of all changes
-- **Animation Previews**: View expression transitions and blink/talk animations
+### Windows
 
-## 🚀 Quick Start
+1. Install [Python 3.12](https://www.python.org/downloads/) and tick **Add python.exe to PATH**.
+   Newer Pythons can stay installed; the launcher picks a supported one through the `py` launcher.
+2. Download or `git clone` this repository and double-click **`run.bat`**.
 
-### Prerequisites
+On first run it creates `.venv`, installs PyTorch (with CUDA if an NVIDIA GPU is present) and
+the other dependencies, offers to install See-through (recommended, ~9 GB), then asks for
+**1) Studio** or **2) Demo** and opens <http://127.0.0.1:5000/generator> in your browser.
+Later runs start in seconds; dependencies are reinstalled only when `requirements.txt`
+changes. Keep the console window open while you work; closing it stops the server.
 
-- Python 3.9 or higher
-- CUDA-capable GPU (recommended, but not required for testing)
-- 8GB+ RAM (16GB+ recommended)
-- 10GB+ free disk space
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/Ka-myii.git
-   cd Ka-myii
-   ```
-
-2. **Create a virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set up environment variables** (optional)
-   ```bash
-   cp .env.example .env
-   # Edit .env with your preferred settings
-   ```
-
-### Running the Application
-
-#### Development Mode (with dummy generators - no GPU required)
-
-Perfect for testing the interface without needing a GPU:
+### Linux
 
 ```bash
-python app.py --dummy
+./run.sh
 ```
 
-#### Production Mode (with actual AI generation)
+On Debian/Ubuntu, install venv support first if needed: `sudo apt install python3.12-venv`
+(`run.sh` tells you when it's missing).
 
-Requires a CUDA-capable GPU and ~10GB VRAM:
+### Manual setup
 
 ```bash
-python app.py
+python -m venv .venv
+.venv\Scripts\activate          # Linux: source .venv/bin/activate
+# NVIDIA on Windows: the CUDA build of PyTorch first
+pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+python scripts/install_seethrough.py   # optional but recommended
+python app.py --open                   # or: python app.py --dummy --open
 ```
 
-#### Custom Configuration
+## Using the Studio
+
+1. **Write a brief.** Danbooru-style tags work best (`1girl, silver hair, twin braids,
+   witch hat, gentle smile`). Autocomplete suggests real tags as you type; Tab or Enter accepts.
+2. **Framing.** *Upper body* (the default) gives the eyes and mouth more pixels, which makes
+   the live animation look much better. *Full body* shows the complete outfit.
+3. **Checkpoint.** The default, **Animagine XL 4.0**, downloads automatically on first use
+   (~7 GB, once). Any SDXL checkpoint you drop into `models/checkpoints/` appears in the list
+   and is selected by default. Illustrious- and NoobAI-based (eps) anime models work well.
+   LoRAs go in `models/loras/`.
+4. **Create.** Progress shows each of the three steps with an estimate, also in the tab title.
+   While a job runs, the button becomes **Add to queue**.
+   To split existing art instead, choose **Use my artwork** and pick a PNG, JPG or WebP.
+   One character facing forward on a plain background works best.
+5. **Use the result.** Inspect the layers, open **Live Preview**, or download the **Live2D
+   package**, **PSD** or **ORA**. Everything is saved under `outputs/<id>/` and listed in the
+   **Gallery**, where a character can be reopened with its exact settings and seed.
+
+### Live Preview
+
+Breathing, blinking and gentle hair physics start immediately. **Face detail** zooms in on the
+face. There are sliders for expressions, head and eyes, anchor adjustment, layer visibility and
+order, transparent PNG snapshots and short recordings. **Use camera** and **Use microphone**
+ask for permission only when clicked, and all processing stays in the browser (Chrome or Edge
+with WebGL recommended; the camera needs `localhost` or HTTPS). Preview adjustments affect the
+browser preview only; they don't rig the Cubism project.
+
+### Finishing in Live2D Cubism
+
+Each character's `model/<name>/` folder (the **Live2D package** download) contains:
+
+- `<name>.psd` / `.ora`: the layered artwork, back to front, named for Cubism.
+- `<name>.model3.json`, `.cdi3.json` (the standard parameter set: `ParamAngleX/Y/Z`,
+  `ParamEyeLOpen`, `ParamMouthOpenY`, ...), `.physics3.json` (starter hair and cloth physics)
+  and an idle motion.
+- `RIGGING_GUIDE.md`, a step-by-step walkthrough for the specific character.
+
+The JSON files validate against the schemas in Live2D's
+[CubismSpecs](https://github.com/Live2D/CubismSpecs). The physics drives the standard
+`ParamHairFront` / `ParamHairBack` (plus declared sway parameters for accessories and skirts).
+
+Open the PSD in **Cubism 5**, run *Modeling → Deformer → Auto Generation of Deformer* (5.1+)
+and *Auto generation of facial motion* from the Parameters palette (5.0+), then export for
+runtime. The binary `.moc3` can only be produced by the Cubism Editor, so Ka-myii prepares
+everything up to that step.
+
+## How decomposition works
+
+Ka-myii picks the best available backend:
+
+1. **See-through** (recommended). A layer-diffusion model generates every semantic part as
+   its own RGBA layer, including the parts hidden behind hair and clothes, and a depth model
+   orders them. Ka-myii runs it in its own virtualenv as a separate process (so its GPU memory
+   is fully released after each job), then:
+   - cuts the character out with an anime segmentation model;
+   - fixes draw orders that depth gets wrong for thin parts (iris under eye white, bangs under
+     the face);
+   - gives every visible pixel to the part the artwork really shows there, trimming
+     over-extended predictions;
+   - drops hallucinated layers and empty accessory specks;
+   - keeps the artist's visible colours;
+   - puts character pixels no layer claimed (cat ears, a witch hat) into a `leftover` layer
+     so nothing goes missing.
+2. **SAM 2**, if `sam2` is installed and `KAMYII_SAM2_CHECKPOINT` is set: automatic masks
+   classified into semantic layers.
+3. **Geometric fallback**: a rough anatomical split of the cut-out character.
+
+Demo mode uses the procedural character's own pixel-perfect region map.
+
+After an update, `python scripts/rebuild_layers.py <model_id>` re-applies the latest
+post-processing to an existing result from its saved See-through PSD, with no GPU needed.
+
+## Configuration
+
+Every setting has a sensible default. To change one, copy `.env.example` to `.env`.
+Common ones:
+
+| Variable | Default | |
+|---|---|---|
+| `PORT` | `5000` | |
+| `HOST` | `127.0.0.1` | `0.0.0.0` exposes the studio to your network, **without any login** |
+| `KAMYII_MODEL_NAME` | `cagliostrolab/animagine-xl-4.0` | default Hugging Face checkpoint |
+| `KAMYII_SEETHROUGH_RESOLUTION` | `1024` | `1280` gives sharper layers on 12 GB+ GPUs |
+| `KAMYII_CPU_OFFLOAD` | auto below 12 GB | lower VRAM use for SDXL, slightly slower |
+
+## Troubleshooting
+
+- **`run.bat` says Python 3.10 to 3.13 is needed.** PyTorch's CUDA 12.8 build doesn't
+  support newer Pythons yet. Install 3.12 alongside your current one; `run.bat` finds it.
+- **The window closes immediately.** Open a terminal in the folder and run `run.bat` there
+  to read the error.
+- **"CUDA available: False" or very slow generation.** Update the NVIDIA driver, delete
+  `.venv` and run `run.bat` again so it reinstalls the CUDA build of PyTorch.
+- **The first character sits on "Downloading ...".** The default checkpoint is ~7 GB and
+  downloads once. See-through's weights are fetched by its installer.
+- **A job fails with out-of-memory, or is extremely slow.** Close other GPU-heavy apps.
+  On 8 GB, keep See-through at resolution 1024. Above ~7.7 GB of VRAM use, NVIDIA drivers
+  silently spill into system RAM and run ~10× slower.
+- **The camera doesn't start in Live Preview.** Use Chrome or Edge on `http://127.0.0.1:5000`
+  (not a LAN IP) and allow camera access.
+- **Port 5000 is busy.** `python app.py --port 5001`, or set `PORT` in `.env`.
+
+Logs are written to `logs/kamyii.log`.
+
+## Status and known limitations
+
+Ka-myii is an early release. What works and has been checked on real hardware: generation, See-through
+decomposition, Live Preview, the queue, uploads, and the PSD/ORA/Cubism files (validated against
+Live2D's published JSON schemas). Not yet confirmed by a human:
+
+- importing a package into the Live2D Cubism Editor and running its auto-generation tools;
+- webcam face tracking in Live Preview (the code path is tested, a physical camera is not);
+- real (GPU) generation on Linux.
+
+Layer quality depends on the artwork. Front-facing upper-body characters on plain backgrounds
+decompose best; arms, hands and complex poses are weaker, and parts See-through cannot name end up
+in `leftover` / `headwear`. Issues with example images are very welcome.
+
+## Privacy and security
+
+Everything runs locally; nothing is uploaded and there is no telemetry. Internet is needed
+only to download dependencies and model weights. The server listens on `127.0.0.1` and
+rejects requests from other sites. It has no accounts or authentication, so don't expose it
+to the internet.
+
+## Development
 
 ```bash
-python app.py --host 0.0.0.0 --port 8080 --debug
+python -m pytest tests -q            # GPU-free; demo mode + monkeypatched See-through
+node tests/preview_runtime.test.cjs  # browser-runtime checks (optional)
+node tests/tagcomplete.test.cjs
 ```
 
-#### Using a custom Stable Diffusion checkpoint (e.g., CivitAI models)
-
-You can point Ka-myii at a locally downloaded checkpoint or switch to SDXL-compatible
-pipelines without modifying the source code. Configure the model by setting the
-following environment variables (add them to `.env` or export them before launching the app):
-
-```bash
-# Path to a .safetensors or .ckpt file converted for diffusers (will be loaded with from_single_file)
-export KAMYII_CUSTOM_MODEL_PATH="/path/to/your/model.safetensors"
-
-# Optional: "sd15", "sdxl", or "auto" to let Ka-myii auto-detect based on file name
-export KAMYII_MODEL_PIPELINE="sdxl"
-
-# Optional: override the default model name used when no custom checkpoint is supplied
-export KAMYII_MODEL_NAME="stabilityai/stable-diffusion-xl-base-1.0"
-
-# Optional extras for advanced checkpoints
-export KAMYII_CUSTOM_VAE_PATH="/path/to/diffusers/vae"
-export KAMYII_ORIGINAL_CONFIG="/path/to/original/config.json"
+```
+app.py                       Flask entry point
+config.py                    settings (.env overrides)
+src/api/generation.py        REST API: /generate (queues a job), /jobs, layers, artifacts
+src/pipeline/jobs.py         background job queue (one GPU job at a time, cancel, progress)
+src/pipeline/assembly_line.py  generate → separate → package
+src/core/image_generator.py  SDXL via diffusers (chunked prompts, LoRAs, samplers) + demo renderer
+src/core/asset_separator.py  layer decomposition and See-through post-processing
+src/core/seethrough.py       runs See-through in its own venv as a subprocess
+src/core/psd_exporter.py     layered PSD / ORA
+src/core/model_assembler.py  Cubism scaffold (model3 / cdi3 / physics3, guide)
+src/core/live_preview.py     preview PSD for the browser rig
+scripts/                     See-through installer and runner, rebuild_layers.py
+templates/, static/          Studio, Gallery and Live Preview
 ```
 
-When `KAMYII_CUSTOM_MODEL_PATH` is provided the built-in download script skips any
-Hugging Face downloads; simply place your checkpoint at the configured location and
-start the app. Width/height, steps, and guidance defaults will also respect the values
-defined in `config.py`, so you can increase SDXL defaults (e.g., 1024×1024) without
-changing the UI each time.
-
-### Accessing the Web UI
-
-Once the server is running, open your browser and navigate to:
-
-```
-http://localhost:5000
-```
-
-## 📚 Usage
-
-### Generating Your First Model
-
-1. **Navigate to the Generator page** by clicking "Start Creating" or visiting `/generator`
-
-2. **Enter a character description** in the prompt field:
-   ```
-   anime girl with blue hair and green eyes, wearing a school uniform
-   ```
-
-3. **Choose your art style** (Anime, Live2D, VTuber, or Realistic)
-
-4. **Adjust advanced settings** (optional):
-   - Image dimensions
-   - Generation steps
-   - Guidance scale
-   - Random seed
-
-5. **Click "Generate Model"** and wait for the pipeline to complete
-
-6. **Download your model** when generation is complete!
-
-### Adding Expressions & Accessories
-
-After generating a model, click **"Edit Expressions & Accessories"** to:
-
-1. **Generate Expressions**:
-   - Select from 15+ emotions (happy, sad, angry, cry, smug, heart eyes, etc.)
-   - Click "Generate Expressions" to create all selected emotions
-   - Use the live toggle to preview each expression
-
-2. **Add Accessories**:
-   - Choose a preset theme (Cute, Cool, Elegant, Fantasy, Casual)
-   - Or select individual accessories (cat ears, glasses, bows, etc.)
-   - Click "Add Accessories" to apply them to your model
-
-3. **Adjust Image Settings**:
-   - Fine-tune brightness, contrast, and saturation
-   - Apply filters and effects
-   - See changes in real-time preview
-
-4. **Export**:
-   - Download all expressions and accessories as a package
-   - Export for Live2D integration
-
-### Viewing Your Models
-
-Visit the **Gallery** page to:
-- View all generated models
-- Search and filter models
-- **Edit expressions and accessories** for any model
-- Download models as ZIP files
-- View detailed model information
-- Delete unwanted models
-
-## 🏗️ Project Structure
-
-```
-Ka-myii/
-├── app.py                 # Main Flask application
-├── config.py             # Configuration settings
-├── requirements.txt      # Python dependencies
-├── README.md            # This file
-├── .gitignore           # Git ignore rules
-├── .env.example         # Environment template
-│
-├── src/                 # Source code
-│   ├── api/            # API routes
-│   │   ├── generation.py   # Model generation endpoints
-│   │   └── models.py       # Model management endpoints
-│   │
-│   ├── core/           # Core functionality
-│   │   ├── image_generator.py         # Stable Diffusion integration
-│   │   ├── asset_separator.py         # Asset layer separation
-│   │   ├── model_assembler.py         # Live2D model assembly
-│   │   ├── expression_generator.py    # Expression generation ⭐
-│   │   ├── accessory_generator.py     # Accessory creation ⭐
-│   │   ├── image_editor.py            # Image editing tools ⭐
-│   │   ├── controlnet_expression.py   # ControlNet integration ⭐
-│   │   ├── sam_segmentation.py        # Segment Anything integration ⭐
-│   │   ├── auto_physics.py            # Auto physics generation ⭐
-│   │   ├── live2d_exporter.py         # Live2D export helper ⭐
-│   │   ├── expression_animator.py     # GIF/animation creator ⭐
-│   │   └── rigging.py                 # Auto-rigging (placeholder)
-│   │
-│   ├── models/         # Data models
-│   │   └── vtuber_model.py            # VTuber model data structures
-│   │
-│   ├── utils/          # Utilities
-│   │   ├── helpers.py                 # Helper functions
-│   │   ├── prompt_history.py          # Prompt history system ⭐
-│   │   └── model_versioning.py        # Model versioning ⭐
-│   │
-│   └── pipeline/       # Pipeline orchestration
-│       └── assembly_line.py      # Main generation pipeline
-│
-├── templates/          # HTML templates
-│   ├── base.html
-│   ├── index.html
-│   ├── generator.html
-│   └── gallery.html
-│
-├── static/             # Static assets
-│   ├── css/
-│   │   └── style.css
-│   ├── js/
-│   │   ├── main.js
-│   │   ├── generator.js
-│   │   └── gallery.js
-│   └── img/
-│
-├── outputs/            # Generated models (created at runtime)
-├── models/             # Pre-trained model storage
-├── logs/               # Application logs
-└── tests/              # Unit tests
-```
-
-## 🔧 Configuration
-
-Configuration is managed through `config.py` and environment variables.
-
-### Key Configuration Options
-
-**Image Generation Settings:**
-- `default_width`: Default image width (512)
-- `default_height`: Default image height (512)
-- `default_steps`: Number of diffusion steps (30)
-- `model_name`: Stable Diffusion model to use
-
-**Asset Separation:**
-- `layers`: List of layer types to generate
-- `use_ai_segmentation`: Enable AI-based segmentation
-
-**Model Assembly:**
-- `texture_size`: Size of texture atlas (2048)
-- `include_physics`: Include physics in model
-
-## 🎯 Pipeline Stages
-
-### 1. Image Generation
-Uses Stable Diffusion to generate a character image based on your prompt.
-
-**Technologies:**
-- Diffusers library
-- PyTorch
-- DPM++ scheduler for quality
-
-### 2. Asset Separation
-Separates the generated image into layers:
-- Background
-- Body
-- Head
-- Eyes (with variants: open, closed, happy)
-- Mouth (with variants: closed, open, smile)
-- Hair (front and back)
-- Accessories
-- Clothing
-
-**Technologies:**
-- OpenCV for image processing
-- RemBG for background removal
-- Custom segmentation algorithms
-
-### 3. Model Assembly
-Combines separated assets into a Live2D-compatible model structure:
-- Creates model3.json configuration
-- Generates physics3.json for physics simulation
-- Organizes textures and assets
-- Creates motion definitions
-
-### 4. Auto-Rigging (Coming Soon)
-Automatically applies rigging and deformers to enable animation.
-
-## 📖 API Documentation
-
-### Generate Model
-
-```http
-POST /api/generation/generate
-Content-Type: application/json
-
-{
-  "prompt": "anime girl with blue hair",
-  "negative_prompt": "low quality, blurry",
-  "style": "live2d",
-  "width": 512,
-  "height": 512,
-  "steps": 30,
-  "guidance_scale": 7.5,
-  "seed": null,
-  "include_rigging": false
-}
-```
-
-### List Models
-
-```http
-GET /api/generation/list
-```
-
-### Get Model Status
-
-```http
-GET /api/generation/status/{model_id}
-```
-
-### Download Model
-
-```http
-GET /api/generation/download/{model_id}
-```
-
-### Get Statistics
-
-```http
-GET /api/models/stats
-```
-
-### Generate Expressions
-
-```http
-POST /api/expression/generate
-Content-Type: application/json
-
-{
-  "model_id": "uuid",
-  "expressions": ["happy", "sad", "angry", "cry", "smug", "heart_eyes"]
-}
-```
-
-### List Available Expressions
-
-```http
-GET /api/expression/list
-```
-
-### Get Expression Preview
-
-```http
-GET /api/expression/preview/{model_id}/{expression_name}
-```
-
-### Generate Accessories
-
-```http
-POST /api/expression/accessories/generate
-Content-Type: application/json
-
-{
-  "model_id": "uuid",
-  "preset": "cute"  // or "cool", "elegant", "fantasy", "casual"
-}
-```
-
-### Edit Image
-
-```http
-POST /api/expression/edit
-Content-Type: application/json
-
-{
-  "model_id": "uuid",
-  "image_path": "base_image.png",
-  "operations": [
-    {"type": "brightness", "factor": 1.2},
-    {"type": "contrast", "factor": 1.1},
-    {"type": "saturation", "factor": 1.0}
-  ]
-}
-```
-
-## 🛠️ Development
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Formatting
-
-```bash
-black src/
-```
-
-### Linting
-
-```bash
-flake8 src/
-```
-
-## 🚧 Roadmap
-
-- [x] Basic image generation
-- [x] Asset separation
-- [x] Model assembly
-- [x] Web interface
-- [ ] Auto-rigging implementation
-- [ ] Advanced segmentation models
-- [ ] Real-time progress updates (WebSocket)
-- [ ] User authentication
-- [ ] Cloud deployment guides
-- [ ] Model fine-tuning interface
-- [ ] Animation preview
-- [ ] Direct Live2D export
-- [ ] VRM format support
-
-## ⚠️ Limitations
-
-- **Auto-rigging is not yet implemented** - Manual rigging in Live2D Cubism is currently required
-- **GPU recommended** - CPU generation is very slow
-- **Large model size** - Stable Diffusion models are several GB
-- **Segmentation quality** - Asset separation is currently basic and may need manual refinement
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- [Stable Diffusion](https://github.com/Stability-AI/stablediffusion) for image generation
-- [Live2D](https://www.live2d.com/) for the model format inspiration
-- [Hugging Face](https://huggingface.co/) for model hosting
-- The VTuber community for inspiration
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/Ka-myii/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/Ka-myii/discussions)
-
-## 🌟 Star History
-
-If you find this project useful, please consider giving it a star! ⭐
-
----
-
-**Made with ❤️ for the VTuber community**
+`AGENTS.md` holds the detailed engineering notes: architecture, hard-won facts and the backlog.
+
+## Credits
+
+- [See-through](https://github.com/shitagaki-lab/see-through): Lin et al., SIGGRAPH 2026,
+  Apache-2.0. Downloaded by `scripts/install_seethrough.py` at a pinned commit, not vendored.
+- [Animagine XL 4.0](https://huggingface.co/cagliostrolab/animagine-xl-4.0): Cagliostro
+  Research Lab, CreativeML Open RAIL++-M. Downloaded on first use.
+- [anime-segmentation](https://github.com/SkyTNT/anime-segmentation) IS-Net weights
+  (`skytnt/anime-seg`): SkyTNT, Apache-2.0, run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
+- [Anime2.5DRig](https://github.com/852wa/Anime2.5DRig): 852wa, MIT. It is vendored with
+  local changes in `static/vendor/anime25d` (see `UPSTREAM.md`) and bundles
+  [ag-psd](https://github.com/Agamnentzar/ag-psd) (MIT) and MediaPipe FaceMesh (Apache-2.0).
+- Danbooru tag list from [a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete),
+  Dominik Reh, MIT.
+- Bootstrap 5.3 and Axios (MIT); Font Awesome Free 6.4 (icons CC BY 4.0, fonts SIL OFL 1.1).
+  The licenses are in `static/vendor/`.
+
+Generated images are subject to the license of the checkpoint you use.
+
+## License
+
+MIT; see [LICENSE](LICENSE). Third-party components keep their own licenses (above).

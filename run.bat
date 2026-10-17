@@ -1,196 +1,127 @@
 @echo off
-SETLOCAL EnableDelayedExpansion
-
-REM ================================
-REM Ka-myii Enhanced Setup & Launch
-REM ================================
+setlocal EnableDelayedExpansion
+cd /d "%~dp0"
+set FLASK_ENV=production
+set PYTHONIOENCODING=utf-8
 
 echo.
 echo ================================================
-echo    Ka-myii VTuber Model Generator
-echo    Enhanced Setup with CUDA Detection
+echo    Ka-myii - VTuber Model Studio
 echo ================================================
 echo.
 
-REM Check if Python is installed
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Python is not installed or not in PATH!
-    echo Please install Python 3.9+ from https://www.python.org/
-    echo.
-    pause
-    exit /b 1
-)
+REM --- Virtual environment (.venv; an older venv\ is reused) ---------------
+set "VENV=.venv"
+if not exist ".venv\Scripts\python.exe" if exist "venv\Scripts\python.exe" set "VENV=venv"
+if exist "%VENV%\Scripts\python.exe" goto :have_venv
 
-echo [OK] Python detected
-python --version
-echo.
-
-REM Check/Create virtual environment
-if not exist "venv" (
-    echo [INFO] Creating virtual environment...
-    python -m venv venv
-    if errorlevel 1 (
-        echo [ERROR] Failed to create virtual environment
-        pause
-        exit /b 1
+REM PyTorch 2.8 (used for CUDA 12.8 on 8 GB GPUs) has builds for Python 3.10 - 3.13 only.
+set "PYEXE="
+for %%v in (3.12 3.11 3.13 3.10) do (
+    if not defined PYEXE (
+        py -%%v -c "import sys" >nul 2>&1
+        if not errorlevel 1 set "PYEXE=py -%%v"
     )
-    echo [OK] Virtual environment created
-    echo.
-) else (
-    echo [OK] Virtual environment found
-    echo.
 )
+if not defined PYEXE (
+    python -c "import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>&1
+    if not errorlevel 1 set "PYEXE=python"
+)
+if not defined PYEXE (
+    echo [ERROR] Ka-myii needs Python 3.10 to 3.13 ^(3.12 recommended^).
+    echo         Install it from https://www.python.org/downloads/ and tick "Add python.exe to PATH".
+    echo         Newer Pythons can stay installed; the launcher picks a supported one.
+    goto :fail
+)
+echo [INFO] Creating .venv with %PYEXE% ...
+%PYEXE% -m venv .venv
+if errorlevel 1 goto :fail
+set "VENV=.venv"
 
-REM Activate virtual environment
-echo [INFO] Activating virtual environment...
-call venv\Scripts\activate.bat
+:have_venv
+set "VPY=%VENV%\Scripts\python.exe"
+"%VPY%" --version
+
+REM --- Dependencies: first run, or whenever requirements.txt changed ---------
+fc /b requirements.txt "%VENV%\kamyii-requirements.txt" >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Failed to activate virtual environment
-    pause
-    exit /b 1
-)
-echo [OK] Virtual environment activated
-echo.
-
-REM Check if dependencies are installed
-python -c "import flask" 2>nul
-if errorlevel 1 (
-    echo [INFO] Dependencies not found. Installing...
-    goto :install_deps
+    call :install
+    if errorlevel 1 goto :fail
 ) else (
-    echo [OK] Dependencies already installed
-    goto :check_pytorch
+    echo [OK] Dependencies up to date
 )
 
-:install_deps
-echo.
-echo ================================================
-echo    Installing Dependencies
-echo ================================================
-echo.
-
-REM Upgrade pip first
-echo [INFO] Upgrading pip...
-python -m pip install --upgrade pip
-echo.
-
-REM Check for CUDA/GPU support
-echo [INFO] Checking for NVIDIA GPU support...
+set "HAS_GPU=0"
 nvidia-smi >nul 2>&1
-if errorlevel 1 (
-    echo [WARNING] NVIDIA GPU not detected or nvidia-smi not available
-    echo [INFO] Will install CPU-only version of PyTorch
-    set CUDA_AVAILABLE=0
-) else (
-    echo [OK] NVIDIA GPU detected!
-    nvidia-smi
-    echo.
-    set CUDA_AVAILABLE=1
-)
+if not errorlevel 1 set "HAS_GPU=1"
 
-echo.
-echo ================================================
-echo    Installing PyTorch
-echo ================================================
-echo.
-
-if !CUDA_AVAILABLE! equ 1 (
-    echo [INFO] Installing PyTorch with CUDA 11.8 support...
-    echo This may take a few minutes...
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-    if errorlevel 1 (
-        echo [WARNING] CUDA installation failed, falling back to CPU version...
-        pip install torch torchvision torchaudio
-    )
-) else (
-    echo [INFO] Installing PyTorch (CPU version)...
-    pip install torch torchvision torchaudio
-)
-
-echo.
-echo [INFO] Installing other dependencies...
-pip install -r requirements.txt
-
-if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies
-    echo Please check the error messages above
-    pause
-    exit /b 1
-)
-
-echo.
-echo [OK] All dependencies installed successfully!
-echo.
-
-:check_pytorch
-REM Verify PyTorch installation and CUDA availability
-echo ================================================
-echo    PyTorch Configuration
-echo ================================================
-echo.
-
-python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda if torch.cuda.is_available() else \"N/A\"}'); print(f'GPU Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"CPU Only\"}')"
-
-echo.
-
-REM Ask user which mode to run
-echo ================================================
-echo    Launch Options
-echo ================================================
-echo.
-echo Select mode:
-echo   1) Production mode (with GPU/CUDA if available)
-echo   2) Dummy mode (no AI generation, for testing UI)
-echo   3) Exit
-echo.
-
-set /p mode="Enter choice (1, 2, or 3): "
-
-if "%mode%"=="3" (
-    echo.
-    echo Exiting...
-    pause
-    exit /b 0
-)
-
-if "%mode%"=="2" (
+REM --- Optional See-through engine (real layer decomposition) ----------------
+if "%HAS_GPU%"=="1" if not exist "engines\see-through\.venv\Scripts\python.exe" if not exist "engines\see-through.skip" (
     echo.
     echo ================================================
-    echo    Starting Ka-myii in DUMMY MODE
-    echo    (No actual AI generation)
+    echo    Optional: See-through layer decomposition
     echo ================================================
+    echo Splits each character into 20+ clean, inpainted layers ^(SIGGRAPH 2026^).
+    echo Needs an 8 GB+ NVIDIA GPU and about 9 GB of downloads. Without it,
+    echo generated characters get a rough geometric split.
     echo.
-    python app.py --dummy
-) else if "%mode%"=="1" (
-    echo.
-    echo ================================================
-    echo    Starting Ka-myii in PRODUCTION MODE
-    echo ================================================
-    echo.
-
-    REM Check if CUDA is available
-    python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>nul
-    if errorlevel 1 (
-        echo [WARNING] CUDA not available - generation will be SLOW on CPU
-        echo Press Ctrl+C to cancel, or any key to continue with CPU...
-        pause
+    set "install_st=y"
+    set /p install_st="Install See-through now? [Y/n]: "
+    if /i "!install_st!"=="n" (
+        if not exist engines mkdir engines
+        echo declined> "engines\see-through.skip"
+        echo [INFO] Skipped. Install later with:  %VPY% scripts\install_seethrough.py
     ) else (
-        echo [OK] CUDA available - GPU acceleration enabled
+        "%VPY%" scripts\install_seethrough.py
+        if errorlevel 1 echo [WARNING] See-through install failed - Ka-myii will use the basic splitter.
     )
-
-    echo.
-    python app.py
-) else (
-    echo [ERROR] Invalid choice. Please run the script again.
-    pause
-    exit /b 1
 )
 
-REM If we get here, the server has stopped
+REM --- Launch ----------------------------------------------------------------
 echo.
-echo ================================================
-echo    Ka-myii has stopped
-echo ================================================
+echo   1^) Studio - real generation ^(NVIDIA GPU^)
+echo   2^) Demo   - no GPU or downloads; a drawn character runs the full pipeline
 echo.
+set "mode=2"
+if "%HAS_GPU%"=="1" set "mode=1"
+set /p mode="Choose 1 or 2 [!mode!]: "
+echo.
+echo Ka-myii opens in your browser. Keep this window open; close it to stop the server.
+echo.
+if "!mode!"=="2" (
+    "%VPY%" app.py --dummy --open
+) else (
+    "%VPY%" app.py --open
+)
+echo.
+echo Ka-myii has stopped.
 pause
+exit /b 0
+
+:install
+echo.
+echo [INFO] Installing dependencies ^(first run or an update^). This can take a while...
+"%VPY%" -m pip install --upgrade pip
+"%VPY%" -c "import torch" >nul 2>&1
+if errorlevel 1 (
+    nvidia-smi >nul 2>&1
+    if errorlevel 1 (
+        echo [INFO] No NVIDIA GPU found: installing CPU PyTorch ^(demo mode works; real generation needs a GPU^).
+        "%VPY%" -m pip install torch torchvision
+    ) else (
+        echo [INFO] Installing PyTorch with CUDA 12.8 ^(about 3 GB^)...
+        "%VPY%" -m pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+    )
+    if errorlevel 1 exit /b 1
+)
+"%VPY%" -m pip install -r requirements.txt
+if errorlevel 1 exit /b 1
+copy /y requirements.txt "%VENV%\kamyii-requirements.txt" >nul
+echo [OK] Dependencies installed
+exit /b 0
+
+:fail
+echo.
+echo [ERROR] Setup did not finish. Scroll up for the message above, or see README.md - Troubleshooting.
+pause
+exit /b 1
