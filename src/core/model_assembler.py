@@ -64,14 +64,17 @@ class ModelAssembler:
 
         # 3. Physics from hair / cloth layers.
         physics_path = model_dir / f"{model_name}.physics3.json"
+        physics_params: List[Dict] = []
         try:
-            self.physics.generate_physics_json(assets, model_name, physics_path)
+            physics_params = self.physics.generate_physics_json(assets, model_name, physics_path)
         except Exception as exc:  # pragma: no cover
             logger.warning("Physics generation failed: %s", exc)
+        standard = config.MODEL_ASSEMBLY["standard_parameters"]
+        parameters = standard + [p for p in physics_params if p["Id"] not in {s["Id"] for s in standard}]
 
         # 4. Display info (parameters + parts) and 5. model definition.
         rig_layers = [a.layer_type for a in assets if a.layer_type != "character"]
-        self._write_json(model_dir / f"{model_name}.cdi3.json", self._build_cdi3(rig_layers))
+        self._write_json(model_dir / f"{model_name}.cdi3.json", self._build_cdi3(rig_layers, parameters))
         self._write_json(
             model_dir / f"{model_name}.model3.json",
             self._build_model3(model_name, texture_files, rig_layers),
@@ -112,10 +115,11 @@ class ModelAssembler:
                 "model_name": model_name,
                 "layers": rig_layers,
                 "artifacts": produced,
-                "parameters": [p["Id"] for p in config.MODEL_ASSEMBLY["standard_parameters"]],
+                "parameters": [p["Id"] for p in parameters],
             },
         )
-        (model_dir / "RIGGING_GUIDE.md").write_text(self._rigging_guide(model_name, rig_layers), encoding="utf-8")
+        (model_dir / "RIGGING_GUIDE.md").write_text(
+            self._rigging_guide(model_name, rig_layers, [p["Id"] for p in physics_params]), encoding="utf-8")
 
         logger.info("Cubism project assembled at %s", model_dir)
         return model_dir
@@ -143,11 +147,8 @@ class ModelAssembler:
             ],
         }
 
-    def _build_cdi3(self, layers: List[str]) -> Dict:
-        parameters = [
-            {"Id": p["Id"], "GroupId": "", "Name": p["Name"]}
-            for p in config.MODEL_ASSEMBLY["standard_parameters"]
-        ]
+    def _build_cdi3(self, layers: List[str], parameters: List[Dict]) -> Dict:
+        parameters = [{"Id": p["Id"], "GroupId": "", "Name": p["Name"]} for p in parameters]
         parameter_groups = [
             {"Id": "Position", "GroupId": "", "Name": "Position"},
             {"Id": "Eyes", "GroupId": "", "Name": "Eyes"},
@@ -167,7 +168,8 @@ class ModelAssembler:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
 
-    def _rigging_guide(self, model_name: str, layers: List[str]) -> str:
+    def _rigging_guide(self, model_name: str, layers: List[str], physics_params: List[str]) -> str:
+        driven = ", ".join(f"`{p}`" for p in physics_params) or "nothing (no hair or accessory layers)"
         layer_lines = "\n".join(f"- `{layer}` → part `{_part_id(layer)}`" for layer in layers)
         return f"""# Rigging Guide — {model_name}
 
@@ -203,9 +205,10 @@ The following layers were exported (back to front):
 > Pick 2048 in the texture-atlas dialog when exporting.
 
 ## 4. Physics
-`{model_name}.physics3.json` contains starter physics for hair and clothing.
-Load it via **`Modeling → Physics/Style Sheet Settings → Import`** and tweak
-the pendulum strengths to taste.
+`{model_name}.physics3.json` holds starter pendulums driven by head and body sway
+(`ParamAngleX/Z`, `ParamBodyAngleX/Z`). They output to {driven}. Give your
+hair and accessory deformers those parameters (same IDs) before importing it in
+the **Physics** settings dialog, then tune the pendulum lengths and strengths.
 
 ## 5. Export
 `File → Export for Runtime → moc3` produces the binary `.moc3` plus updated

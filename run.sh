@@ -15,6 +15,12 @@ if [ ! -x .venv/bin/python ]; then
         echo "Ka-myii needs Python 3.10 to 3.13 (3.12 recommended)." >&2
         exit 1
     fi
+    if ! "$PY" -c 'import ensurepip' 2>/dev/null; then
+        # Debian/Ubuntu split venv support into its own package.
+        echo "Python's venv support is missing. Install it, then run ./run.sh again:" >&2
+        echo "    sudo apt install $(basename "$PY")-venv" >&2
+        exit 1
+    fi
     echo "Creating .venv with $PY ..."
     "$PY" -m venv .venv
 fi
@@ -23,6 +29,8 @@ fi
 if ! cmp -s requirements.txt .venv/kamyii-requirements.txt; then
     echo "Installing dependencies (first run or an update)..."
     .venv/bin/python -m pip install --upgrade pip
+    # The PyTorch Ka-myii is verified with (Linux wheels on PyPI are CUDA 12.8 builds).
+    .venv/bin/python -c 'import torch' 2>/dev/null || .venv/bin/python -m pip install torch==2.8.0 torchvision==0.23.0
     .venv/bin/python -m pip install -r requirements.txt
     cp requirements.txt .venv/kamyii-requirements.txt
 fi

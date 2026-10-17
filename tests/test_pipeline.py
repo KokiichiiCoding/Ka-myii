@@ -262,3 +262,36 @@ def test_leftover_above_the_chin_becomes_headwear():
     assert [n for n, _ in kept] == ["back hair", "leftover", "face", "headwear"]
     merged = np.asarray(kept[-1][1])[..., 3]
     assert merged[5, 5] == 255 and merged[5, 50] == 255 and merged[85, 50] == 0  # stars + ears
+
+
+def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
+    """physics3.json lacked Meta.EffectiveForces / PhysicsDictionary (required by Live2D's schema)
+    and drove ids like "ParamFront Hair" that no file declared; human ears got accessory physics."""
+    import re
+    from PIL import Image
+    from src.core.model_assembler import ModelAssembler
+    from src.models.vtuber_model import Asset
+
+    assets = []
+    for i, name in enumerate(["back hair", "face", "ears-l", "front hair", "headwear"]):
+        path = workdir / f"{i:02d}_{name}.png"
+        Image.new("RGBA", (64, 64), (200, 100, 50, 255)).save(path)
+        assets.append(Asset(layer_type=name, file_path=path, metadata={"order": i}))
+    model_dir = ModelAssembler().assemble(assets, workdir / "model", "study")
+
+    physics = json.loads((model_dir / "study.physics3.json").read_text())
+    cdi = json.loads((model_dir / "study.cdi3.json").read_text())
+    meta, settings = physics["Meta"], physics["PhysicsSettings"]
+    for key in ("PhysicsSettingCount", "TotalInputCount", "TotalOutputCount", "VertexCount",
+                "EffectiveForces", "PhysicsDictionary"):
+        assert key in meta
+    assert meta["PhysicsSettingCount"] == len(settings) == len(meta["PhysicsDictionary"]) == 3
+    assert meta["TotalInputCount"] == sum(len(s["Input"]) for s in settings)
+    assert meta["VertexCount"] == sum(len(s["Vertices"]) for s in settings)
+
+    declared = {p["Id"] for p in cdi["Parameters"]}
+    used = {i["Source"]["Id"] for s in settings for i in s["Input"]} | \
+           {o["Destination"]["Id"] for s in settings for o in s["Output"]}
+    assert used <= declared and all(re.fullmatch(r"[A-Za-z0-9_]+", p) for p in declared)
+    assert {o["Destination"]["Id"] for s in settings for o in s["Output"]} == \
+        {"ParamHairBack", "ParamHairFront", "ParamAccessorySway"}  # no physics for the real ears
