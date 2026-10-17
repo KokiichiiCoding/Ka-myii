@@ -66,9 +66,11 @@ for _directory in (
 # ---------------------------------------------------------------------------
 # Flask / server settings
 # ---------------------------------------------------------------------------
-FLASK_ENV = os.getenv("FLASK_ENV", "development")
+# Production by default: the development reloader restarts the server (killing a running job)
+# whenever a file changes. Local-only by default; the camera preview needs localhost anyway.
+FLASK_ENV = os.getenv("FLASK_ENV", "production")
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
-HOST = os.getenv("HOST", "0.0.0.0")
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = _env_int("PORT", 5000)
 DEBUG = FLASK_ENV == "development"
 
@@ -298,11 +300,6 @@ MODEL_ASSEMBLY = {
 PIPELINE = {
     "save_intermediate_steps": True,
     "cleanup_temp_files": False,
-}
-
-API = {
-    "max_concurrent_generations": _env_int("KAMYII_MAX_CONCURRENT", 2),
-    "timeout": _env_int("KAMYII_TIMEOUT", 600),
 }
 
 # Application metadata

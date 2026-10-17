@@ -16,7 +16,6 @@ from src.models.vtuber_model import (
 from src.core.image_generator import ImageGenerator, DummyImageGenerator
 from src.core.asset_separator import AssetSeparator, DummyAssetSeparator
 from src.core.model_assembler import ModelAssembler, DummyModelAssembler
-from src.core.rigging import AutoRigger
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +27,7 @@ class AssemblyLine:
     Pipeline stages:
     1. Image Generation - Create base character image
     2. Asset Separation - Split into layers
-    3. Model Assembly - Combine into Live2D format
-    4. Auto-Rigging (optional) - Add rigging and physics
+    3. Model Assembly - PSD/ORA + Live2D Cubism scaffold
     """
 
     def __init__(
@@ -62,7 +60,6 @@ class AssemblyLine:
             self.asset_separator = AssetSeparator()
             self.model_assembler = ModelAssembler()
 
-        self.auto_rigger = AutoRigger()
         self.use_dummy_generators = use_dummy_generators
         self._generator_signature = None
 
@@ -173,14 +170,6 @@ class AssemblyLine:
                 except Exception as exc:  # pragma: no cover
                     logger.warning("Could not read model manifest: %s", exc)
 
-            # Stage 4: Auto-Rigging (optional)
-            if request.include_rigging:
-                self._update_progress("Applying auto-rigging...", 0.9)
-                model.status = GenerationStatus.RIGGING
-                rigging_data = self._apply_rigging(final_model_path, assets)
-                model.metadata["rigging"] = rigging_data
-                logger.info("Rigging applied")
-
             # Complete
             model.status = GenerationStatus.COMPLETED
             model.generation_time = time.time() - start_time
@@ -242,10 +231,6 @@ class AssemblyLine:
         """Stage 3: Assemble model"""
         models_dir = output_dir / "model"
         return self.model_assembler.assemble(assets, models_dir, model_name)
-
-    def _apply_rigging(self, model_path: Path, assets: list[Asset]) -> Dict:
-        """Stage 4: Apply auto-rigging"""
-        return self.auto_rigger.rig_model(model_path, assets)
 
     def _generate_preview(self, model: VTuberModel, output_dir: Path):
         """Generate preview image for the model"""

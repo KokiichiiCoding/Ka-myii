@@ -24,7 +24,7 @@ echo ""
 if [ "$mode" = "1" ]; then
     if ! python -c "import flask, PIL, numpy, psd_tools, pytoshop" 2>/dev/null; then
         echo "Installing demo dependencies..."
-        pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six python-dotenv
+        pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
     fi
     echo "Starting Ka-myii in DEMO mode at http://localhost:${PORT:-5000} ..."
     python app.py --dummy

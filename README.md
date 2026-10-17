@@ -328,7 +328,7 @@ tests/                     Demo-mode pipeline, job-queue and browser-runtime tes
 ```cmd
 python -m venv venv
 venv\Scripts\activate.bat
-pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six python-dotenv
+pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
 python app.py --dummy
 ```
 

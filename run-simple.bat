@@ -59,7 +59,7 @@ exit /b 1
 :demo
 echo.
 echo Installing demo dependencies (lightweight)...
-pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six python-dotenv
+pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
 if errorlevel 1 (
     echo.
     echo ERROR during installation. Try:

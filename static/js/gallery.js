@@ -35,7 +35,6 @@
       }
       const more = document.createElement('details'); more.className = 'model-more';
       const summary = document.createElement('summary'); summary.textContent = 'More options';
-      const editor = document.createElement('a'); editor.href = `/editor/${id}`; editor.textContent = 'Expression editor';
       const remove = document.createElement('button'); remove.type='button'; remove.textContent='Delete character';
       remove.addEventListener('click', async () => {
         if (!confirm(`Delete ${name.textContent} and all its generated files? This cannot be undone.`)) return;
@@ -49,7 +48,7 @@
           $('galleryError').hidden=false; remove.disabled=false;
         }
       });
-      more.append(summary,editor,remove);
+      more.append(summary,remove);
       body.append(status,name,details,actions,more);card.append(art,body);grid.append(card);
     }
     if (models.length && !shown.length) {

@@ -39,80 +39,107 @@ def init_assembly_line(use_dummy: bool = False):
     logger.info("Assembly line initialized")
 
 
+def _number(data, key, default, kind, low, high):
+    value = data.get(key)
+    if value is None or value == '':
+        return default
+    try:
+        number = kind(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{key}' must be a number")
+    if not low <= number <= high:
+        raise ValueError(f"'{key}' must be between {low} and {high}")
+    return number
+
+
+def _parse_request(data) -> GenerationRequest:
+    """Validate a /generate body. Raises ValueError with a message for the user."""
+    from src.utils import model_scanner
+
+    if not isinstance(data, dict):
+        raise ValueError('Send the brief as a JSON object')
+    prompt = str(data.get('prompt') or '').strip()
+    if not prompt:
+        raise ValueError('Prompt is required')
+    framing = data.get('framing') or 'full_body'
+    if framing not in ('full_body', 'upper_body'):
+        raise ValueError('Choose full_body or upper_body framing')
+    style = data.get('style') or 'vtuber'
+    if style not in config.STYLE_PRESETS:
+        raise ValueError(f"Unknown style '{style}'")
+    defaults = config.IMAGE_GENERATION
+    sampler = data.get('sampler') or defaults.get('default_sampler')
+    if sampler not in config.SAMPLERS:
+        raise ValueError(f"Unknown sampler '{sampler}'")
+
+    # Only checkpoints/LoRAs the Studio lists: a free-form path would load any file on disk.
+    model_id = data.get('model_id') or None
+    if model_id and model_id not in {c['id'] for c in model_scanner.list_checkpoints() if c.get('available', True)}:
+        raise ValueError('Unknown checkpoint; pick one from the list (or drop it into models/checkpoints)')
+    loras = data.get('loras') or None
+    if loras is not None:
+        known = {entry['id'] for entry in model_scanner.list_loras()}
+        if not isinstance(loras, list) or not all(isinstance(l, dict) and l.get('id') in known for l in loras):
+            raise ValueError('Unknown LoRA; pick one from the list (or drop it into models/loras)')
+        loras = [{'id': l['id'], 'weight': _number(l, 'weight', 1.0, float, -4.0, 4.0)} for l in loras]
+
+    # Generous bounds; the point is to refuse sizes that would only exhaust the GPU.
+    w = _number(data, 'width', defaults.get('default_width', 832), int, 256, 2048)
+    h = _number(data, 'height', defaults.get('default_height', 1216), int, 256, 2048)
+    return GenerationRequest(
+        prompt=prompt,
+        negative_prompt=str(data.get('negative_prompt') or ''),
+        style=style,
+        width=w - w % 8,
+        height=h - h % 8,
+        steps=_number(data, 'steps', defaults.get('default_steps', 28), int, 1, 150),
+        guidance_scale=_number(data, 'guidance_scale', defaults.get('default_guidance_scale', 6.5), float, 0.0, 30.0),
+        seed=_number(data, 'seed', None, int, 0, 2**32 - 1),
+        model_id=model_id,
+        sampler=sampler,
+        clip_skip=_number(data, 'clip_skip', None, int, 1, 12),
+        loras=loras,
+        framing=framing,
+    )
+
+
 @generation_bp.route('/generate', methods=['POST'])
 def generate_model():
     """
     Queue a new VTuber model; poll /jobs/<task_id> for progress and the finished model_id.
 
-    Request JSON:
+    Request JSON (only "prompt" is required):
     {
-        "prompt": "anime girl with blue hair",
-        "negative_prompt": "low quality",
-        "style": "anime",
-        "width": 512,
-        "height": 512,
-        "steps": 30,
-        "guidance_scale": 7.5,
-        "seed": null,
-        "include_rigging": false,
-        "custom_layers": null
+        "prompt": "1girl, silver hair, witch hat",
+        "negative_prompt": "lowres",
+        "style": "vtuber",                  # a key of config.STYLE_PRESETS
+        "framing": "upper_body",            # or "full_body"
+        "model_id": "<id from /options>",   # checkpoint; default from config
+        "sampler": "DPM++ 2M Karras",
+        "width": 832, "height": 1216, "steps": 28, "guidance_scale": 6.5,
+        "clip_skip": 2, "seed": null,
+        "loras": [{"id": "<id from /options>", "weight": 0.8}]
     }
 
     Response (202):
     {
         "success": true,
-        "task_id": "gen_1a2b3c4d",
+        "task_id": "<job id>",
         "job": {"id": ..., "state": "queued", "position": 0, ...}
     }
     """
     try:
-        data = request.json
+        gen_request = _parse_request(request.get_json(silent=True))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
 
-        if data.get('framing', 'full_body') not in ('full_body', 'upper_body'):
-            return jsonify({'success': False, 'error': 'Choose full_body or upper_body framing'}), 400
-
-        # Create generation request
-        image_settings = config.IMAGE_GENERATION
-
-        gen_request = GenerationRequest(
-            prompt=data.get('prompt', ''),
-            negative_prompt=data.get('negative_prompt', ''),
-            style=data.get('style', 'vtuber'),
-            width=int(data.get('width', image_settings.get('default_width', 832))),
-            height=int(data.get('height', image_settings.get('default_height', 1216))),
-            steps=int(data.get('steps', image_settings.get('default_steps', 28))),
-            guidance_scale=float(data.get('guidance_scale', image_settings.get('default_guidance_scale', 6.5))),
-            seed=data.get('seed'),
-            model_id=data.get('model_id'),
-            sampler=data.get('sampler', image_settings.get('default_sampler')),
-            clip_skip=data.get('clip_skip'),
-            loras=data.get('loras'),
-            batch_size=int(data.get('batch_size', 1)),
-            framing=data.get('framing', 'full_body'),
-            include_rigging=data.get('include_rigging', False),
-            custom_layers=data.get('custom_layers')
-        )
-
-        if not gen_request.prompt:
-            return jsonify({
-                'success': False,
-                'error': 'Prompt is required'
-            }), 400
-
-        job = job_queue.submit(gen_request)
-        return jsonify({
-            'success': True,
-            'task_id': job.id,
-            'job': job_queue.describe(job),
-            'message': 'Queued'
-        }), 202
-
-    except Exception as e:
-        logger.error(f"Generation failed: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    job = job_queue.submit(gen_request)
+    return jsonify({
+        'success': True,
+        'task_id': job.id,
+        'job': job_queue.describe(job),
+        'message': 'Queued'
+    }), 202
 
 
 @generation_bp.route('/jobs', methods=['GET'])
@@ -150,9 +177,10 @@ def get_status(model_id: str):
     }
     """
     try:
-        model_metadata_path = config.OUTPUT_DIR / model_id / "metadata.json"
+        model_dir = model_dir_for(model_id)
+        model_metadata_path = model_dir / "metadata.json" if model_dir else None
 
-        if not model_metadata_path.exists():
+        if not model_metadata_path or not model_metadata_path.exists():
             return jsonify({
                 'success': False,
                 'error': 'Model not found'
@@ -216,9 +244,9 @@ def list_models():
 def download_model(model_id: str):
     """Download a generated model as a zip file"""
     try:
-        model_dir = config.OUTPUT_DIR / model_id
+        model_dir = model_dir_for(model_id)
 
-        if not model_dir.exists():
+        if not model_dir:
             return jsonify({
                 'success': False,
                 'error': 'Model not found'
@@ -238,13 +266,14 @@ def download_model(model_id: str):
 def get_preview(model_id: str):
     """Get preview image for a model"""
     try:
-        preview_path = config.OUTPUT_DIR / model_id / "preview.png"
+        model_dir = model_dir_for(model_id)
+        preview_path = model_dir / "preview.png" if model_dir else None
 
-        if not preview_path.exists():
+        if preview_path and not preview_path.exists():
             # Try base image as fallback
-            preview_path = config.OUTPUT_DIR / model_id / "base_image.png"
+            preview_path = model_dir / "base_image.png"
 
-        if not preview_path.exists():
+        if not preview_path or not preview_path.exists():
             return jsonify({
                 'success': False,
                 'error': 'Preview not found'
@@ -266,9 +295,9 @@ def delete_model(model_id: str):
     try:
         import shutil
 
-        model_dir = config.OUTPUT_DIR / model_id
+        model_dir = model_dir_for(model_id)
 
-        if not model_dir.exists():
+        if not model_dir:
             return jsonify({
                 'success': False,
                 'error': 'Model not found'
@@ -441,8 +470,9 @@ def get_options():
 def list_layers(model_id: str):
     """List the decomposed layer images for a model (for the Layer Studio)."""
     try:
-        assets_dir = config.OUTPUT_DIR / model_id / "assets"
-        if not assets_dir.exists():
+        model_dir = model_dir_for(model_id)
+        assets_dir = model_dir / "assets" if model_dir else None
+        if not assets_dir or not assets_dir.exists():
             return jsonify({'success': False, 'error': 'No layers found'}), 404
         layers = []
         for layer_file in sorted(assets_dir.glob("*.png")):
@@ -466,10 +496,10 @@ def list_layers(model_id: str):
 def get_layer(model_id: str, filename: str):
     """Serve a single decomposed layer PNG."""
     try:
+        model_dir = model_dir_for(model_id)
         # Prevent path traversal.
-        safe_name = Path(filename).name
-        layer_path = config.OUTPUT_DIR / model_id / "assets" / safe_name
-        if not layer_path.exists():
+        layer_path = model_dir / "assets" / Path(filename).name if model_dir else None
+        if not layer_path or not layer_path.is_file():
             return jsonify({'success': False, 'error': 'Layer not found'}), 404
         if request.args.get('crop'):
             # Layers are full-canvas and mostly transparent; thumbnails want just the part.
@@ -509,8 +539,8 @@ def _download_zip(directory: Path, name: str):
         raise
 
 
-def preview_model_dir(model_id: str):
-    # A single model directory, including on Windows (drive/backslash aware).
+def model_dir_for(model_id: str):
+    """The output folder for a model id from a URL, or None. Never escapes OUTPUT_DIR."""
     if not model_id or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in model_id):
         return None
     base = config.OUTPUT_DIR.resolve()
@@ -522,7 +552,7 @@ def preview_model_dir(model_id: str):
 def get_artifact(model_id: str, kind: str):
     """Download a rig-ready artifact: 'psd', 'ora', 'flat' or 'package' (zip)."""
     try:
-        model_dir = preview_model_dir(model_id)
+        model_dir = model_dir_for(model_id)
         if not model_dir:
             return jsonify({'success': False, 'error': 'Model not found'}), 404
 

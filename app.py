@@ -10,8 +10,7 @@ from pathlib import Path
 # allocations, so the idle app kept ~7.5 GB of unloaded SDXL weights while See-through needed
 # the RAM. Must be set before torch loads.
 os.environ.setdefault("MIMALLOC_PURGE_DELAY", "0")
-from flask import Flask, render_template, jsonify, abort, url_for
-from flask_cors import CORS
+from flask import Flask, render_template, jsonify, abort, url_for, request
 import logging
 
 # Add src to path
@@ -20,17 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config
 from src.utils.helpers import setup_logging
 from src.api.generation import generation_bp, init_assembly_line
-from src.api.models import models_bp
-from src.api.expression import expression_bp
-
-# Try to import SocketIO for real-time progress
-try:
-    from flask_socketio import SocketIO
-    from src.utils.progress_tracker import init_progress_manager
-    SOCKETIO_AVAILABLE = True
-except ImportError:
-    SOCKETIO_AVAILABLE = False
-    logging.getLogger(__name__).warning("flask-socketio not installed - real-time progress updates disabled")
 
 # Setup logging
 setup_logging(
@@ -41,6 +29,9 @@ setup_logging(
 logger = logging.getLogger(__name__)
 
 
+LOOPBACK_HOSTS = {'127.0.0.1', 'localhost', '[::1]'}
+
+
 def create_app(use_dummy_generators: bool = False):
     """
     Create and configure the Flask application
@@ -49,41 +40,26 @@ def create_app(use_dummy_generators: bool = False):
         use_dummy_generators: Use dummy generators for testing (no GPU required)
 
     Returns:
-        Flask application (and SocketIO if available)
+        Flask application
     """
     app = Flask(__name__)
     app.config['SECRET_KEY'] = config.SECRET_KEY
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+    # No CORS: the UI is same-origin, and allowing other origins would let any website the
+    # user visits drive this local server (queue jobs, delete results).
+    app.config['LOCAL_ONLY'] = False
 
-    # Enable CORS
-    CORS(app)
-
-    # Initialize SocketIO for real-time progress
-    socketio = None
-    if SOCKETIO_AVAILABLE:
-        socketio = SocketIO(app, cors_allowed_origins="*")
-        init_progress_manager(socketio)
-        logger.info("SocketIO initialized for real-time progress updates")
-
-        # SocketIO event handlers
-        @socketio.on('connect', namespace='/progress')
-        def handle_connect():
-            logger.info("Client connected to progress namespace")
-
-        @socketio.on('disconnect', namespace='/progress')
-        def handle_disconnect():
-            logger.info("Client disconnected from progress namespace")
-
-    # Store socketio in app config
-    app.socketio = socketio
+    @app.before_request
+    def reject_foreign_hosts():
+        # DNS rebinding: a website can point its own hostname at 127.0.0.1 and become "same origin".
+        if app.config['LOCAL_ONLY'] and request.host.rsplit(':', 1)[0] not in LOOPBACK_HOSTS:
+            abort(403)
 
     # Initialize assembly line
     init_assembly_line(use_dummy=use_dummy_generators)
 
     # Register blueprints
     app.register_blueprint(generation_bp)
-    app.register_blueprint(models_bp)
-    app.register_blueprint(expression_bp)
 
     # Routes
     @app.route('/')
@@ -103,8 +79,8 @@ def create_app(use_dummy_generators: bool = False):
 
     @app.route('/preview/<model_id>')
     def live_preview(model_id):
-        from src.api.generation import preview_model_dir
-        model_dir = preview_model_dir(model_id)
+        from src.api.generation import model_dir_for
+        model_dir = model_dir_for(model_id)
         if not model_dir or not (model_dir / 'assets').is_dir():
             abort(404)
         from src.utils.helpers import load_json
@@ -114,11 +90,6 @@ def create_app(use_dummy_generators: bool = False):
             name = 'Study ' + name[6:].upper()
         return render_template('preview.html', model_id=model_id, character_name=name,
                                preview_psd=url_for('generation.get_artifact', model_id=model_id, kind='preview_psd'))
-
-    @app.route('/editor/<model_id>')
-    def editor(model_id):
-        """Expression editor page"""
-        return render_template('editor.html', model_id=model_id)
 
     @app.route('/health')
     def health():
@@ -175,6 +146,7 @@ def main():
 
     # Create app
     app = create_app(use_dummy_generators=args.dummy)
+    app.config['LOCAL_ONLY'] = args.host in ('127.0.0.1', 'localhost', '::1')
 
     logger.info("=" * 60)
     logger.info("Ka-myii: Automated VTuber Model Generation System")
@@ -189,24 +161,7 @@ def main():
         logger.warning("Running in DEMO mode - no actual AI generation")
         logger.warning("   This mode is for testing the pipeline without GPU")
 
-    # Run server with SocketIO if available
-    if SOCKETIO_AVAILABLE and hasattr(app, 'socketio') and app.socketio:
-        logger.info("Starting server with SocketIO support")
-        app.socketio.run(
-            app,
-            host=args.host,
-            port=args.port,
-            debug=args.debug,
-            allow_unsafe_werkzeug=True
-        )
-    else:
-        logger.info("Starting server without SocketIO")
-        app.run(
-            host=args.host,
-            port=args.port,
-            debug=args.debug,
-            threaded=True
-        )
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 
 if __name__ == '__main__':

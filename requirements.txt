@@ -2,14 +2,11 @@
 # ---------------------------------------------------------------------------
 # Install everything:           pip install -r requirements.txt
 # Minimum to run the WebUI in demo mode (no GPU):
-#   pip install Flask flask-cors flask-socketio Pillow numpy psd-tools pytoshop six
+#   pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
 # ---------------------------------------------------------------------------
 
 # --- Core web framework (required) ---
 Flask>=3.0.0
-flask-cors>=4.0.0
-flask-socketio>=5.3.0
-python-socketio>=5.10.0
 
 # --- Image + numerics (required) ---
 Pillow>=10.2.0
@@ -22,7 +19,6 @@ six>=1.16.0           # pytoshop runtime dependency
 
 # --- Utilities ---
 python-dotenv>=1.0.0
-pydantic>=2.5.0
 
 # ===========================================================================
 # AI image generation (heavy — install for real, high-quality generation).
@@ -39,7 +35,6 @@ peft>=0.9.0           # LoRA support
 # --- Character cut-out (recommended) ---
 # Runs SkyTNT's anime-segmentation IS-Net; scripts/install_seethrough.py fetches its weights.
 # (rembg also works if installed, but pulls ~200 MB of extra dependencies.)
-opencv-python>=4.8.0
 onnxruntime>=1.17.0
 
 # ===========================================================================
