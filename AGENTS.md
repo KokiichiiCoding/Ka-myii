@@ -30,6 +30,9 @@ Read this whole file before changing anything. Keep it up to date when you finis
   (section 9) as separate commits on top. Commit or push only when the owner asks.
   **Never run `git checkout .`, `git reset --hard`, `git stash` or `git clean` on this tree**
   (`outputs/` holds the owner's characters).
+- **The repo is public.** The local git config's email is the owner's personal address; commit as
+  `git -c user.name=KokiichiiCoding -c user.email=130875715+KokiichiiCoding@users.noreply.github.com commit …`
+  (the GitHub noreply identity earlier commits use) so pushes don't publish it.
 - Never commit model weights, `outputs/`, `engines/`, venvs (all gitignored — keep it that way).
 
 ## 3. Environment & commands (Windows, PowerShell)
