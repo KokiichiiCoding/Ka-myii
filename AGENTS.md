@@ -204,8 +204,9 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
 - `run.sh` was run on Ubuntu 24.04 under WSL (2026-10-17): venv check message, torch 2.8 + pinned
   requirements, demo server, a demo job with package + preview PSD downloads. Real generation /
   See-through on Linux are untested. macOS can only use demo mode (no CUDA).
-- `run.bat`'s `set /p` prompts were only driven from a redirected file in the clean-clone test,
-  where the See-through "n" answer did not register; a human should check them interactively.
+- `run.bat`'s prompts: `fc` (the requirements check) was swallowing redirected stdin, so piped
+  answers never reached `set /p`; fixed with `<nul`, and a piped "2" then started demo mode.
+  Prompts typed in a real console have not been exercised by a human yet.
 - The old expression editor / accessory generator / image editor were removed in M4 (they pasted
   clip-art shapes at guessed positions); Live Preview covers expressions.
 
@@ -381,7 +382,7 @@ Verification (2026-10-17, owner's laptop):
   `py -3.12`, CUDA torch + requirements, See-through installed from scratch, server healthy in
   real mode with Animagine as default. Pulling the pinning commit and re-running reinstalled
   exactly the pinned packages, skipped torch and the See-through prompt, and started.
-  (Redirected input never reached `set /p`, so the prompts took their defaults — see section 6.)
+  (Redirected input never reached `set /p` there — `fc` consumed it; fixed, see section 6.)
 - Studio upload flow in the browser (re-uploading run C's artwork): toggle, thumbnail, the job
   skipped the image stage and completed in 723 s → 18 layers, the witch hat now `headwear`.
 - Gallery retry on a staged failed result: queued, Studio re-attached, cancelled during

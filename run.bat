@@ -43,7 +43,7 @@ set "VPY=%VENV%\Scripts\python.exe"
 "%VPY%" --version
 
 REM --- Dependencies: first run, or whenever requirements.txt changed ---------
-fc /b requirements.txt "%VENV%\kamyii-requirements.txt" >nul 2>&1
+fc /b requirements.txt "%VENV%\kamyii-requirements.txt" <nul >nul 2>&1
 if errorlevel 1 (
     call :install
     if errorlevel 1 goto :fail
