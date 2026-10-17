@@ -1,5 +1,8 @@
 @echo off
 SETLOCAL EnableDelayedExpansion
+cd /d "%~dp0"
+set FLASK_ENV=production
+set PYTHONIOENCODING=utf-8
 
 REM ================================
 REM Ka-myii Enhanced Setup & Launch
@@ -26,10 +29,12 @@ echo [OK] Python detected
 python --version
 echo.
 
-REM Check/Create virtual environment
-if not exist "venv" (
+REM Reuse the existing environment; prefer the same .venv used for development.
+set "KAMYII_VENV=.venv"
+if not exist ".venv\Scripts\python.exe" if exist "venv\Scripts\python.exe" set "KAMYII_VENV=venv"
+if not exist "%KAMYII_VENV%\Scripts\python.exe" (
     echo [INFO] Creating virtual environment...
-    python -m venv venv
+    python -m venv "%KAMYII_VENV%"
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment
         pause
@@ -44,7 +49,7 @@ if not exist "venv" (
 
 REM Activate virtual environment
 echo [INFO] Activating virtual environment...
-call venv\Scripts\activate.bat
+call "%KAMYII_VENV%\Scripts\activate.bat"
 if errorlevel 1 (
     echo [ERROR] Failed to activate virtual environment
     pause
@@ -103,9 +108,9 @@ echo ================================================
 echo.
 
 if !CUDA_AVAILABLE! equ 1 (
-    echo [INFO] Installing PyTorch with CUDA 11.8 support...
+    echo [INFO] Installing PyTorch with CUDA 12.8 support...
     echo This may take a few minutes...
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+    pip install torch==2.8.0+cu128 torchvision==0.23.0+cu128 --index-url https://download.pytorch.org/whl/cu128
     if errorlevel 1 (
         echo [WARNING] CUDA installation failed, falling back to CPU version...
         pip install torch torchvision torchaudio
@@ -131,6 +136,26 @@ echo [OK] All dependencies installed successfully!
 echo.
 
 :check_pytorch
+REM Optional: See-through engine for real layer decomposition of AI-generated characters
+if not exist "engines\see-through\.venv" (
+    nvidia-smi >nul 2>&1
+    if not errorlevel 1 (
+        echo ================================================
+        echo    Optional: See-through layer decomposition
+        echo ================================================
+        echo Splits generated characters into 20+ clean, inpainted layers
+        echo ^(SIGGRAPH 2026^). Needs an 8 GB+ NVIDIA GPU and ~9 GB download.
+        echo Without it, real images use a rough geometric split.
+        echo.
+        set /p install_st="Install See-through now? (Y/n): "
+        if /i not "!install_st!"=="n" (
+            python scripts\install_seethrough.py
+            if errorlevel 1 echo [WARNING] See-through install failed - Ka-myii will use the basic splitter.
+        )
+        echo.
+    )
+)
+
 REM Verify PyTorch installation and CUDA availability
 echo ================================================
 echo    PyTorch Configuration

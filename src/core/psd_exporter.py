@@ -116,6 +116,9 @@ def export_psd(assets: List[Asset], output_path: Path) -> Optional[Path]:
             layers,
             color_mode=enums.ColorMode.rgb,
             compression=enums.Compression.raw,  # RLE path is broken upstream
+            # Without explicit dimensions pytoshop crops AND shifts every layer.
+            # Its implementation accepts (width, height), despite its docstring.
+            size=(cw, ch),
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "wb") as fh:

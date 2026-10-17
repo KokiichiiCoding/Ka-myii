@@ -3,8 +3,9 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
-  let socket = null;
   let currentTaskId = null;
+  let pollTimer = null;
+  const pageTitle = document.title;
   let lastSeed = null;
   let busy = false;
 
@@ -18,7 +19,8 @@
     clipSkip: $('clipSkip'), clipSkipVal: $('clipSkipVal'),
     width: $('width'), widthVal: $('widthVal'), height: $('height'), heightVal: $('heightVal'),
     lora: $('lora'), advToggle: $('advToggle'), advBody: $('advBody'), advChevron: $('advChevron'),
-    generateBtn: $('generateBtn'),
+    generateBtn: $('generateBtn'), cancelBtn: $('cancelBtn'),
+    queuePanel: $('queuePanel'), queueList: $('queueList'), queueNote: $('queueNote'),
     canvasEmpty: $('canvasEmpty'), resultImg: $('resultImg'),
     overlay: $('progressOverlay'), pLabel: $('progressLabel'), pFill: $('progressFill'), pEta: $('progressEta'),
     resultMeta: $('resultMeta'), metaStatus: $('metaStatus'), metaLayers: $('metaLayers'),
@@ -34,10 +36,42 @@
   // ---- init ----
   document.addEventListener('DOMContentLoaded', async () => {
     bindControls();
-    connectSocket();
     await loadOptions();
     await refreshModelNotice();
     addUIEnhancements();
+    refreshQueue();
+    setInterval(refreshQueue, 3000);
+    if (await resumeActiveJob()) return;
+    const savedId = new URLSearchParams(location.search).get('model');
+    if (savedId) {
+      try {
+        const {data} = await axios.get(`/api/generation/status/${encodeURIComponent(savedId)}`);
+        if (data.success) {
+          const saved = data.model.request;
+          if (saved) {
+            els.prompt.value = saved.prompt || '';
+            els.negative.value = saved.negative_prompt || '';
+            $('framing').value = saved.framing || 'full_body';
+            if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
+            for (const [key, value] of [['steps',saved.steps],['cfg',saved.guidance_scale],['width',saved.width],['height',saved.height],['clipSkip',saved.clip_skip]]) {
+              if (value != null) { els[key].value=value; els[key+'Val'].textContent=value; }
+            }
+            if ([...els.model.options].some(o=>o.value===saved.model_id)) els.model.value=saved.model_id;
+            if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
+            const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
+            if (resolution) els.resolution.value=resolution.value;
+            if (saved.style) selectedStyle=saved.style;
+            for (const chip of els.styleChips.children) {
+              const active=chip.textContent===selectedStyle;
+              chip.classList.toggle('active',active); chip.setAttribute('aria-pressed',String(active));
+            }
+            updateModelHint();
+          }
+          els.canvasEmpty.classList.add('hidden');
+          await showResult({model_id:savedId, model:data.model});
+        }
+      } catch (err) { showError('This character could not be opened. Return to the collection and try again.'); }
+    }
   });
 
   function bindControls() {
@@ -50,6 +84,7 @@
     els.reuseSeed.onclick = () => { if (lastSeed != null) els.seed.value = lastSeed; };
     els.advToggle.onclick = () => {
       els.advBody.classList.toggle('hidden');
+      els.advToggle.setAttribute('aria-expanded', String(!els.advBody.classList.contains('hidden')));
       els.advChevron.classList.toggle('fa-chevron-down');
       els.advChevron.classList.toggle('fa-chevron-up');
     };
@@ -63,6 +98,13 @@
     els.model.onchange = updateModelHint;
     els.form.onsubmit = onGenerate;
     els.regenBtn.onclick = resetToForm;
+    els.cancelBtn.onclick = async () => {
+      if (!currentTaskId) return;
+      els.cancelBtn.disabled = true;
+      els.pLabel.textContent = 'Cancelling…';
+      try { await axios.post(`/api/generation/jobs/${currentTaskId}/cancel`); }
+      catch (e) { els.cancelBtn.disabled = false; }
+    };
   }
 
   async function loadOptions() {
@@ -73,13 +115,16 @@
       // styles
       els.styleChips.innerHTML = '';
       data.styles.forEach((s) => {
-        const chip = document.createElement('div');
+        const chip = document.createElement('button');
+        chip.type = 'button';
         chip.className = 'chip' + (s === selectedStyle ? ' active' : '');
         chip.textContent = s;
+        chip.setAttribute('aria-pressed', String(s === selectedStyle));
         chip.onclick = () => {
           selectedStyle = s;
-          [...els.styleChips.children].forEach((c) => c.classList.remove('active'));
+          [...els.styleChips.children].forEach((c) => { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
           chip.classList.add('active');
+          chip.setAttribute('aria-pressed', 'true');
         };
         els.styleChips.appendChild(chip);
       });
@@ -143,38 +188,135 @@
     } catch (e) { /* ignore */ }
   }
 
-  // ---- websocket progress ----
-  function connectSocket() {
-    if (typeof io === 'undefined') return;
+  // ---- background job tracking ----
+  // Generation runs as a server-side job; polling (not the socket) is the single source of truth,
+  // so a reloaded or reopened tab re-attaches to the running job.
+  async function resumeActiveJob() {
     try {
-      socket = io('/progress');
-      socket.on('progress_update', (d) => {
-        if (currentTaskId && d.task_id && d.task_id !== currentTaskId) return;
-        if (typeof d.progress === 'number') els.pFill.style.width = d.progress + '%';
-        if (d.message) els.pLabel.textContent = d.message;
-        if (d.eta && d.eta > 1) {
-          const s = Math.round(d.eta);
-          els.pEta.textContent = s >= 60 ? `ETA ${Math.floor(s / 60)}m ${s % 60}s` : `ETA ${s}s`;
-        } else { els.pEta.textContent = ''; }
-      });
-    } catch (e) { console.warn('socket init failed', e); }
+      const { data } = await axios.get('/api/generation/jobs');
+      const jobs = data.jobs || [];
+      const active = jobs.find((j) => j.state === 'running') || jobs.find((j) => j.state === 'queued');
+      if (!active) return false;
+      if (active.prompt && !els.prompt.value) els.prompt.value = active.prompt;
+      track(active);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function track(job) {
+    currentTaskId = job.id;
+    busy = true;
+    showProgress();
+    renderJob(job);
+    clearTimeout(pollTimer);
+    const tick = async () => {
+      if (currentTaskId !== job.id) return;
+      try {
+        const { data } = await axios.get(`/api/generation/jobs/${job.id}`);
+        const j = data.job;
+        renderJob(j);
+        if (j.state === 'completed') {
+          endJob();
+          const status = await axios.get(`/api/generation/status/${encodeURIComponent(j.model_id)}`);
+          await showResult({ model_id: j.model_id, model: status.data.model });
+          return;
+        }
+        if (j.state === 'failed') { endJob(); showError(j.error || 'Generation failed'); return; }
+        if (j.state === 'cancelled') { endJob(); els.overlay.classList.add('hidden'); resetToForm(); return; }
+      } catch (err) {
+        if (err.response?.status === 404) {
+          endJob();
+          showError('The server no longer knows this job — it was probably restarted. Finished characters are in the Gallery.');
+          return;
+        }
+        // Transient network hiccup: keep polling.
+      }
+      pollTimer = setTimeout(tick, 1000);
+    };
+    pollTimer = setTimeout(tick, 1000);
+  }
+
+  function renderJob(j) {
+    els.pFill.style.width = (j.progress || 0) + '%';
+    // A real run takes ~15 min; show progress on the tab while the user is elsewhere.
+    document.title = (j.state === 'queued' ? 'Queued' : Math.floor(j.progress || 0) + '%') + ' · ' + pageTitle;
+    if (j.state === 'queued') {
+      els.pLabel.textContent = j.position ? `Waiting in queue — ${j.position} ahead` : 'Waiting for the GPU…';
+    } else if (j.message) {
+      const step = { image: 'Step 1 of 3 · ', separate: 'Step 2 of 3 · ', assemble: 'Step 3 of 3 · ' }[j.stage] || '';
+      els.pLabel.textContent = step + j.message;
+    }
+    if (j.eta && j.eta > 1) {
+      const s = Math.round(j.eta);
+      els.pEta.textContent = (s >= 60 ? `about ${Math.floor(s / 60)}m ${s % 60}s` : `about ${s}s`) + ' left in this step';
+    } else { els.pEta.textContent = ''; }
+    els.cancelBtn.disabled = !!j.cancel_requested;
+  }
+
+  function endJob() {
+    clearTimeout(pollTimer);
+    document.title = pageTitle;
+    busy = false;
+    setGenerateLabel(false);
+    els.cancelBtn.classList.add('hidden');
+    els.cancelBtn.disabled = false;
+  }
+
+  // Every job except the one on the canvas, so several characters can be lined up overnight.
+  async function refreshQueue() {
+    let jobs;
+    try { jobs = (await axios.get('/api/generation/jobs')).data.jobs || []; } catch (e) { return; }
+    const others = jobs.filter((j) => (j.state === 'queued' || j.state === 'running') && j.id !== currentTaskId)
+      .sort((a, b) => (a.state === 'running' ? -1 : 0) - (b.state === 'running' ? -1 : 0) || (a.position ?? 0) - (b.position ?? 0));
+    els.queueList.innerHTML = '';
+    for (const j of others) {
+      const li = document.createElement('li');
+      li.className = 'queue-item';
+      const label = document.createElement('span');
+      label.className = 'q-prompt'; label.textContent = j.prompt; label.title = j.prompt;
+      const state = document.createElement('span');
+      state.className = 'q-state';
+      state.textContent = j.state === 'running' ? `${Math.floor(j.progress)}%` : `#${(j.position ?? 0) + 1}`;
+      const watch = document.createElement('button');
+      watch.type = 'button'; watch.title = 'Watch this job'; watch.setAttribute('aria-label', 'Watch ' + j.prompt);
+      watch.innerHTML = '<i class="fas fa-eye"></i>';
+      watch.onclick = () => { els.prompt.value = j.prompt; track(j); refreshQueue(); };
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.title = 'Cancel'; cancel.setAttribute('aria-label', 'Cancel ' + j.prompt);
+      cancel.innerHTML = '<i class="fas fa-xmark"></i>';
+      cancel.disabled = j.cancel_requested;
+      cancel.onclick = async () => { cancel.disabled = true; await axios.post(`/api/generation/jobs/${j.id}/cancel`).catch(() => {}); refreshQueue(); };
+      li.append(label, state, watch, cancel);
+      els.queueList.appendChild(li);
+    }
+    els.queuePanel.classList.toggle('hidden', !others.length && !els.queueNote.textContent);
+  }
+
+  function setGenerateLabel(queueing) {
+    els.generateBtn.innerHTML = queueing
+      ? '<i class="fas fa-plus"></i> Add to queue'
+      : '<i class="fas fa-wand-magic-sparkles"></i> Create character';
   }
 
   // ---- generate ----
+  let submitting = false;
   async function onGenerate(e) {
     e.preventDefault();
-    if (busy) return;
+    if (submitting) return;
     const prompt = els.prompt.value.trim();
     if (!prompt) { els.prompt.focus(); return; }
 
-    busy = true;
-    showProgress();
+    // While a job is on the canvas, new briefs join the queue instead of replacing it.
+    const queueing = busy;
+    if (!queueing) { busy = true; showProgress(); }
+    els.queueNote.textContent = '';
 
     const seedRaw = parseInt(els.seed.value, 10);
     const payload = {
       prompt,
       negative_prompt: els.negative.value.trim(),
       style: selectedStyle,
+      framing: $('framing').value,
       model_id: els.model.value,
       sampler: els.sampler.value,
       steps: parseInt(els.steps.value, 10),
@@ -185,19 +327,21 @@
       seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
       loras: els.lora.value ? [{ id: els.lora.value, weight: 1.0 }] : null,
     };
-    lastSeed = payload.seed;
+    if (!queueing) lastSeed = payload.seed;
 
+    submitting = true;
+    els.generateBtn.disabled = true;
     try {
       const { data } = await axios.post('/api/generation/generate', payload);
       if (!data.success) throw new Error(data.error || 'Generation failed');
-      currentTaskId = data.task_id;
-      els.pFill.style.width = '100%';
-      await showResult(data);
+      if (queueing) refreshQueue(); else track(data.job);
     } catch (err) {
       const msg = err.response?.data?.error || err.message || String(err);
-      showError(msg);
+      if (queueing) { els.queueNote.textContent = msg; refreshQueue(); }
+      else { endJob(); showError(msg); }
     } finally {
-      busy = false;
+      submitting = false;
+      els.generateBtn.disabled = false;
     }
   }
 
@@ -211,13 +355,15 @@
     els.pFill.style.width = '0%';
     els.pLabel.textContent = 'Starting…';
     els.pEta.textContent = '';
-    els.generateBtn.disabled = true;
+    setGenerateLabel(true);
+    els.cancelBtn.classList.remove('hidden');
   }
 
   async function showResult(data) {
     const model = data.model || {};
     const meta = model.metadata || {};
     const mid = data.model_id;
+    if (model.request?.seed != null) lastSeed = model.request.seed;
 
     els.resultImg.src = `/api/generation/preview/${mid}?t=${Date.now()}`;
     els.resultImg.onload = () => {
@@ -229,9 +375,10 @@
     els.metaStatus.textContent = model.status || 'completed';
     els.metaLayers.textContent = (meta.layers || []).length || '—';
     els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
-    els.metaSeed.textContent = lastSeed != null ? lastSeed : 'random';
+    els.metaSeed.textContent = model.request?.seed ?? lastSeed ?? 'random';
     els.resultMeta.classList.remove('hidden');
 
+    $('livePreview').href = `/preview/${encodeURIComponent(mid)}`;
     els.dlPackage.href = `/api/generation/artifact/${mid}/package`;
     els.dlPsd.href = `/api/generation/artifact/${mid}/psd`;
     els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
@@ -248,7 +395,7 @@
       data.layers.forEach((l) => {
         const card = document.createElement('div');
         card.className = 'layer-card';
-        card.innerHTML = `<div class="layer-thumb"><img loading="lazy" src="${l.url}" alt="${l.name}"></div>
+        card.innerHTML = `<div class="layer-thumb"><img loading="lazy" src="${l.url}?crop=1" alt="${l.name}"></div>
                           <div class="layer-name">${l.name}</div>`;
         els.layerGrid.appendChild(card);
       });
@@ -285,60 +432,10 @@
       slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
     });
 
-    // Add ripple effect to buttons
-    document.querySelectorAll('.btn, .chip').forEach(btn => {
-      btn.addEventListener('click', function(e) {
-        const ripple = document.createElement('span');
-        ripple.style.cssText = `
-          position: absolute;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.3);
-          transform: scale(0);
-          animation: ripple 0.6s ease-out;
-          pointer-events: none;
-        `;
-        const rect = this.getBoundingClientRect();
-        const size = Math.max(rect.width, rect.height);
-        ripple.style.width = ripple.style.height = size + 'px';
-        ripple.style.left = e.clientX - rect.left - size / 2 + 'px';
-        ripple.style.top = e.clientY - rect.top - size / 2 + 'px';
-
-        this.style.position = 'relative';
-        this.style.overflow = 'hidden';
-        this.appendChild(ripple);
-
-        setTimeout(() => ripple.remove(), 600);
-      });
-    });
-
-    // Add CSS animation for ripple if not exists
-    if (!document.getElementById('ripple-style')) {
-      const style = document.createElement('style');
-      style.id = 'ripple-style';
-      style.textContent = '@keyframes ripple { to { transform: scale(4); opacity: 0; } }';
-      document.head.appendChild(style);
-    }
-
-    // Smooth reveal for panels
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.style.animation = 'slideIn 0.6s ease-out forwards';
-          observer.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.1 });
-
-    document.querySelectorAll('.panel, .feature').forEach(el => {
-      if (!el.classList.contains('sticky')) {
-        observer.observe(el);
-      }
-    });
-
     // Add keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       // Ctrl/Cmd + Enter to generate
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !busy) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         els.generateBtn.click();
       }
@@ -348,25 +445,5 @@
       }
     });
 
-    // Show keyboard shortcuts hint on first load
-    if (!localStorage.getItem('km_shortcuts_shown')) {
-      setTimeout(() => {
-        const hint = document.createElement('div');
-        hint.style.cssText = `
-          position: fixed; bottom: 20px; right: 20px;
-          background: linear-gradient(135deg, rgba(177, 108, 234, 0.95), rgba(92, 200, 255, 0.95));
-          color: white; padding: 12px 18px; border-radius: 10px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-          font-size: 0.85rem; z-index: 1000;
-          animation: slideIn 0.4s ease-out;
-          cursor: pointer;
-        `;
-        hint.innerHTML = '💡 <strong>Tip:</strong> Ctrl+Enter to generate, Esc to reset';
-        document.body.appendChild(hint);
-        hint.onclick = () => hint.remove();
-        setTimeout(() => hint.remove(), 8000);
-        localStorage.setItem('km_shortcuts_shown', 'true');
-      }, 2000);
-    }
   }
 })();

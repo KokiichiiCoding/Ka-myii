@@ -21,6 +21,11 @@ LORA_EXTS = {".safetensors", ".pt"}
 VAE_EXTS = {".safetensors", ".pt", ".ckpt"}
 
 
+def _guess_pipeline(path: Path) -> str:
+    # SD1.5 checkpoints are ~2-4 GB, SDXL ones ~6.5 GB; many Illustrious/Pony files lack "xl" in the name.
+    return "sdxl" if "xl" in path.stem.lower() or path.stat().st_size > 5 * 1024**3 else "sd15"
+
+
 def _scan_dir(directory: Path, exts: set) -> List[Path]:
     if not directory.exists():
         return []
@@ -47,7 +52,7 @@ def list_checkpoints() -> List[Dict]:
             {
                 "id": str(path),
                 "name": path.stem,
-                "pipeline": "sdxl" if "xl" in path.stem.lower() else "auto",
+                "pipeline": _guess_pipeline(path),
                 "source": "local",
                 "tags": ["local"],
                 "size_mb": round(path.stat().st_size / (1024 * 1024), 1),
@@ -114,7 +119,7 @@ def resolve_checkpoint(identifier: str) -> Dict:
         return {
             "model_name": path.stem,
             "custom_model_path": str(path),
-            "pipeline": "sdxl" if "xl" in path.stem.lower() else "auto",
+            "pipeline": _guess_pipeline(path),
         }
 
     # Otherwise treat it as a Hugging Face repo id, matching a preset if known.

@@ -16,7 +16,7 @@ Pillow>=10.2.0
 numpy>=1.24.0
 
 # --- Layered document export (required for rig-ready PSD/ORA output) ---
-psd-tools>=1.9.0      # read/inspect PSDs
+psd-tools>=1.25.0     # read PSDs and write the live-preview document
 pytoshop>=1.2.0       # write layered PSDs
 six>=1.16.0           # pytoshop runtime dependency
 
@@ -36,8 +36,9 @@ accelerate>=0.27.0
 safetensors>=0.4.0
 peft>=0.9.0           # LoRA support
 
-# --- Background removal / segmentation (optional but recommended) ---
-rembg>=2.0.50
+# --- Character cut-out (recommended) ---
+# Runs SkyTNT's anime-segmentation IS-Net; scripts/install_seethrough.py fetches its weights.
+# (rembg also works if installed, but pulls ~200 MB of extra dependencies.)
 opencv-python>=4.8.0
 onnxruntime>=1.17.0
 

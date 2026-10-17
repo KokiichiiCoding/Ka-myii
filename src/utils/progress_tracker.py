@@ -38,6 +38,7 @@ class ProgressTracker:
         self.start_time = time.time()
         self.socketio = socketio
         self.cancelled = False
+        self.eta = 0.0
 
         logger.info(f"Progress tracker initialized for task: {task_id}")
 
@@ -63,6 +64,7 @@ class ProgressTracker:
             eta = (elapsed / self.current_step) * (self.total_steps - self.current_step)
         else:
             eta = 0
+        self.eta = eta
 
         # Prepare progress data
         progress_data = {
@@ -89,9 +91,9 @@ class ProgressTracker:
         """Increment progress by one step"""
         self.update(self.current_step + 1, message)
 
-    def complete(self, message: str = "Completed"):
-        """Mark task as completed"""
-        self.update(self.total_steps, message, "completed")
+    def complete(self, message: str = "Completed", status: str = "completed"):
+        """Mark task as finished (``status`` may also be "cancelled" or "failed")"""
+        self.update(self.total_steps, message, status)
 
     def error(self, message: str):
         """Mark task as errored"""
@@ -115,6 +117,9 @@ class ProgressManager:
     def __init__(self, socketio: Optional['SocketIO'] = None):
         """Initialize progress manager"""
         self.trackers: Dict[str, ProgressTracker] = {}
+        self.stages: Dict[str, str] = {}
+        # Cancellation outlives any one tracker: each pipeline stage creates a fresh one.
+        self.cancelled: set = set()
         self.socketio = socketio
         logger.info("ProgressManager initialized")
 
@@ -130,8 +135,27 @@ class ProgressManager:
             ProgressTracker instance
         """
         tracker = ProgressTracker(task_id, total_steps, self.socketio)
+        tracker.cancelled = task_id in self.cancelled
         self.trackers[task_id] = tracker
         return tracker
+
+    def set_stage(self, task_id: str, stage: str):
+        """Enter a pipeline stage; the previous stage's finished tracker no longer describes it."""
+        self.stages[task_id] = stage
+        self.trackers.pop(task_id, None)
+
+    def cancel(self, task_id: str):
+        self.cancelled.add(task_id)
+        if task_id in self.trackers:
+            self.trackers[task_id].cancelled = True
+
+    def is_cancelled(self, task_id: str) -> bool:
+        return task_id in self.cancelled
+
+    def forget(self, task_id: str):
+        self.trackers.pop(task_id, None)
+        self.stages.pop(task_id, None)
+        self.cancelled.discard(task_id)
 
     def get_tracker(self, task_id: str) -> Optional[ProgressTracker]:
         """Get a progress tracker by ID"""

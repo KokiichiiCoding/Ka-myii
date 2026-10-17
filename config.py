@@ -11,6 +11,13 @@ configured without editing code (see ``.env.example``).
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:  # python-dotenv is optional; real env vars still work
+    pass
+
 
 def _env_bool(name: str, default: bool) -> bool:
     """Parse a boolean environment variable."""
@@ -247,6 +254,10 @@ ASSET_SEPARATION = {
     "inpaint_occluded": _env_bool("KAMYII_INPAINT_OCCLUDED", True),
     "sam2_checkpoint": os.getenv("KAMYII_SAM2_CHECKPOINT"),
     "sam2_model_cfg": os.getenv("KAMYII_SAM2_CONFIG", "sam2_hiera_l.yaml"),
+    # See-through (SIGGRAPH 2026) — best decomposition when installed in engines/see-through.
+    "seethrough_dir": os.getenv("KAMYII_SEETHROUGH_DIR", str(BASE_DIR / "engines" / "see-through")),
+    # Activations dominate VRAM: ~8 GB at 1280, ~5 GB at 1024. 1024 fits 8 GB cards.
+    "seethrough_resolution": _env_int("KAMYII_SEETHROUGH_RESOLUTION", 1024),
 }
 
 
@@ -255,7 +266,6 @@ ASSET_SEPARATION = {
 # ---------------------------------------------------------------------------
 MODEL_ASSEMBLY = {
     "format": "live2d",  # "live2d" packages a Cubism-import-ready project
-    "texture_size": _env_int("KAMYII_TEXTURE_SIZE", 4096),
     "include_physics": True,
     "export_psd": True,  # Layered PSD is the primary rig-ready artifact
     # Standard Cubism parameter set generated into the .cdi3.json so the artist

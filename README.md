@@ -5,9 +5,10 @@
 > Turn a text prompt into a **rig-ready Live2D character** in minutes
 
 Ka-myii is a local, self-hosted web app that generates high-quality anime art with modern
-**SDXL models**, automatically decomposes characters into **15+ named layers**, and
+**SDXL models**, decomposes each character into **20+ inpainted layers** with
+[See-through](https://github.com/shitagaki-lab/see-through) (SIGGRAPH 2026), and
 packages a complete **Live2D Cubism project** — layered PSD, physics, parameters and all —
-ready for Cubism 5's AI auto-rig.
+ready for Cubism 5's semi-automatic deformer and face-motion tools.
 
 **Think *Stable Diffusion WebUI*, but the output is a riggable VTuber model instead of a flat image.**
 
@@ -22,27 +23,102 @@ ready for Cubism 5's AI auto-rig.
 ## ✨ What it does
 
 ```
- Prompt → SDXL Generate → Decompose Layers → Layered PSD + Live2D project → Rig in Cubism
+ Prompt → SDXL → See-through layers → Live Preview + layered PSD → Finish rigging in Cubism
 ```
 
 | Stage | What happens |
 |-------|--------------|
 | **Generate** | Modern SDXL / Illustrious / NoobAI / Pony / Holodayo checkpoints with sampler, LoRA, clip-skip and VAE controls |
-| **Decompose** | The character is split into 15+ aligned, named, transparent layers (hair front/back, head, eyes L/R, brows, mouth, body, clothing, accessories…), with occluded regions filled in |
+| **Decompose** | See-through splits the character into 20+ aligned, named, transparent layers (front/back hair, face, eye whites / irises / lashes / brows L+R, ears, mouth, nose, neck, top, bottom, arms L+R, legs, shoes, accessories…) with hidden regions genuinely inpainted |
 | **Package** | A true layered **`.psd`** (plus open **`.ora`**) and a Cubism-import-ready project: `model3.json`, `physics3.json`, `cdi3.json` (pre-loaded with the standard parameter set), an idle motion and a step-by-step rigging guide |
-| **Rig** | Open the PSD in **Live2D Cubism 5** and finish with its AI auto-rig |
+| **Rig** | Open the PSD in **Live2D Cubism 5** and use *Auto Generation of Deformer* (5.1+) and *Auto generation of facial motion* (5.0+) |
 
 ### Highlights
-- 🖥️ **Stable-Diffusion-style WebUI** — dark, fast, two-column studio with live
-  WebSocket progress and ETA.
-- ✂️ **Real decomposition** — region-map → SAM 2 → rembg+anatomy → geometry
-  backend chain, inspired by single-image layer-decomposition research.
+- **Character workshop UI** — charcoal and copper Studio, an artwork collection,
+  aligned layer inspection, live progress and offline browser libraries.
+- **Live Preview** — local WebGL animation, auto-blink, breathing, expressions, hair
+  physics, optional webcam tracking and microphone lip-sync.
+- **Upper-body framing** — the Studio default gives facial parts more pixels;
+  full-body framing remains available for complete outfits.
+- **Background queue** — generation runs as a server-side job: line up several
+  characters, close or reload the tab and come back, cancel at any stage (a cancelled
+  decomposition stops its GPU process at once). Progress shows on the browser tab.
+- **Long prompts** — SDXL briefs past CLIP's 77-token limit are encoded in 75-token chunks
+  (A1111/ComfyUI style) instead of being cut off, and clip skip uses the A1111 meaning
+  (2 = penultimate layer) for both the positive and negative prompt.
+- **Saved character briefs and seeds** — reopen a result with its settings and reuse its
+  actual seed, including when generation originally requested a random one.
+- ✂️ **Real decomposition** — See-through (SIGGRAPH 2026) layer diffusion with
+  inpainted hidden regions, running on 8 GB GPUs; geometric fallback without it.
 - 🧩 **Layered PSD / ORA export** with Live2D-friendly naming and draw order.
 - 🦴 **Rig-ready Live2D scaffold** with the full standard parameter set.
 - 💻 **Runs locally**, and a built-in **demo mode** exercises the entire pipeline
   with **no GPU and no model downloads**.
 
 ---
+
+## Live Preview
+
+Create a character in Studio and choose **Live Preview**, or open it from the Gallery.
+The exporter requires `psd-tools>=1.25.0` (included in requirements).
+Older outputs work too: `/preview/<model_id>` builds and caches a separate preview PSD
+from their aligned PNG layers. Cubism PSD/ORA files are preserved. Eye, brow and ear
+pairs are merged for the browser engine, which splits them again around the face.
+PSD canvas margins and layer offsets are retained in both preview and artist exports.
+Visible layer colors are taken from the original artwork; hidden inpainted pixels stay intact.
+
+The preview starts with breathing, blinking and gentle hair physics. **Face detail**
+zooms to the face; **Fit** restores the whole character. Expressions, head and eye
+sliders, anchor adjustment, layer visibility/order, transparent PNG snapshots and
+short video recording are available. Save adjustments in the browser or export a
+settings JSON. These adjustments affect the browser preview; they do not rig the
+Cubism scaffold or create a `.moc3` file.
+
+**Use camera** and **Use microphone** request browser permissions only when clicked.
+Camera frames and microphone audio stay in the browser. Use `localhost` / `127.0.0.1`
+or HTTPS. A denied or missing input leaves idle motion available; click a pending
+input toggle again to cancel. Chrome or Edge with WebGL and WebAssembly SIMD is
+recommended. All runtime scripts, fonts and face-tracking assets are bundled locally;
+there is no tracking-model CDN fallback. Generation still requires locally installed
+model weights (initial installation/downloads require internet).
+
+Closed-eye and closed-mouth expression artwork is generated by Anime2.5DRig from
+bundled parts, scaled to detected anchors and tinted to the model. The inspected
+v2 engine supports this directly, so an additional SDXL expression-inpainting pass
+is unnecessary for preview. Artists can supply their own `eye_close` / `mouth_close`
+layers for a closer match. Automatic animation remains an approximation: inspect
+occluded parts and adjust anchors before relying on the result for a stream.
+
+### Preview checks
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider --basetemp outputs/test-preview
+node tests/preview_runtime.test.cjs
+```
+
+The alternate temporary directory avoids Windows permission conflicts with temp
+folders created by another account. Node is only needed for the browser-runtime
+unit checks; the application itself runs with Python and a browser.
+
+### Browser dependencies and credits
+
+- [Anime2.5DRig](https://github.com/852wa/Anime2.5DRig), 852wa, MIT,
+  pinned to `7ddbd9943ea3152561b3dc8348fd752c850f3e95`. Vendored in
+  `static/vendor/anime25d` with its license. Local changes add direct model loading,
+  English primary controls, calmer motion, offline-only devices, face framing and
+  a smaller noise threshold to preserve tiny facial details.
+- [ag-psd](https://github.com/Agamnentzar/ag-psd), MIT; bundled by Anime2.5DRig.
+- [MediaPipe FaceMesh](https://github.com/google-ai-edge/mediapipe), Google LLC,
+  package `0.4.1633559619`, Apache-2.0. License and version notice accompany assets.
+- Bootstrap 5.3.0, Axios 1.13.2 and Socket.IO client 4.5.4, MIT.
+- Font Awesome Free 6.4.0: icons CC BY 4.0, fonts SIL OFL 1.1, code MIT.
+- [anime-segmentation](https://github.com/SkyTNT/anime-segmentation) IS-Net weights
+  (`skytnt/anime-seg`, revision `493cb608`), SkyTNT, Apache-2.0 — character cut-outs,
+  run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
+- Danbooru tag list from [a1111-sd-webui-tagcomplete](https://github.com/DominikDoom/a1111-sd-webui-tagcomplete),
+  Dominik Reh, MIT, pinned to `4170882f90b47be130a0ff9314f663c230b9153d`, trimmed to tags
+  with ≥ 100 posts. License in `static/vendor/tags`.
+  UI-library licenses are in `static/vendor/ui`. Typography uses system fonts.
 
 ## 🚀 Quick start
 
@@ -157,15 +233,35 @@ models: **Illustrious-XL**, **NoobAI-XL (v-pred)**, **Pony Diffusion V6**,
 The asset separator picks the best available backend:
 
 1. **Region map** — Ka-myii's demo renderer emits a pixel-perfect sidecar.
-2. **SAM 2** — Meta's Segment Anything 2 automatic masks (set
+2. **See-through** *(recommended)* — [Lin et al., SIGGRAPH 2026](https://github.com/shitagaki-lab/see-through)
+   (Apache-2.0). A layer-diffusion model generates every semantic part as its own
+   RGBA layer — including the parts hidden behind hair and clothes — and a depth
+   model orders them. Ka-myii then cuts the character out with an anime segmentation
+   model, fixes draw orders depth gets wrong for thin parts (iris under eye white, bangs
+   under the face), gives every visible pixel to the part the artwork really shows there
+   (trimming over-extended predictions), drops hallucinated or empty accessory layers,
+   keeps the artist's visible colours, and puts any character pixels no layer claimed
+   (e.g. cat ears, a witch hat) into a `leftover` layer so nothing goes missing.
+   After an update, `python scripts/rebuild_layers.py <model_id>` re-applies this to an
+   older result from its saved See-through PSD — no GPU needed.
+3. **SAM 2** — Meta's Segment Anything 2 automatic masks (set
    `KAMYII_SAM2_CHECKPOINT`), classified into semantic layers.
-3. **rembg + anatomy** — a foreground cut-out intersected with an anatomical
-   template.
-4. **Anatomy heuristic** — always-available geometric fallback.
+4. **rembg + anatomy / anatomy heuristic** — rough geometric fallback.
 
-Base layers (head, body, hair) are **hole-filled** so each exported layer is
-complete even where it was occluded — the core idea behind modern single-image
-decomposition (e.g. *See-through*, SIGGRAPH 2026).
+### Installing See-through
+
+`run.bat` offers to install it, or run:
+
+```bash
+python scripts/install_seethrough.py   # ~9 GB: engine venv + 4-bit weights
+```
+
+It lives in `engines/see-through` with its own virtualenv and runs as a separate
+process, so its GPU memory is fully released after every job. Ka-myii uses the
+4-bit weights with block swapping (`scripts/seethrough_runner.py`), which fits
+**8 GB GPUs**: ~4.6 GB peak, ~10 minutes per character on an RTX 4070 Laptop at
+the default 1024 resolution. Set `KAMYII_SEETHROUGH_RESOLUTION=1280` on 12 GB+ cards
+for sharper layers.
 
 > **Note on `.moc3`:** the binary runtime model can only be produced by the
 > proprietary Cubism Editor, so Ka-myii prepares a complete, correctly-structured
@@ -186,15 +282,20 @@ config.py                  Central configuration
 src/core/
   image_generator.py       SDXL/SD pipeline (optional torch) + demo renderer
   demo_character.py         Procedural character + region map (demo mode)
-  asset_separator.py        Layer decomposition (region-map/SAM2/rembg/geometry)
+  asset_separator.py        Layer decomposition (region-map/See-through/SAM2/geometry)
+  seethrough.py             Runs See-through in its own venv as a subprocess
   psd_exporter.py           Layered PSD (pytoshop) + OpenRaster .ora
   model_assembler.py        Cubism-ready project packaging
   auto_physics.py           physics3.json generation
 src/pipeline/assembly_line.py   Orchestration
+src/pipeline/jobs.py       Background job queue (one GPU job at a time, cancel, progress)
 src/api/                   REST endpoints
 src/utils/model_scanner.py Local checkpoint/LoRA/VAE discovery
 templates/ static/         Dark Stable-Diffusion-style WebUI
-tests/test_pipeline.py     End-to-end demo-mode smoke tests
+scripts/install_seethrough.py   One-shot See-through engine installer
+scripts/seethrough_runner.py    Low-VRAM (NF4 + block swap) See-through runner
+scripts/rebuild_layers.py       Re-run layer post-processing on existing results (no GPU)
+tests/                     Demo-mode pipeline, job-queue and browser-runtime tests
 ```
 
 ## 🪟 Windows Troubleshooting
@@ -319,6 +420,8 @@ Ka-myii can be deployed to:
 ```bash
 pip install pytest
 python -m pytest tests/ -q          # runs entirely in demo mode, no GPU
+node tests/preview_runtime.test.cjs # browser-runtime checks (optional, needs Node)
+node tests/tagcomplete.test.cjs
 ```
 
 ## 📜 License

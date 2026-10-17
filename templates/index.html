@@ -1,76 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Ka-myii — Automated VTuber Model Studio{% endblock %}
+{% block title %}Ka-myii — Character Workshop{% endblock %}
 {% block tab_home %}active{% endblock %}
-
 {% block content %}
 <div class="km-wrap">
-    <section class="hero">
-        <h1>Turn a prompt into a <span class="grad">rig-ready VTuber</span></h1>
-        <p>
-            Ka-myii is a local, Stable-Diffusion-style studio that generates high-quality
-            anime characters, automatically decomposes them into clean named layers, and
-            packages a complete <strong>Live2D Cubism</strong> project — layered PSD, physics,
-            parameters and all — ready for auto-rigging.
-        </p>
-        <div class="btn-row">
-            <a href="/generator" class="btn btn-primary btn-lg" style="width:auto;padding:15px 28px;">
-                <i class="fas fa-wand-magic-sparkles"></i> Open the Studio
-            </a>
-            <a href="/gallery" class="btn btn-lg" style="width:auto;padding:15px 28px;">
-                <i class="fas fa-images"></i> Browse Gallery
-            </a>
-        </div>
-
-        <div class="pipeline">
-            <div class="pipe-step"><span class="num">1</span> Prompt</div>
-            <span class="pipe-arrow">→</span>
-            <div class="pipe-step"><span class="num">2</span> SDXL Generate</div>
-            <span class="pipe-arrow">→</span>
-            <div class="pipe-step"><span class="num">3</span> Decompose Layers</div>
-            <span class="pipe-arrow">→</span>
-            <div class="pipe-step"><span class="num">4</span> PSD + Live2D</div>
-            <span class="pipe-arrow">→</span>
-            <div class="pipe-step"><span class="num">5</span> Rig in Cubism</div>
-        </div>
-    </section>
-
-    <section class="feature-grid">
-        <div class="panel feature">
-            <div class="fico">🎨</div>
-            <h4>Modern SDXL models</h4>
-            <p>Illustrious-XL, NoobAI-XL, Pony, Animagine and Holodayo-class checkpoints with
-               sampler, LoRA, clip-skip and VAE controls — the 2026 standard for anime art.</p>
-        </div>
-        <div class="panel feature">
-            <div class="fico">✂️</div>
-            <h4>Automatic decomposition</h4>
-            <p>Characters are split into 15+ aligned, named layers — hair front/back, head,
-               eyes L/R, brows, mouth, body, clothing — with occluded regions filled in.</p>
-        </div>
-        <div class="panel feature">
-            <div class="fico">🧩</div>
-            <h4>Layered PSD export</h4>
-            <p>True layered <strong>.psd</strong> (plus open <strong>.ora</strong>) with Live2D-friendly
-               naming and draw order — drop it straight into Cubism or Clip Studio.</p>
-        </div>
-        <div class="panel feature">
-            <div class="fico">🦴</div>
-            <h4>Rig-ready Live2D</h4>
-            <p>A complete Cubism project scaffold: model3.json, physics3.json and a cdi3.json
-               pre-loaded with the standard parameter set for Cubism 5's AI auto-rig.</p>
-        </div>
-        <div class="panel feature">
-            <div class="fico">⚡</div>
-            <h4>Live progress</h4>
-            <p>Real-time WebSocket progress with step counts and ETA — watch the model build,
-               just like your favourite diffusion UI.</p>
-        </div>
-        <div class="panel feature">
-            <div class="fico">💻</div>
-            <h4>Runs locally</h4>
-            <p>Fully self-hosted Flask app. No GPU? A built-in demo mode exercises the entire
-               pipeline so you can explore every feature instantly.</p>
-        </div>
-    </section>
+  <section class="home-layout">
+    <div><span class="eyebrow">AN INDEPENDENT CHARACTER WORKSHOP</span><h1>From a small idea.<br>To a <em>living character.</em></h1><p>A local space to create anime characters, uncover their layers, and try them in motion. Your imagination, your machine, your cast.</p><div class="home-actions"><a class="btn btn-primary" href="/generator">Enter the Studio ↗</a><a class="btn" href="/gallery">Your collection</a></div></div>
+    <div class="home-sheet"><div class="sheet-top"><span>KA-MYII / CHARACTER STUDIES</span><span>No. 01</span></div><div class="sheet-mark" id="homeMonogram">K/m</div><a class="sheet-art" id="homeCharacter" aria-label="Preview the featured character" hidden><img id="homeCharacterImage" alt="A character made in your local workshop"></a><div class="sheet-bottom">A little imagination.<br>A life of its own.<small>DESIGN · DECOMPOSE · ANIMATE</small></div></div>
+  </section>
+  <section class="workshop-steps" aria-label="The process"><div><span>01 / DESIGN</span><h2>Find their character.</h2><p>Describe the hair, outfit, expression and details. Generate artwork with your own SDXL checkpoint and LoRAs.</p></div><div><span>02 / UNCOVER</span><h2>Get beneath the surface.</h2><p>See-through separates aligned character parts. Keep a layered PSD or OpenRaster document for your own finishing touches.</p></div><div><span>03 / BRING TO LIFE</span><h2>Meet them in motion.</h2><p>Try blinking, expressions and local camera tracking in Live Preview. Export the Cubism scaffold to continue rigging in Live2D.</p></div></section>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(async () => {
+  try {
+    const {data} = await axios.get('/api/generation/list');
+    const completed = (data.models || []).filter(m => m.status === 'completed');
+    const model = completed.find(m => m.assets?.some(a => a.metadata?.backend === 'see-through')) || completed[0];
+    if (!model) return;
+    const image = document.getElementById('homeCharacterImage');
+    image.onload = () => {
+      document.getElementById('homeMonogram').hidden = true;
+      document.getElementById('homeCharacter').hidden = false;
+    };
+    document.getElementById('homeCharacter').href = `/preview/${encodeURIComponent(model.id)}`;
+    image.src = `/api/generation/preview/${encodeURIComponent(model.id)}`;
+  } catch (error) { /* The monogram remains if the collection is unavailable. */ }
+})();
+</script>
 {% endblock %}

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List
 
@@ -31,16 +32,16 @@ logger = logging.getLogger(__name__)
 
 
 def _part_id(layer_type: str) -> str:
-    return "Part" + "".join(part.capitalize() for part in layer_type.split("_"))
+    # "front hair" / "eyewhite-l" / "hair_back" -> PartFrontHair / PartEyewhiteL / PartHairBack
+    return "Part" + "".join(part.capitalize() for part in re.split(r"[^0-9A-Za-z]+", layer_type) if part)
 
 
 class ModelAssembler:
     """Assembles separated assets into a Cubism-import-ready project folder."""
 
-    def __init__(self, texture_size: int = None):
-        self.texture_size = texture_size or config.MODEL_ASSEMBLY.get("texture_size", 4096)
+    def __init__(self):
         self.physics = AutoPhysicsGenerator()
-        logger.info("ModelAssembler ready (texture size: %s)", self.texture_size)
+        logger.info("ModelAssembler ready")
 
     # ------------------------------------------------------------------
     def assemble(self, assets: List[Asset], output_dir: Path, model_name: str = "vtuber_model") -> Path:
@@ -185,14 +186,21 @@ The following layers were exported (back to front):
 
 {layer_lines}
 
-## 3. Auto-rig (Cubism 5 AI)
-1. Select the model in the editor.
-2. Open **Modeling → Auto-Rig (AI)** — Cubism analyses the layers and creates
-   deformers for the eyes, eyebrows, mouth and head angle automatically.
+## 3. Semi-automatic rigging (Cubism 5 AI features)
+1. **Cubism 5.1+:** `Modeling → Deformer → Auto Generation of Deformer` builds a
+   whole-body deformer structure straight from the imported PSD. Review the
+   preview, move or remove ArtMeshes, then click OK. Works best on upright,
+   front-facing characters — exactly what Ka-myii's `vtuber` preset generates.
+2. **Cubism 5.0+:** in the **Parameters** palette menu, run
+   `Auto generation of facial motion`. It needs the face, each eye, eyeball,
+   eyebrow and ear, the mouth and the nose in separate parts — Ka-myii's
+   left/right-split layers are prepared for this.
 3. Ka-myii has pre-defined the standard parameter set in
    **`{model_name}.cdi3.json`** (ParamAngleX/Y/Z, ParamEyeLOpen/ROpen,
-   ParamMouthOpenY/Form, ParamBrowLY/RY, ParamBody*, ParamBreath …) so the
-   auto-rig has the right targets to bind to.
+   ParamMouthOpenY/Form, ParamBrowLY/RY, ParamBody*, ParamBreath …).
+
+> **Cubism FREE:** one texture atlas of at most **2048 px**, max 100 ArtMeshes.
+> Pick 2048 in the texture-atlas dialog when exporting.
 
 ## 4. Physics
 `{model_name}.physics3.json` contains starter physics for hair and clothing.

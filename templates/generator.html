@@ -4,16 +4,17 @@
 
 {% block content %}
 <div class="km-wrap">
+  <div class="page-heading"><div><span class="eyebrow">THE CHARACTER WORKSHOP / 01</span><h1>Give your character a beginning.</h1><p>Shape the idea. Separate the artwork. See it move.</p></div><a href="/gallery" class="text-link">Your collection ↗</a></div>
   <div class="studio">
 
     <!-- ============ LEFT: controls ============ -->
     <form id="genForm" class="panel panel-pad sticky">
-      <h3><i class="fas fa-sliders ico"></i> Generation</h3>
+      <h3><span class="section-index">01</span> Character brief</h3>
 
       <div class="field">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" placeholder="1girl, silver hair, long twin tails, blue eyes, sailor uniform, gentle smile"></textarea>
-        <div class="hint">Danbooru-style tags work best with modern anime models.</div>
+        <div class="hint">Describe hair, eyes, outfit, and silhouette. Comma-separated tags work well.</div>
       </div>
 
       <div class="field">
@@ -26,6 +27,11 @@
         <div class="chips" id="styleChips"></div>
       </div>
 
+      <div class="field">
+        <label for="framing">Framing</label>
+        <select id="framing"><option value="upper_body">Upper body · more facial detail</option><option value="full_body">Full body · complete outfit</option></select>
+        <div class="hint">Upper body gives the eyes and mouth more pixels for live motion.</div>
+      </div>
       <div class="field">
         <label for="model">Checkpoint</label>
         <select id="model"></select>
@@ -63,10 +69,10 @@
       </div>
 
       <div class="divider"></div>
-      <div class="collapse-head" id="advToggle">
+      <button class="collapse-head" type="button" aria-expanded="false" aria-controls="advBody" id="advToggle">
         <span><i class="fas fa-gear"></i> Advanced</span>
         <i class="fas fa-chevron-down" id="advChevron"></i>
-      </div>
+      </button>
       <div class="collapse-body hidden" id="advBody">
         <div class="row">
           <div class="field">
@@ -91,11 +97,15 @@
 
       <div class="divider"></div>
       <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
-        <i class="fas fa-wand-magic-sparkles"></i> Generate Model
+        <i class="fas fa-wand-magic-sparkles"></i> Create character
       </button>
       <button type="button" class="btn btn-lg hidden" id="cancelBtn" style="margin-top:10px;">
         <i class="fas fa-stop"></i> Cancel
       </button>
+      <div class="queue-panel hidden" id="queuePanel">
+        <div class="queue-head">Queue <span class="hint" id="queueNote"></span></div>
+        <ol class="queue-list" id="queueList" aria-live="polite"></ol>
+      </div>
     </form>
 
     <!-- ============ RIGHT: canvas + results ============ -->
@@ -112,8 +122,7 @@
       <div class="panel panel-pad" style="margin-bottom:16px;">
         <div class="canvas-wrap" id="canvasWrap">
           <div class="canvas-empty" id="canvasEmpty">
-            <div class="big"><i class="fas fa-image"></i></div>
-            <div>Your generated character will appear here</div>
+            <span class="canvas-registration">K / m</span><div class="empty-title">A character starts with an idea.</div><p>Describe yours in the brief.<br>The artwork will take shape here.</p><span class="canvas-caption">ARTWORK → LAYERS → LIVE PREVIEW</span>
           </div>
           <img id="resultImg" class="hidden" alt="Generated character">
           <div class="progress-overlay hidden" id="progressOverlay">
@@ -132,7 +141,8 @@
             <div class="meta-card"><div class="k">Seed</div><div class="v" id="metaSeed">—</div></div>
           </div>
           <div class="result-actions">
-            <a class="btn btn-primary" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
+            <a class="btn btn-primary" id="livePreview">Live Preview ↗</a>
+            <a class="btn" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
             <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>
             <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
             <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
@@ -161,5 +171,6 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='js/tagcomplete.js') }}"></script>
 <script src="{{ url_for('static', filename='js/generator.js') }}"></script>
 {% endblock %}

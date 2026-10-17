@@ -56,6 +56,18 @@ except Exception:  # pragma: no cover
     PROGRESS_AVAILABLE = False
 
 
+def chunk_token_ids(ids: List[int], comma: int, size: int = 75, lookback: int = 20) -> List[List[int]]:
+    """Split prompt tokens into CLIP-sized chunks, preferring to cut just after a comma
+    within the last ``lookback`` tokens so a tag is not split across chunks (A1111's rule)."""
+    chunks = []
+    while len(ids) > size:
+        commas = [i for i in range(size - lookback, size) if ids[i] == comma]
+        cut = commas[-1] + 1 if commas else size
+        chunks.append(ids[:cut])
+        ids = ids[cut:]
+    return chunks + [ids]
+
+
 class ImageGenerator:
     """Generates character art with a Stable Diffusion / SDXL pipeline."""
 
@@ -155,17 +167,17 @@ class ImageGenerator:
         self._apply_sampler()
         self._apply_vae(dtype)
 
-        # Memory / placement strategy.
-        if config.IMAGE_GENERATION.get("enable_cpu_offload") and self.device == "cuda":
+        # Memory / placement strategy. SDXL in fp16 is ~6.8 GB, so cards under 12 GB
+        # (e.g. 8 GB laptops) need model offload to leave room for activations.
+        low_vram = self.device == "cuda" and torch.cuda.get_device_properties(0).total_memory < 12 * 1024**3
+        if self.device == "cuda" and (config.IMAGE_GENERATION.get("enable_cpu_offload") or low_vram):
+            logger.info("Enabling model CPU offload (low VRAM)")
             self.pipeline.enable_model_cpu_offload()
         else:
             self.pipeline = self.pipeline.to(self.device)
 
         if self.device == "cuda":
-            try:
-                self.pipeline.enable_attention_slicing()
-            except Exception:  # pragma: no cover
-                pass
+            # No attention slicing: torch 2 SDPA is already memory-efficient and slicing only slows it down.
             try:
                 self.pipeline.enable_xformers_memory_efficient_attention()
             except Exception as exc:  # pragma: no cover
@@ -242,14 +254,6 @@ class ImageGenerator:
         task_id: Optional[str] = None,
     ) -> Path:
         """Generate an image for ``request`` and save it to ``output_path``."""
-        if self.pipeline is None:
-            self.load_model()
-
-        torch = self._torch
-        logger.info("Generating: %s", request.prompt[:60])
-
-        positive, negative = self._build_prompts(request)
-
         tracker = None
         if PROGRESS_AVAILABLE:
             try:
@@ -260,22 +264,35 @@ class ImageGenerator:
             except Exception as exc:  # pragma: no cover
                 logger.debug("Progress tracking unavailable: %s", exc)
 
+        if self.pipeline is None:
+            if tracker:
+                tracker.update(0, f"Loading checkpoint {self.model_name} (about a minute)…")
+            self.load_model()
+
+        torch = self._torch
+        logger.info("Generating: %s", request.prompt[:60])
+
+        positive, negative = self._build_prompts(request)
+
         generator = None
         if request.seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(int(request.seed))
 
         call_kwargs = dict(
-            prompt=positive,
-            negative_prompt=negative,
             width=request.width,
             height=request.height,
             num_inference_steps=request.steps,
             guidance_scale=request.guidance_scale,
             generator=generator,
         )
-        if self.clip_skip and self.clip_skip > 1:
-            # diffusers counts hidden layers to skip from the end.
-            call_kwargs["clip_skip"] = self.clip_skip
+        if getattr(self.pipeline, "tokenizer_2", None) is not None:
+            call_kwargs.update(self._sdxl_prompt_embeds(positive, negative))
+        else:
+            call_kwargs.update(prompt=positive, negative_prompt=negative)
+            if self.clip_skip and self.clip_skip > 1:
+                # UI uses the A1111 convention (2 = penultimate); diffusers SD1.5 counts layers skipped past it.
+                # shortcut: SD1.5 prompts are still cut at 77 tokens; chunk them like SDXL if SD1.5 matters.
+                call_kwargs["clip_skip"] = self.clip_skip - 1
 
         self._attach_progress_callback(call_kwargs, tracker, request.steps)
 
@@ -297,6 +314,46 @@ class ImageGenerator:
                 tracker.complete(f"Generation failed: {exc}", status="failed")
             logger.error("Generation failed: %s", exc)
             raise
+
+    def _sdxl_prompt_embeds(self, positive: str, negative: str) -> dict:
+        """SDXL conditioning without CLIP's 77-token cut-off, the way A1111/ComfyUI do it.
+
+        Prompts are split into 75-token chunks; each one is wrapped in BOS/EOS, encoded by both
+        text encoders and the results are concatenated. Encoding ourselves also gives the UI's
+        clip skip its A1111 meaning (2 = penultimate layer, SDXL's native one) for BOTH prompts;
+        diffusers' own ``clip_skip`` counts past the penultimate and ignores the negative prompt.
+        """
+        torch, pipe = self._torch, self.pipeline
+        device = pipe._execution_device
+        layer = -max(1, int(self.clip_skip or 2))
+        tok = pipe.tokenizer  # both SDXL tokenizers share CLIP's BPE vocabulary; only padding differs
+        comma = tok.convert_tokens_to_ids(",</w>")
+        chunks = [
+            chunk_token_ids(tok(text, add_special_tokens=False, truncation=False, verbose=False).input_ids, comma)
+            for text in (positive, negative)
+        ]
+        count = max(len(c) for c in chunks)
+        encoded = []
+        with torch.no_grad():
+            for ids in chunks:
+                ids = ids + [[]] * (count - len(ids))  # equal lengths for classifier-free guidance
+                hidden, pooled = [], None
+                for tokenizer, encoder in ((pipe.tokenizer, pipe.text_encoder), (pipe.tokenizer_2, pipe.text_encoder_2)):
+                    parts = []
+                    for chunk in ids:
+                        row = [tokenizer.bos_token_id, *chunk, tokenizer.eos_token_id]
+                        row += [tokenizer.pad_token_id] * (tokenizer.model_max_length - len(row))
+                        out = encoder(torch.tensor([row], device=device), output_hidden_states=True)
+                        parts.append(out.hidden_states[layer])
+                        if pooled is None and out[0].ndim == 2:  # text_encoder_2's projected pooled output
+                            pooled = out[0]
+                    hidden.append(torch.cat(parts, dim=1))
+                encoded.append((torch.cat(hidden, dim=-1), pooled))
+        if count > 1:
+            logger.info("Long prompt: encoded as %d chunks of 75 tokens", count)
+        (pos, pos_pooled), (neg, neg_pooled) = encoded
+        return dict(prompt_embeds=pos, pooled_prompt_embeds=pos_pooled,
+                    negative_prompt_embeds=neg, negative_pooled_prompt_embeds=neg_pooled)
 
     def _attach_progress_callback(self, call_kwargs: dict, tracker, total_steps: int):
         """Wire up live progress using the modern callback, with a fallback."""
@@ -334,7 +391,12 @@ class ImageGenerator:
         style = (request.style or "anime").lower()
         preset = config.STYLE_PRESETS.get(style, config.STYLE_PRESETS["anime"])
 
-        positive_parts = [request.prompt.strip(), preset["positive"]]
+        style_prompt = preset["positive"]
+        framing = getattr(request, "framing", "full_body")
+        if framing == "upper_body":
+            style_prompt = style_prompt.replace("full body", "upper body").replace("reference sheet", "portrait")
+            style_prompt += ", upper body, waist up, detailed face, both eyes visible, centered composition"
+        positive_parts = [request.prompt.strip(), style_prompt]
         positive = ", ".join(p for p in positive_parts if p)
 
         negative_parts = [request.negative_prompt.strip(), preset.get("negative", ""), config.DEFAULT_NEGATIVE_PROMPT]
@@ -360,8 +422,11 @@ class ImageGenerator:
 
     def unload_model(self):
         if self.pipeline is not None:
+            import gc
+
             del self.pipeline
             self.pipeline = None
+            gc.collect()  # offload hooks hold reference cycles; collect before freeing CUDA cache
             torch = self._torch or _try_import_torch()
             if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()

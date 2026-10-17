@@ -5,7 +5,12 @@ Main Flask application
 import os
 import sys
 from pathlib import Path
-from flask import Flask, render_template, jsonify
+
+# PyTorch's Windows CPU allocator (mimalloc) returns freed memory to the OS only during later
+# allocations, so the idle app kept ~7.5 GB of unloaded SDXL weights while See-through needed
+# the RAM. Must be set before torch loads.
+os.environ.setdefault("MIMALLOC_PURGE_DELAY", "0")
+from flask import Flask, render_template, jsonify, abort, url_for
 from flask_cors import CORS
 import logging
 
@@ -25,7 +30,7 @@ try:
     SOCKETIO_AVAILABLE = True
 except ImportError:
     SOCKETIO_AVAILABLE = False
-    logger.warning("flask-socketio not installed - real-time progress updates disabled")
+    logging.getLogger(__name__).warning("flask-socketio not installed - real-time progress updates disabled")
 
 # Setup logging
 setup_logging(
@@ -95,6 +100,20 @@ def create_app(use_dummy_generators: bool = False):
     def gallery():
         """Model gallery page"""
         return render_template('gallery.html')
+
+    @app.route('/preview/<model_id>')
+    def live_preview(model_id):
+        from src.api.generation import preview_model_dir
+        model_dir = preview_model_dir(model_id)
+        if not model_dir or not (model_dir / 'assets').is_dir():
+            abort(404)
+        from src.utils.helpers import load_json
+        metadata_path = model_dir / 'metadata.json'
+        name = load_json(metadata_path).get('name', model_id[:8]) if metadata_path.exists() else model_id[:8]
+        if name.startswith('model_'):
+            name = 'Study ' + name[6:].upper()
+        return render_template('preview.html', model_id=model_id, character_name=name,
+                               preview_psd=url_for('generation.get_artifact', model_id=model_id, kind='preview_psd'))
 
     @app.route('/editor/<model_id>')
     def editor(model_id):
@@ -167,7 +186,7 @@ def main():
     logger.info("=" * 60)
 
     if args.dummy:
-        logger.warning("⚠️  Running in DUMMY mode - no actual AI generation")
+        logger.warning("Running in DEMO mode - no actual AI generation")
         logger.warning("   This mode is for testing the pipeline without GPU")
 
     # Run server with SocketIO if available

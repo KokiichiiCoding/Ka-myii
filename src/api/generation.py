@@ -4,11 +4,11 @@ API routes for model generation
 from flask import Blueprint, request, jsonify, send_file
 from pathlib import Path
 import logging
-import uuid
 from typing import Dict, Any
 
 from src.models.vtuber_model import GenerationRequest, VTuberModel
 from src.pipeline.assembly_line import AssemblyLine
+from src.pipeline.jobs import JobQueue
 from src.utils.helpers import save_json, load_json
 import config
 
@@ -17,24 +17,32 @@ logger = logging.getLogger(__name__)
 # Create blueprint
 generation_bp = Blueprint('generation', __name__, url_prefix='/api/generation')
 
-# Global assembly line instance (will be initialized in app.py)
+# Global assembly line + job queue (initialized in app.py)
 assembly_line: AssemblyLine = None
+job_queue: JobQueue = None
+
+
+def _run_job(gen_request: GenerationRequest, task_id: str) -> str:
+    model = assembly_line.generate_model(gen_request, task_id=task_id)
+    save_json(model.to_dict(), config.OUTPUT_DIR / model.id / "metadata.json")
+    return model.id
 
 
 def init_assembly_line(use_dummy: bool = False):
     """Initialize the assembly line"""
-    global assembly_line
+    global assembly_line, job_queue
     assembly_line = AssemblyLine(
         output_base_dir=config.OUTPUT_DIR,
         use_dummy_generators=use_dummy
     )
+    job_queue = JobQueue(_run_job)
     logger.info("Assembly line initialized")
 
 
 @generation_bp.route('/generate', methods=['POST'])
 def generate_model():
     """
-    Generate a new VTuber model
+    Queue a new VTuber model; poll /jobs/<task_id> for progress and the finished model_id.
 
     Request JSON:
     {
@@ -50,15 +58,18 @@ def generate_model():
         "custom_layers": null
     }
 
-    Response:
+    Response (202):
     {
         "success": true,
-        "model_id": "uuid",
-        "message": "Model generation started"
+        "task_id": "gen_1a2b3c4d",
+        "job": {"id": ..., "state": "queued", "position": 0, ...}
     }
     """
     try:
         data = request.json
+
+        if data.get('framing', 'full_body') not in ('full_body', 'upper_body'):
+            return jsonify({'success': False, 'error': 'Choose full_body or upper_body framing'}), 400
 
         # Create generation request
         image_settings = config.IMAGE_GENERATION
@@ -77,6 +88,7 @@ def generate_model():
             clip_skip=data.get('clip_skip'),
             loras=data.get('loras'),
             batch_size=int(data.get('batch_size', 1)),
+            framing=data.get('framing', 'full_body'),
             include_rigging=data.get('include_rigging', False),
             custom_layers=data.get('custom_layers')
         )
@@ -87,26 +99,13 @@ def generate_model():
                 'error': 'Prompt is required'
             }), 400
 
-        logger.info(f"Generation request received: {gen_request.prompt}")
-
-        # Generate task ID for progress tracking
-        task_id = f"gen_{uuid.uuid4().hex[:8]}"
-        logger.info(f"Created task: {task_id}")
-
-        # Generate model with task ID for progress tracking
-        model = assembly_line.generate_model(gen_request, task_id=task_id)
-
-        # Save model metadata
-        model_metadata_path = config.OUTPUT_DIR / model.id / "metadata.json"
-        save_json(model.to_dict(), model_metadata_path)
-
+        job = job_queue.submit(gen_request)
         return jsonify({
             'success': True,
-            'model_id': model.id,
-            'task_id': task_id,
-            'model': model.to_dict(),
-            'message': 'Model generated successfully'
-        })
+            'task_id': job.id,
+            'job': job_queue.describe(job),
+            'message': 'Queued'
+        }), 202
 
     except Exception as e:
         logger.error(f"Generation failed: {e}", exc_info=True)
@@ -114,6 +113,29 @@ def generate_model():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@generation_bp.route('/jobs', methods=['GET'])
+def list_jobs():
+    """Recent and active jobs, newest first."""
+    jobs = sorted(job_queue.jobs(), key=lambda j: j.created, reverse=True)
+    return jsonify({'success': True, 'jobs': [job_queue.describe(j) for j in jobs]})
+
+
+@generation_bp.route('/jobs/<job_id>', methods=['GET'])
+def get_job(job_id: str):
+    job = job_queue.get(job_id)
+    if job is None:
+        return jsonify({'success': False, 'error': 'Job not found (the server may have restarted)'}), 404
+    return jsonify({'success': True, 'job': job_queue.describe(job)})
+
+
+@generation_bp.route('/jobs/<job_id>/cancel', methods=['POST'])
+def cancel_job(job_id: str):
+    job = job_queue.cancel(job_id)
+    if job is None:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({'success': True, 'job': job_queue.describe(job)})
 
 
 @generation_bp.route('/status/<model_id>', methods=['GET'])
@@ -194,9 +216,6 @@ def list_models():
 def download_model(model_id: str):
     """Download a generated model as a zip file"""
     try:
-        import zipfile
-        import tempfile
-
         model_dir = config.OUTPUT_DIR / model_id
 
         if not model_dir.exists():
@@ -205,21 +224,7 @@ def download_model(model_id: str):
                 'error': 'Model not found'
             }), 404
 
-        # Create temporary zip file
-        temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-
-        with zipfile.ZipFile(temp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file_path in model_dir.rglob('*'):
-                if file_path.is_file():
-                    arcname = file_path.relative_to(model_dir)
-                    zipf.write(file_path, arcname)
-
-        return send_file(
-            temp_zip.name,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f'vtuber_model_{model_id}.zip'
-        )
+        return _download_zip(model_dir, f'vtuber_model_{model_id}.zip')
 
     except Exception as e:
         logger.error(f"Failed to download model: {e}", exc_info=True)
@@ -399,9 +404,12 @@ def get_options():
         from src.utils import model_scanner
 
         igen = config.IMAGE_GENERATION
+        checkpoints = model_scanner.list_checkpoints()
+        # Prefer a checkpoint the user already has over the multi-GB auto-download default.
+        local = [c for c in checkpoints if c.get('source') == 'local' and c.get('available', True)]
         return jsonify({
             'success': True,
-            'checkpoints': model_scanner.list_checkpoints(),
+            'checkpoints': checkpoints,
             'loras': model_scanner.list_loras(),
             'vaes': model_scanner.list_vaes(),
             'samplers': model_scanner.list_samplers(),
@@ -412,7 +420,7 @@ def get_options():
                 'steps': igen['default_steps'],
                 'guidance_scale': igen['default_guidance_scale'],
                 'sampler': igen['default_sampler'],
-                'model': igen['model_name'],
+                'model': local[0]['id'] if local else igen['model_name'],
                 'negative_prompt': config.DEFAULT_NEGATIVE_PROMPT,
                 'clip_skip': igen.get('clip_skip', 2),
             },
@@ -463,19 +471,69 @@ def get_layer(model_id: str, filename: str):
         layer_path = config.OUTPUT_DIR / model_id / "assets" / safe_name
         if not layer_path.exists():
             return jsonify({'success': False, 'error': 'Layer not found'}), 404
+        if request.args.get('crop'):
+            # Layers are full-canvas and mostly transparent; thumbnails want just the part.
+            from io import BytesIO
+            from PIL import Image
+
+            img = Image.open(layer_path)
+            bbox = img.getbbox()
+            buf = BytesIO()
+            (img.crop(bbox) if bbox else img).save(buf, format='PNG')
+            buf.seek(0)
+            return send_file(buf, mimetype='image/png')
         return send_file(layer_path, mimetype='image/png')
     except Exception as e:
         logger.error(f"Failed to get layer: {e}", exc_info=True)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _download_zip(directory: Path, name: str):
+    """Stream a temporary archive, closing/deleting it with the response.
+
+    Using one file object avoids Windows locks and keeps big packages off RAM.
+    """
+    import tempfile
+    import zipfile
+    archive = tempfile.TemporaryFile(mode='w+b')
+    try:
+        with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as package:
+            for file in directory.rglob('*'):
+                if file.is_file():
+                    package.write(file, file.relative_to(directory))
+        archive.seek(0)
+        return send_file(archive, mimetype='application/zip', as_attachment=True,
+                         download_name=name)
+    except Exception:
+        archive.close()
+        raise
+
+
+def preview_model_dir(model_id: str):
+    # A single model directory, including on Windows (drive/backslash aware).
+    if not model_id or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in model_id):
+        return None
+    base = config.OUTPUT_DIR.resolve()
+    candidate = (base / model_id).resolve()
+    return candidate if candidate.parent == base and candidate.is_dir() else None
+
+
 @generation_bp.route('/artifact/<model_id>/<kind>', methods=['GET'])
 def get_artifact(model_id: str, kind: str):
     """Download a rig-ready artifact: 'psd', 'ora', 'flat' or 'package' (zip)."""
     try:
-        model_dir = config.OUTPUT_DIR / model_id
-        if not model_dir.exists():
+        model_dir = preview_model_dir(model_id)
+        if not model_dir:
             return jsonify({'success': False, 'error': 'Model not found'}), 404
+
+        if kind == 'preview_psd':
+            from src.core.live_preview import ensure_preview_psd
+            try:
+                artifact_path = ensure_preview_psd(model_dir)
+            except (FileNotFoundError, ValueError) as exc:
+                return jsonify({'success': False, 'error': str(exc)}), 422
+            return send_file(artifact_path, mimetype='image/vnd.adobe.photoshop',
+                             download_name=f'{model_id}_preview.psd', conditional=True)
 
         metadata_path = model_dir / "metadata.json"
         artifacts = {}
@@ -489,19 +547,12 @@ def get_artifact(model_id: str, kind: str):
                                  download_name=artifact_path.name)
 
         if kind == 'package':
-            # Zip the assembled Cubism project folder.
-            import tempfile, zipfile
-            model_subdir = next((p for p in model_dir.iterdir()
-                                 if p.is_dir() and (p / 'kamyii_manifest.json').exists()), None)
-            target = model_subdir or model_dir
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
-            with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for fp in target.rglob('*'):
-                    if fp.is_file():
-                        zf.write(fp, fp.relative_to(target))
-            return send_file(tmp.name, as_attachment=True,
-                             download_name=f'{model_id}_live2d_package.zip',
-                             mimetype='application/zip')
+            # The manifest lives at model/<name>/, not directly under the output.
+            manifest = next((model_dir / 'model').glob('*/kamyii_manifest.json'), None)
+            target = manifest.parent.resolve() if manifest else model_dir
+            if not target.is_relative_to(model_dir.resolve()):
+                return jsonify({'success': False, 'error': 'Invalid package path'}), 404
+            return _download_zip(target, f'{model_id}_live2d_package.zip')
 
         return jsonify({'success': False, 'error': f"Artifact '{kind}' not available"}), 404
     except Exception as e:
