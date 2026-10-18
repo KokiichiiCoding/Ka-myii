@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-EXPORT_VERSION = 3
+EXPORT_VERSION = 4  # 4: painted expression layers
 _export_lock = threading.Lock()
 _ALIASES = {
     'hair_back': 'back hair', 'hair_front': 'front hair', 'head': 'face',
@@ -46,7 +46,45 @@ def preview_layers(assets_dir: Path):
         if name in merged:
             image = Image.alpha_composite(merged.pop(name), image)
         merged[name] = image
-    return [(name, image) for name, image in merged.items() if image.getbbox()]
+    items = [(name, image) for name, image in merged.items() if image.getbbox()]
+    return _with_expressions(items, Path(assets_dir).parent, size)
+
+
+def _with_expressions(items, model_dir: Path, size):
+    """Insert the painted expression layers (src/core/expressions.py) where the rig expects
+    them: closed eyes just above the eye parts (bangs stay on top), the generated mouth state
+    next to the drawn one. A generated open mouth makes the drawn mouth the closed one."""
+    from src.core import expressions
+
+    made = expressions.read(model_dir)
+    names = [n for n, _ in items]
+
+    def art(key):
+        path = model_dir / made[key]
+        if not path.exists():
+            return None
+        with Image.open(path) as source:
+            image = source.convert('RGBA')
+        return image if image.size == size and image.getbbox() else None
+
+    def after(*targets):
+        hits = [i for i, n in enumerate(names) if n in targets]
+        return hits[-1] + 1 if hits else len(names)
+
+    for key in ('eye_close', 'mouth_open', 'mouth_close'):
+        image = art(key) if key in made else None
+        if image is None:
+            continue
+        if key == 'eye_close':
+            at = after('eyewhite', 'irides', 'eyelash')
+        else:
+            if key == 'mouth_open' and 'mouth_open' in names:  # the drawn mouth is the closed one
+                names[names.index('mouth_open')] = 'mouth_close'
+                items = [('mouth_close' if n == 'mouth_open' else n, im) for n, im in items]
+            at = after('mouth_open', 'mouth_close')
+        items.insert(at, (key, image))
+        names.insert(at, key)
+    return items
 
 
 def ensure_preview_psd(model_dir: Path) -> Path:
@@ -56,7 +94,8 @@ def ensure_preview_psd(model_dir: Path) -> Path:
     files = sorted(assets_dir.glob('*.png'))
     if not files:
         raise FileNotFoundError('This character has no separated layers to preview')
-    revision = [(p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in files]
+    revision = [(p.name, p.stat().st_size, p.stat().st_mtime_ns)
+                for p in files + sorted((model_dir / 'expressions').glob('*'))]
     key = hashlib.sha256(json.dumps([EXPORT_VERSION, revision]).encode()).hexdigest()[:16]
     out_dir = model_dir / 'live_preview'
     output = out_dir / f'preview-{key}.psd'

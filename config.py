@@ -264,6 +264,10 @@ MODEL_ASSEMBLY = {
 # ---------------------------------------------------------------------------
 # Pipeline / API
 # ---------------------------------------------------------------------------
+# Paint character-specific closed eyes and the other mouth state after separation (~1-2 min),
+# so Live Preview blinks and talks with the character's own art instead of generic shapes.
+EXPRESSIONS = _env_bool("KAMYII_EXPRESSIONS", True)
+
 PIPELINE = {
     "save_intermediate_steps": True,
     "cleanup_temp_files": False,

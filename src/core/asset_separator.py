@@ -316,6 +316,18 @@ class AssetSeparator:
         err = np.where(opaque, err, np.inf)
         acceptable = err <= err.min(axis=0) + margin
         owner = len(arrs) - 1 - np.argmax(acceptable[::-1], axis=0)  # topmost acceptable part
+        # Seen: lavender bangs over purple irises won those near-ties, so iris strokes moved with
+        # the hair and showed through closed eyes. Where a facial detail is acceptable under hair
+        # or headwear, the detail owns the pixel; real strands over an eye still differ a lot
+        # from the iris predicted beneath them, so they stay with the hair.
+        names = [name for name, _ in kept]
+        detail = np.array([n in FACE_DETAIL_TAGS for n in names])
+        covers = np.array([n in ("front hair", "headwear") for n in names])
+        if detail.any() and covers.any():
+            detail_ok = acceptable & detail[:, None, None]
+            topmost_detail = len(arrs) - 1 - np.argmax(detail_ok[::-1], axis=0)
+            prefer = covers[owner] & detail_ok.any(axis=0)
+            owner = np.where(prefer, topmost_detail, owner)
         claimed = opaque.any(axis=0)
         for i, (name, canvas) in enumerate(kept):
             a = arrs[i]

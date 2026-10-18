@@ -326,6 +326,84 @@ class ImageGenerator:
                 pass
         return f"Loading checkpoint {self.model_name} (about a minute)…"
 
+    # ------------------------------------------------------------------
+    # Inpainting (region edits, outpainting, expression art)
+    # ------------------------------------------------------------------
+    def inpaint(self, image, mask, prompt: str, negative: str = "", strength: float = 0.9,
+                steps: Optional[int] = None, guidance: Optional[float] = None, seed: Optional[int] = None,
+                task_id: Optional[str] = None, label: str = "Repainting the selection", detail: int = 1024,
+                feather: int = 6):
+        """Repaint the white part of ``mask`` (PIL L) in ``image`` and return the full image.
+
+        Works on a crop around the mask at SDXL's native ~``detail`` px (a face gets far more
+        pixels than in the whole picture), with the loaded checkpoint shared through
+        ``from_pipe``. Everything outside the dilated mask is returned unchanged; the seam is
+        a ``feather``-px blend.
+        """
+        from PIL import Image, ImageFilter
+
+        if self.pipeline is None:
+            self.load_model()
+        import numpy as np
+
+        torch = self._torch
+        image = image.convert("RGB")
+        hard = mask.convert("L").point(lambda v: 255 if v > 127 else 0)
+        box = hard.getbbox()
+        if box is None:
+            return image
+        # Context around the selection, at least ~40 % of the picture so the model sees the style.
+        W, H = image.size
+        x0, y0, x1, y1 = box
+        side = max(x1 - x0, y1 - y0)
+        pad = max(48, int(side * 0.35))
+        cw, ch = max(x1 - x0 + 2 * pad, int(0.4 * W)), max(y1 - y0 + 2 * pad, int(0.4 * H))
+        cw, ch = min(cw, W), min(ch, H)
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        left = min(max(0, cx - cw // 2), W - cw)
+        top = min(max(0, cy - ch // 2), H - ch)
+        crop_box = (left, top, left + cw, top + ch)
+        scale = detail / max(cw, ch)
+        tw, th = max(64, int(cw * scale) // 8 * 8), max(64, int(ch * scale) // 8 * 8)
+
+        tracker = None
+        if PROGRESS_AVAILABLE and task_id:
+            tracker = get_progress_manager().create_tracker(task_id, max(1, int((steps or 28) * strength)))
+            tracker.update(0, label + "…")
+        from diffusers import AutoPipelineForInpainting
+
+        pipe = AutoPipelineForInpainting.from_pipe(self.pipeline)
+        positive, negative = self._build_prompts(GenerationRequest(prompt=prompt, negative_prompt=negative,
+                                                                   style="anime", framing="none"))
+        call = dict(
+            image=image.crop(crop_box).resize((tw, th), Image.Resampling.LANCZOS),
+            mask_image=hard.crop(crop_box).resize((tw, th), Image.Resampling.NEAREST),
+            width=tw, height=th, strength=float(strength),
+            num_inference_steps=int(steps or config.IMAGE_GENERATION.get("default_steps", 28)),
+            guidance_scale=float(guidance if guidance is not None else config.IMAGE_GENERATION.get("default_guidance_scale", 5)),
+            generator=torch.Generator(device=self.device).manual_seed(int(seed)) if seed is not None else None,
+        )
+        call.update(self._sdxl_prompt_embeds(positive, negative) if getattr(pipe, "tokenizer_2", None) is not None
+                    else dict(prompt=positive, negative_prompt=negative))
+        if tracker:
+            def _step(_pipe, step, _t, kwargs):
+                tracker.update(step + 1, f"{label} — step {step + 1}")
+                if tracker.is_cancelled():
+                    raise InterruptedError("Generation cancelled by user")
+                return kwargs
+            call["callback_on_step_end"] = _step
+        out = pipe(**call).images[0].resize((cw, ch), Image.Resampling.LANCZOS)
+
+        soft = hard.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(feather)) if feather else hard
+        region = Image.composite(out, image.crop(crop_box), soft.crop(crop_box))
+        result = image.copy()
+        result.paste(region, crop_box[:2])
+        if tracker:
+            tracker.complete(label + " — done")
+        logger.info("Inpainted %s px region (crop %s at %dx%d, strength %.2f)",
+                    int((np.asarray(hard) > 0).sum()), crop_box, tw, th, strength)
+        return result
+
     def _sdxl_prompt_embeds(self, positive: str, negative: str) -> dict:
         """SDXL conditioning without CLIP's 77-token cut-off, the way A1111/ComfyUI do it.
 
@@ -471,6 +549,17 @@ class DummyImageGenerator(ImageGenerator):
 
     def load_model(self):  # noqa: D401
         logger.info("DummyImageGenerator: no model to load")
+
+    def inpaint(self, image, mask, prompt: str, negative: str = "", strength: float = 0.9, steps=None,
+                guidance=None, seed=None, task_id=None, label="Repainting the selection", detail=1024, feather=6):
+        """Demo: fill the selection with a blurred, colour-shifted version so the flows are testable."""
+        from PIL import Image, ImageFilter, ImageOps
+
+        image = image.convert("RGB")
+        hard = mask.convert("L").point(lambda v: 255 if v > 127 else 0)
+        painted = ImageOps.posterize(image.filter(ImageFilter.GaussianBlur(12)), 3)
+        soft = hard.filter(ImageFilter.GaussianBlur(feather)) if feather else hard
+        return Image.composite(painted, image, soft)
 
     def generate(self, request: GenerationRequest, output_path: Path, task_id: Optional[str] = None) -> Path:
         import time

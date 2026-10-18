@@ -23,6 +23,8 @@ job_queue: JobQueue = None
 
 
 def _run_job(gen_request: GenerationRequest, task_id: str) -> str:
+    if gen_request.operation == "expressions":
+        return assembly_line.add_expressions(gen_request.target_model, task_id=task_id)
     model = assembly_line.generate_model(gen_request, task_id=task_id)
     save_json(model.to_dict(), config.OUTPUT_DIR / model.id / "metadata.json")
     return model.id
@@ -392,6 +394,22 @@ def delete_model(model_id: str):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@generation_bp.route('/expressions/<model_id>', methods=['POST'])
+def paint_expressions(model_id: str):
+    """Queue painting closed eyes and the other mouth state onto a separated character."""
+    model_dir = model_dir_for(model_id)
+    metadata_path = model_dir / 'metadata.json' if model_dir else None
+    if not metadata_path or not metadata_path.exists():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    saved = load_json(metadata_path)
+    if not any(a.get('metadata', {}).get('backend') == 'see-through' for a in saved.get('assets', [])):
+        return jsonify({'success': False, 'error': 'Expressions need a character separated by See-through'}), 400
+    prompt = (saved.get('request') or {}).get('prompt') or 'character'
+    job = job_queue.submit(GenerationRequest(prompt=prompt, operation='expressions', target_model=model_dir.name,
+                                             source='artwork'))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
 @generation_bp.route('/rename/<model_id>', methods=['POST'])

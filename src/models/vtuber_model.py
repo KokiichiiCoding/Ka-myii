@@ -60,6 +60,13 @@ class GenerationRequest:
     reference_image: Optional[str] = None  # server-side path of artwork to import instead of generating
     sketch: bool = False  # stop after the artwork (~1 min) instead of separating layers
     source: str = "prompt"  # prompt | upload (the user's file) | artwork (re-separating saved artwork)
+    # What the job does: "generate" (artwork -> layers -> package), "expressions" (paint closed
+    # eyes / the other mouth onto ``target_model`` in place), "edit" / "extend" (repaint part of
+    # ``reference_image`` through ``mask_image`` into a new sketch).
+    operation: str = "generate"
+    target_model: Optional[str] = None
+    mask_image: Optional[str] = None
+    strength: float = 0.9
 
 
 @dataclass

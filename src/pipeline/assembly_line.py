@@ -19,6 +19,8 @@ from src.core.image_generator import ImageGenerator, DummyImageGenerator
 from src.core.asset_separator import AssetSeparator, DummyAssetSeparator
 from src.core.model_assembler import ModelAssembler, DummyModelAssembler
 from src.utils.helpers import save_json
+from src.core import expressions
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +166,14 @@ class AssemblyLine:
             model.assets = assets
             logger.info(f"Assets separated: {len(assets)} layers")
 
+            # Stage 2b: the character's own closed eyes and other mouth state, for Live Preview.
+            if self._wants_expressions(assets):
+                self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.8)
+                made = self._paint_expressions(request, model_output_dir, task_id)
+                if made:
+                    model.metadata["expressions"] = made
+                    assets = model.assets = assets + expressions.as_assets(model_output_dir, made, assets)
+
             # Stage 3: Model Assembly
             self._enter_stage(task_id, "assemble", "Assembling Live2D model...", 0.7)
             model.status = GenerationStatus.MODEL_ASSEMBLY
@@ -213,6 +223,48 @@ class AssemblyLine:
             else:
                 shutil.rmtree(model_output_dir, ignore_errors=True)
             raise
+
+    def _wants_expressions(self, assets) -> bool:
+        return (not self.use_dummy_generators and config.EXPRESSIONS
+                and any(a.metadata.get("backend") == "see-through" for a in assets)
+                and any(a.layer_type.startswith(("irides", "mouth")) for a in assets))
+
+    def _paint_expressions(self, request: GenerationRequest, model_dir: Path, task_id: Optional[str]) -> Dict:
+        """Expression layers, or {} when painting fails (the character is complete without)."""
+        try:
+            self._ensure_generator(request)
+            return expressions.generate(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+        except InterruptedError:
+            raise
+        except Exception as exc:
+            logger.warning("Expression painting failed, continuing without: %s", exc, exc_info=True)
+            return {}
+
+    def add_expressions(self, model_id: str, task_id: Optional[str] = None) -> str:
+        """Paint expression layers onto an existing separated character and repackage it."""
+        from src.utils.helpers import load_json
+
+        model_dir = self.output_base_dir / model_id
+        metadata_path = model_dir / "metadata.json"
+        data = load_json(metadata_path)
+        model = VTuberModel.from_dict(data)
+        assets = [a for a in model.assets if not a.metadata.get("expression") and Path(a.file_path).exists()]
+        if not any(a.metadata.get("backend") == "see-through" for a in assets):
+            raise ValueError("Expressions need a character separated by See-through")
+        self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.1)
+        request = model.request or GenerationRequest(prompt="")
+        made = self._paint_expressions(request, model_dir, task_id)
+        if not made or not any(k in made for k in ("eye_close", "mouth_open", "mouth_close")):
+            raise RuntimeError("Could not paint expressions for this character (see the log)")
+        self._enter_stage(task_id, "assemble", "Repackaging PSD + Cubism files...", 0.9)
+        assets = assets + expressions.as_assets(model_dir, made, assets)
+        final_model_path = self._assemble_model(assets, model_dir, model.name)
+        data["assets"] = [{"layer_type": a.layer_type, "file_path": str(a.file_path), "metadata": a.metadata}
+                          for a in assets]
+        data.setdefault("metadata", {})["expressions"] = made
+        data["final_model_path"] = str(final_model_path)
+        save_json(data, metadata_path)
+        return model_id
 
     def _generate_image(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str] = None) -> Path:
         """Stage 1: Generate base image"""

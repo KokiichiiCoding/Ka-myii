@@ -25,9 +25,15 @@ logger = logging.getLogger(__name__)
 # Share of a real run per stage, from measured timings (~2 min paint, ~10–12 min decompose,
 # seconds to package) — turns per-stage trackers into one bar that never goes backwards.
 STAGES = {
-    "image": (0.0, 0.15, "Painting the character…"),
-    "separate": (0.15, 0.97, "Separating layers…"),
+    "image": (0.0, 0.12, "Painting the character…"),
+    "separate": (0.12, 0.86, "Separating layers…"),
+    "expressions": (0.86, 0.97, "Painting closed eyes and mouth…"),
     "assemble": (0.97, 1.0, "Packaging PSD + Cubism files…"),
+}
+# Jobs that only run some stages spread the bar over those.
+STAGES_BY_OPERATION = {
+    "expressions": {"expressions": (0.0, 0.9, "Painting closed eyes and mouth…"),
+                    "assemble": (0.9, 1.0, "Packaging PSD + Cubism files…")},
 }
 KEEP_FINISHED = 20
 ACTIVE = ("queued", "running")
@@ -124,8 +130,9 @@ class JobQueue:
             job.cancel_requested = True
             if job.state == "queued":
                 job.state, job.finished = "cancelled", time.time()
-                if job.request.reference_image:  # an upload that will now never be imported
-                    Path(job.request.reference_image).unlink(missing_ok=True)
+                for staged in (job.request.reference_image, job.request.mask_image):
+                    if staged:  # uploaded/staged files that will now never be used
+                        Path(staged).unlink(missing_ok=True)
                 self._save()
             else:
                 # The running stage raises InterruptedError at its next check (diffusion step,
@@ -157,7 +164,8 @@ class JobQueue:
         elif job.state == "running":
             manager = get_progress_manager()
             stage = manager.stages.get(job.id, "image")
-            lo, hi, label = STAGES.get(stage, (0.0, 1.0, ""))
+            stages = STAGES_BY_OPERATION.get(getattr(job.request, "operation", "generate"), STAGES)
+            lo, hi, label = stages.get(stage, (0.0, 1.0, ""))
             tracker = manager.get_tracker(job.id)
             frac = min(1.0, tracker.current_step / tracker.total_steps) if tracker and tracker.total_steps else 0.0
             data.update(

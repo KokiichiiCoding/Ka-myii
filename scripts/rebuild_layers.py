@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config  # noqa: E402
-from src.core import seethrough  # noqa: E402
+from src.core import expressions, seethrough  # noqa: E402
 from src.core.asset_separator import AssetSeparator  # noqa: E402
 from src.core.model_assembler import ModelAssembler  # noqa: E402
 from src.models.vtuber_model import VTuberModel  # noqa: E402
@@ -39,6 +39,8 @@ def rebuild(model_id: str) -> int:
     for asset in assets:
         asset.file_path = Path(shutil.move(str(asset.file_path), str(model_dir / "assets" / asset.file_path.name)))
     shutil.rmtree(staging)
+    # Painted expressions live outside assets/ and survive; ship them in the package again.
+    assets += expressions.as_assets(model_dir, expressions.read(model_dir), assets)
 
     model.assets = assets
     shutil.rmtree(model_dir / "model", ignore_errors=True)
@@ -49,7 +51,7 @@ def rebuild(model_id: str) -> int:
         model.metadata[key] = manifest.get(key, model.metadata.get(key))
     assembler.create_preview_image(assets, model_dir / "preview.png")
     save_json(model.to_dict(), model_dir / "metadata.json")
-    return len(assets) - 1  # minus the helper cut-out
+    return sum(1 for a in assets if a.layer_type != "character" and not a.metadata.get("expression"))
 
 
 if __name__ == "__main__":
