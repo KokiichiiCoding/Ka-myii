@@ -394,7 +394,10 @@ class ImageGenerator:
             call["callback_on_step_end"] = _step
         out = pipe(**call).images[0].resize((cw, ch), Image.Resampling.LANCZOS)
 
-        soft = hard.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(feather)) if feather else hard
+        # Fully painted inside the mask, fading out only into the original around it: a blur on
+        # both sides let the flat fill of an outpaint canvas bleed in as a ghost frame.
+        soft = Image.fromarray(np.maximum(np.asarray(hard), np.asarray(
+            hard.filter(ImageFilter.GaussianBlur(feather))))) if feather else hard
         region = Image.composite(out, image.crop(crop_box), soft.crop(crop_box))
         result = image.copy()
         result.paste(region, crop_box[:2])

@@ -239,7 +239,19 @@ class AssemblyLine:
         painted = self.image_generator.inpaint(
             image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
             strength=request.strength, seed=request.seed, task_id=task_id,
+            # An outpaint join needs a wide blend; a narrow one left lines where the artwork ended.
+            feather=20 if request.operation == "extend" else 6,
             label="Extending the canvas" if request.operation == "extend" else "Repainting the selection")
+        if request.operation == "extend":
+            # Seam fix: a standard checkpoint does not harmonise across a long mask boundary, so the
+            # join showed as straight lines. A band straddling the boundary is redrawn gently.
+            from PIL import ImageChops, ImageFilter
+
+            hard = mask.point(lambda v: 255 if v > 127 else 0)
+            seam = ImageChops.subtract(hard.filter(ImageFilter.MaxFilter(57)), hard.filter(ImageFilter.MinFilter(57)))
+            painted = self.image_generator.inpaint(
+                painted, seam, request.edit_prompt or request.prompt, negative=request.negative_prompt,
+                strength=0.45, seed=request.seed, task_id=task_id, feather=12, label="Blending the join")
         path = output_dir / "base_image.png"
         painted.save(path)
         for file in staged:

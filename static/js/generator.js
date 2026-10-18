@@ -36,6 +36,7 @@
     paintToggle: $('paintToggle'), eraseToggle: $('eraseToggle'), brushSize: $('brushSize'),
     clearSelection: $('clearSelection'), editPrompt: $('editPrompt'), editStrength: $('editStrength'),
     editStrengthVal: $('editStrengthVal'), editBtn: $('editBtn'), editRetryBtn: $('editRetryBtn'), editNote: $('editNote'),
+    extendFullBtn: $('extendFullBtn'), uncropBtn: $('uncropBtn'),
   };
   let shownModelId = null; // the result on the canvas
 
@@ -499,6 +500,8 @@
       clearMask(); drawParts();
     };
     els.editBtn.onclick = () => submitEdit(false);
+    els.extendFullBtn.onclick = () => submitExtend('full_body');
+    els.uncropBtn.onclick = () => submitExtend('uncrop');
     els.editRetryBtn.onclick = () => submitEdit(true);
     const mask = els.maskCanvas;
     let last = null;
@@ -583,6 +586,18 @@
     });
     ctx.globalCompositeOperation = 'source-in';
     ctx.fillStyle = 'rgb(80,200,190)'; ctx.fillRect(0, 0, c.width, c.height);
+  }
+
+  async function submitExtend(mode) {
+    if (!shownModelId) return;
+    els.editNote.textContent = '';
+    for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = true;
+    try {
+      const { data } = await axios.post(`/api/generation/extend/${encodeURIComponent(shownModelId)}`,
+        { mode, prompt: els.editPrompt.value.trim() });
+      if (busy) { els.editNote.textContent = 'Added to the queue.'; refreshQueue(); } else track(data.job);
+    } catch (err) { els.editNote.textContent = err.response?.data?.error || 'Could not queue the extension'; }
+    finally { for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = false; }
   }
 
   async function submitEdit(again) {

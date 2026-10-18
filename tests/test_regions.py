@@ -121,3 +121,34 @@ def test_pixels_no_part_predicts_are_released_to_the_leftover():
     assert not covered[10, 30] and np.asarray(back)[10, 30, 3] == 0      # the hat: nobody's
     assert covered[35, 5] and np.asarray(back)[35, 5, 3] == 255          # real hair stays hair
     assert covered[50, 30]                                                # the face is untouched
+
+
+def test_outpaint_plan_full_body_and_uncrop():
+    from src.core import outpaint
+
+    image = Image.new("RGB", (200, 300), "white")
+    fg = np.zeros((300, 200), bool); fg[100:, 40:160] = True     # a torso cut by the bottom border
+    canvas, mask, info = outpaint.plan(image, fg, "full_body")
+    assert canvas.size == (200, 300) and info["touched"] == ["bottom"]
+    left, top, w, h = info["placed"]
+    assert w == 110 and h == 165 and mask[top + h // 2, left + w // 2] == False  # the artwork kept...
+    assert mask[top + h + 5, 100] and mask[top + h - 2, 100]                     # ...below it and the cut edge painted
+    assert mask[5, 5] and not mask[top + 10, left + 10]
+
+    canvas, mask, info = outpaint.plan(image, fg, "uncrop")
+    left, top, w, h = info["placed"]
+    assert canvas.size == (200, 300) and top == 0 and h < 300 and mask[-1, 100] and not mask[10, 100]
+
+
+def test_extend_api_queues_an_outpaint(client):
+    r = client.post("/api/generation/extend/abc-123", json={"mode": "full_body", "prompt": "red sneakers"})
+    assert r.status_code == 202
+    req = client.submitted[-1]
+    assert req.operation == "extend" and req.sketch and req.strength == 1.0 and req.framing == "full_body"
+    assert req.edit_prompt.startswith("red sneakers") and "full body" in req.edit_prompt
+    assert "cropped" in req.negative_prompt
+    with Image.open(req.reference_image) as canvas:
+        assert canvas.size == (100, 140)
+    # The test character (a white canvas) touches no border, so there is nothing to uncrop.
+    assert client.post("/api/generation/extend/abc-123", json={"mode": "uncrop"}).status_code == 400
+    assert client.post("/api/generation/extend/abc-123", json={"mode": "sideways"}).status_code == 400

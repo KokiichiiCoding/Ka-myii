@@ -477,6 +477,53 @@ def edit_region(model_id: str):
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
+@generation_bp.route('/extend/<model_id>', methods=['POST'])
+def extend_artwork(model_id: str):
+    """Paint the rest of a character cut off by the image border into a new sketch.
+
+    JSON: {"mode": "full_body" | "uncrop", "prompt": "optional extra description", "seed": null}
+    """
+    from secrets import randbits
+    from PIL import Image
+    from src.core import outpaint, regions
+
+    model_dir = model_dir_for(model_id)
+    base = model_dir / 'base_image.png' if model_dir else None
+    if not base or not base.is_file():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode') or 'full_body'
+    if mode not in ('full_body', 'uncrop'):
+        return jsonify({'success': False, 'error': 'Choose full_body or uncrop'}), 400
+    try:
+        extra = str(data.get('prompt') or '').strip()
+        if len(extra) > MAX_PROMPT_CHARS:
+            raise ValueError(f'Keep prompts under {MAX_PROMPT_CHARS} characters')
+        seed = _number(data, 'seed', None, int, 0, 2**32 - 1)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    with Image.open(base) as img:
+        image = img.convert('RGB')
+    canvas, mask, info = outpaint.plan(image, outpaint.character_mask(image), mode)
+    if mode == 'uncrop' and not info['touched']:
+        return jsonify({'success': False, 'error': 'This character is not cut off by the border'}), 400
+
+    brief = _saved_brief(model_dir)
+    brief['prompt'] = brief.get('prompt') or f'Artwork of {model_id[:8]}'
+    tags = outpaint.FULL_BODY_TAGS if mode == 'full_body' else ''
+    negative = outpaint.FULL_BODY_NEGATIVE if mode == 'full_body' else outpaint.UNCROP_NEGATIVE
+    job = job_queue.submit(GenerationRequest(**{
+        **brief, 'width': canvas.width, 'height': canvas.height, 'operation': 'extend', 'sketch': True,
+        'source': 'upload' if brief.get('source') == 'upload' else 'artwork',
+        'framing': 'full_body' if mode == 'full_body' else brief.get('framing', 'upper_body'),
+        'reference_image': _stage(canvas, 'canvas'), 'mask_image': _stage(regions.to_image(mask), 'mask'),
+        'edit_prompt': ', '.join(p for p in (extra or brief['prompt'], tags) if p),
+        'negative_prompt': ', '.join(p for p in (brief.get('negative_prompt'), negative) if p),
+        'strength': 1.0, 'seed': seed if seed is not None else randbits(31)}))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'info': info,
+                    'message': 'Queued'}), 202
+
+
 @generation_bp.route('/expressions/<model_id>', methods=['POST'])
 def paint_expressions(model_id: str):
     """Queue painting closed eyes and the other mouth state onto a separated character."""
