@@ -149,6 +149,8 @@ class AssemblyLine:
                 shutil.move(request.reference_image, base_image_path)
                 model.request = request = replace(request, reference_image=None)
                 model.metadata["source"] = request.source
+                if request.import_options is not None:
+                    request = model.request = self._prepare_import(request, base_image_path, model, task_id)
             else:
                 self._ensure_generator(request)
                 base_image_path = self._generate_image(request, model_output_dir, task_id)
@@ -228,6 +230,30 @@ class AssemblyLine:
             else:
                 shutil.rmtree(model_output_dir, ignore_errors=True)
             raise
+
+    def _prepare_import(self, request: GenerationRequest, path: Path, model: VTuberModel,
+                        task_id: Optional[str]) -> GenerationRequest:
+        """Frame, whiten, optionally clean up and describe an uploaded design (importer.py)."""
+        from PIL import Image
+        from src.core import importer, tagger
+
+        options = request.import_options or {}
+        with Image.open(path) as img:
+            image = img.convert("RGB")
+        enhance = float(options.get("enhance") or 0)
+        if enhance > 0 and not self.use_dummy_generators:
+            self._ensure_generator(request)
+        prepared, tags = importer.prepare(image, frame_figure=bool(options.get("frame", True)),
+                                          plain_background=bool(options.get("plain_background", True)),
+                                          enhance=enhance, generator=self.image_generator, task_id=task_id,
+                                          tag=None if self.use_dummy_generators else tagger.tag_image)
+        prepared.save(path)
+        updates = {"import_options": None, "width": prepared.width, "height": prepared.height}
+        if tags:
+            model.metadata["tags"] = tagger.describe(tags)
+            if request.prompt.startswith("Uploaded artwork"):
+                updates["prompt"] = model.metadata["tags"]  # a brief for later edits and expressions
+        return replace(request, **updates)
 
     def _repaint(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str]) -> Path:
         """Edit / extend: inpaint the staged artwork through the staged mask into a new base image."""

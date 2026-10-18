@@ -26,8 +26,8 @@ Read this whole file before changing anything. Keep it up to date when you finis
 - Branch: `claude/automated-vtuber-model-011CUg6gEfYhoWvMuuXdF2hJ` (the real development branch;
   the default branch `Ka-myii` is stale; there is no `main`).
 - **Everything is committed** (2026-10-17). The owner asked to make Ka-myii a good initial
-  product to push to GitHub; M1–M3 were committed as one baseline (`c113da1`) and M4 work
-  (section 9) as separate commits on top. Commit or push only when the owner asks.
+  product to push to GitHub; M1–M3 were committed as one baseline (`c113da1`), M4 work
+  (section 9) and M5 (section 10) as separate commits on top. Commit or push only when the owner asks.
   **Never run `git checkout .`, `git reset --hard`, `git stash` or `git clean` on this tree**
   (`outputs/` holds the owner's characters).
 - **The repo is public.** The local git config's email is the owner's personal address; commit as
@@ -404,7 +404,77 @@ Ideas / next steps:
   clothing, now fixed by `topwear/bottomwear < handwear` priors (still image unchanged, mean
   error 0.35, p99 11; preview 25 animated parts, all facial checks).
 
-## 10. How to work in this repo
+## 10. M5 — import, edits, expressions, projects, exports, e2e (2026-10-17, committed)
+
+The owner asked for: importing outside designs (Perchance/ChatGPT), better mouth/eye animation,
+region inpainting (face, hair, new clothes; retry), extending cut-off characters to full body,
+reliable import/segmentation, stable tracking, save/reopen, functional exports, e2e tests.
+
+- **SDXL inpainting** (`ImageGenerator.inpaint`): `AutoPipelineForInpainting.from_pipe` on the
+  loaded checkpoint (no second load), crop around the mask, ~1024 px work size, composite that
+  blends only *outward* into the original (`max(hard, blur(hard))`; a symmetric feather left a
+  ghost frame). Peak 5.3 GB on the 8 GB card. Demo mode: posterized blur fill.
+- **Expressions** (`src/core/expressions.py`, job stage 0.86–0.97 and `POST /expressions/<id>`):
+  closed eyes = geometric ellipse per eye from eyewhite/irides/eyelash (minus front hair), flat
+  skin fill, then "closed eyes" at strength 1.0 (inpainting over the open eye left iris
+  remnants); the other mouth = "open mouth, :d/:o, teeth" (or "closed mouth" when the drawn one
+  is open), saved as *changed pixels only*. Prompts are face-only (character tags painted a
+  beard/clothes into the patch). Preview PSD v4 maps them to the rig's `eye_close`/`mouth_open`/
+  `mouth_close`; they are hidden layers in PSD/ORA. ~2 min per character.
+- **Ownership fixes** (asset_separator `_resolve_ownership`): facial details beat front hair /
+  headwear on near-ties (bangs were owning iris strokes); pixels no part predicts (min error >
+  `ALIEN_ERROR` 90, opened with a 9 px min/max filter) are cut from every part and left to
+  leftover/headwear (a witch hat's top had gone to the back hair); `inside` keeps pixels a part
+  covered from being called background. Real results: holes 0.36–2 %, mean error 0.25–0.49.
+- **Region edit / extend** (`regions.py`, `outpaint.py`, `POST /edit|/extend/<id>`, `GET /parts`):
+  part selections use *visible* pixels only (`visible_alphas`, back to front) + a brush mask
+  (PNG data URL, validated). Extend: full_body puts the art at 55 % into the top of the canvas;
+  uncrop pads the touched borders 12 %; strength 1.0 then a seam pass (57 px band, 0.45). Edits
+  are new sketches; empty prompt = the saved brief; each edit gets a new random seed.
+- **Import** (`importer.py`, `/upload` fields `frame`, `plain_background`, `enhance` 0–0.6,
+  `separate`, `crop` "x0,y0,x1,y1" fractions): anime-seg → largest connected figure → framed into
+  832×1216 with a 6 % margin (kept against a border it was cut at) → white background through
+  the soft alpha → optional SDXL redraw → WD tagger (`tagger.py`, wd-vit-tagger-v3 ONNX, pinned
+  revision) on the *framed* image for the brief; sheet-layout tags are dropped. Overlapping views
+  on a sheet join into one component — that is what the crop box is for.
+- **Projects**: Gallery Export zip → **Open exported character** (`POST /open-project`,
+  `project.py`): zip-slip/size checks (bytes counted while writing), staging under `_uploads`,
+  a new id when the old one exists, absolute paths in every JSON rebased to the new folder.
+  Global `MAX_CONTENT_LENGTH` is 1 GB but a `before_request` hook keeps everything except
+  open-project at 16 MB (Flask 3.0 has no per-request limit).
+- **Studio adjustments** are saved with the character (`PUT /studio/<id>` → `studio.json`,
+  injected as `KamyiiPreview.settings`, applied with `anyModel` because the PSD fingerprint
+  changes whenever the preview PSD is rebuilt). Plain PSDs opened in the Studio still use
+  localStorage.
+- **PNGtuber pack** (`pngtuber.py`, `artifact/<id>/pngtuber`): character.png + expression layers
+  → idle/talk/blink/talk_blink PNGs cropped alike, with a README for veadotube mini, PNGTuber
+  Plus and Discord overlays. Shown when the character has expressions.
+- **pytoshop** wrote a NUL into every PSD layer name; patched `encode_unicode_string`.
+- **e2e** (`tests/e2e`, Python Playwright): three browser journeys against an in-process demo
+  server; skipped without a browser. Locally: `KAMYII_E2E_CHANNEL=msedge` (playwright 1.47 is in
+  `.venv`, no bundled browser). Edge's download UI crashes the 1.47 driver on close, so the
+  tests fetch the Export link with `page.request` instead of a real download. CI runs them on
+  Ubuntu with bundled Chromium.
+
+Verification (owner's laptop, RTX 4070 Laptop 8 GB):
+
+- 64 pytest + 3 e2e (Edge) + 2 node tests.
+- Inpaint/expressions on real results: eyes close cleanly, mouth opens (116–126 s per job).
+  Hair recolour edit touched only the hair; full-body extension of a hoodie character had no
+  visible seams (~1.5 min).
+- Import of outside-style art: a 512 px neon-street JPEG and a reference sheet came out as framed
+  white-background sketches with sensible tag briefs. The sheet's front view, boxed with the crop
+  (`ab1ffc38…` sketch → `4bb6ee7b-e6ea-4885-a91b-f8ea3b305eb5`, 881 s): 20 layers, composite
+  mean error 1.18, 0 % holes, expressions painted, PNGtuber states look natural.
+
+Not done / next:
+
+- Tracking stability was verified only with synthetic devices (section 6); no new smoothing work.
+- Physical webcam/mic, Cubism import and Linux GPU runs still need a human.
+- Expressions only for See-through characters; demo mode has none (the demo rig blinks by
+  squashing). Mouth shapes are two (closed/open); no vowel shapes.
+
+## 11. How to work in this repo
 
 - Smallest complete change; reuse existing code and libraries; no speculative abstractions.
 - Every non-trivial logic change gets a small GPU-free pytest (monkeypatch GPU parts like

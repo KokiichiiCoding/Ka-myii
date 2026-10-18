@@ -129,12 +129,15 @@
     els.artwork.onchange = () => {
       const file = els.artwork.files[0];
       if (els.artworkThumb.src) URL.revokeObjectURL(els.artworkThumb.src);
-      els.artworkThumb.classList.toggle('hidden', !file);
+      $('cropStage').classList.toggle('hidden', !file);
+      $('cropHint').classList.toggle('hidden', !file);
+      setCrop(null);
       if (file) els.artworkThumb.src = URL.createObjectURL(file);
     };
     els.form.onsubmit = onGenerate;
     els.regenBtn.onclick = resetToForm;
     bindEditor();
+    bindCrop();
     els.separateBtn.onclick = async () => {
       if (!shownModelId) return;
       els.separateBtn.disabled = true;
@@ -344,8 +347,37 @@
     els.generateBtn.innerHTML = queueing
       ? '<i class="fas fa-plus"></i> Add to queue'
       : source === 'upload'
-        ? '<i class="fas fa-layer-group"></i> Separate layers'
+        ? '<i class="fas fa-file-import"></i> Import artwork'
         : '<i class="fas fa-wand-magic-sparkles"></i> Create character';
+  }
+
+  // ---- import crop: a box around one character of a sheet or group picture ----
+  let crop = null; // [x0, y0, x1, y1] as fractions of the artwork
+  function setCrop(c) {
+    crop = c;
+    $('cropBox').hidden = $('cropClear').hidden = !c;
+    if (c) Object.assign($('cropBox').style, { left: `${c[0] * 100}%`, top: `${c[1] * 100}%`,
+      width: `${(c[2] - c[0]) * 100}%`, height: `${(c[3] - c[1]) * 100}%` });
+  }
+  function bindCrop() {
+    const stage = $('cropStage');
+    const clamp = (v) => Math.min(1, Math.max(0, v));
+    const at = (e) => {
+      const r = els.artworkThumb.getBoundingClientRect();
+      return [clamp((e.clientX - r.left) / r.width), clamp((e.clientY - r.top) / r.height)];
+    };
+    let start = null;
+    stage.onpointerdown = (e) => { start = at(e); stage.setPointerCapture(e.pointerId); e.preventDefault(); };
+    stage.onpointermove = (e) => {
+      if (!start) return;
+      const p = at(e);
+      setCrop([Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.max(start[0], p[0]), Math.max(start[1], p[1])]);
+    };
+    stage.onpointerup = stage.onpointercancel = () => {
+      start = null;
+      if (crop && (crop[2] - crop[0] < 0.05 || crop[3] - crop[1] < 0.05)) setCrop(null); // a click, not a box
+    };
+    $('cropClear').onclick = () => setCrop(null);
   }
 
   // ---- generate ----
@@ -359,6 +391,11 @@
       if (!file) { els.artwork.focus(); return; }
       const form = new FormData();
       form.append('image', file);
+      form.append('frame', $('importFrame').checked ? '1' : '0');
+      form.append('plain_background', $('importWhite').checked ? '1' : '0');
+      form.append('enhance', $('importEnhance').value);
+      form.append('separate', $('importSeparate').checked ? '1' : '0');
+      if (crop) form.append('crop', crop.map((v) => v.toFixed(4)).join(','));
       send = () => axios.post('/api/generation/upload', form);
     } else {
       const prompt = els.prompt.value.trim();
@@ -452,6 +489,9 @@
     els.dlPackage.href = `/api/generation/artifact/${mid}/package`;
     els.dlPsd.href = `/api/generation/artifact/${mid}/psd`;
     els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
+    // Needs the painted closed eyes / second mouth shape (Gallery: Add blink & talk).
+    $('dlPngtuber').classList.toggle('hidden', sketch || !model.metadata?.expressions);
+    $('dlPngtuber').href = `/api/generation/artifact/${mid}/pngtuber`;
 
     els.generateBtn.disabled = false;
     if (sketch) els.layerPanel.classList.add('hidden'); else await loadLayers(mid);

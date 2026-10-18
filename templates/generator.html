@@ -21,8 +21,23 @@
       <div class="field hidden" id="uploadFields">
         <label for="artwork">Artwork</label>
         <input type="file" id="artwork" accept="image/png,image/jpeg,image/webp">
-        <img id="artworkThumb" class="artwork-thumb hidden" alt="The artwork you chose">
-        <div class="hint">One character facing forward on a plain background works best. PNG, JPG or WebP up to 16 MB. It is split into layers as is, without SDXL.</div>
+        <div class="crop-stage hidden" id="cropStage">
+          <img id="artworkThumb" class="artwork-thumb" alt="The artwork you chose" draggable="false">
+          <div class="crop-box" id="cropBox" hidden></div>
+        </div>
+        <div class="hint hidden" id="cropHint">Several characters or views? Drag a box around the one to import.
+          <button type="button" class="link-btn" id="cropClear" hidden>Use the whole picture</button></div>
+        <div class="hint">Designs from Perchance, ChatGPT or an artist work. PNG, JPG or WebP up to 16 MB; one character
+          facing forward works best. You get a prepared sketch first to check, edit or extend, then separate its layers.</div>
+        <label class="option-row"><input type="checkbox" id="importFrame" checked> Find, center and frame the character</label>
+        <label class="option-row"><input type="checkbox" id="importWhite" checked> Replace the background with white</label>
+        <label for="importEnhance" class="option-label">Clean up with AI</label>
+        <select id="importEnhance">
+          <option value="0">Off: keep the picture exactly</option>
+          <option value="0.25">Light: small, blurry or JPEG images</option>
+          <option value="0.4">Strong: rough or painterly images</option>
+        </select>
+        <label class="option-row"><input type="checkbox" id="importSeparate"> Separate the layers right away (~11 min)</label>
       </div>
 
       <div id="promptFields">
@@ -189,6 +204,7 @@
             <a class="btn" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
             <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>
             <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
+            <a class="btn hidden" id="dlPngtuber" title="Idle, talk and blink PNGs for veadotube mini, PNGTuber Plus or Discord overlays"><i class="fas fa-microphone"></i> PNGtuber pack</a>
             <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
           </div>
 

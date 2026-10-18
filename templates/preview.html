@@ -194,7 +194,7 @@
     </section>
     <section class="sec" data-sec="save"><h2>Save & settings</h2>
       <div class="btns">
-        <button class="btn" type="button" id="btnSaveSettings" data-model-action disabled title="Save in this browser (Ctrl+S)">Save adjustments</button>
+        <button class="btn" type="button" id="btnSaveSettings" data-model-action disabled title="Save with the character (Ctrl+S)">Save adjustments</button>
         <button class="btn" type="button" id="btnRestoreSettings" data-model-action disabled>Restore saved settings</button>
         <button class="btn" type="button" id="btnExportSettings" data-model-action disabled>Export settings</button>
         <button class="btn" type="button" id="btnImportSettings" data-model-action disabled>Import settings</button>
@@ -224,7 +224,8 @@
   <div class="dialog-head"><b id="shortcutTitle">Keyboard shortcuts</b><button class="btn" type="button" id="shortcutClose" aria-label="Close shortcuts">✕</button></div>
   <div class="dialog-body"><table class="shortcut-table" id="shortcutTable"></table></div>
 </div></div>
-<script>window.KamyiiPreview = {psd: {{ preview_psd|tojson }}, name: {{ character_name|tojson }}};</script>
+<script>window.KamyiiPreview = {psd: {{ preview_psd|tojson }}, name: {{ character_name|tojson }}, id: {{ model_id|tojson }},
+  settings: {{ studio_settings|tojson }}};</script>
 <script src="lib/ag-psd.min.js"></script>
 <script src="lib/rigger.js"></script>
 <script src="lib/genericparts.js"></script>

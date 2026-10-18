@@ -84,15 +84,24 @@ def test_upload_queues_the_users_artwork(client, tmp_path):
     assert r.status_code == 202
     req = client.submitted[-1]
     assert req.prompt == "Uploaded artwork: my oc" and (req.width, req.height) == (2048, 1024)
-    assert req.source == "upload" and not req.sketch
+    assert req.source == "upload" and req.sketch  # a prepared sketch first
+    assert req.import_options == {"frame": True, "plain_background": True, "enhance": 0.0}
     with Image.open(req.reference_image) as saved:
         assert saved.mode == "RGB" and saved.getpixel((5, 5)) == (255, 255, 255)  # transparency → white
 
+    # A box around one character of a sheet: fractions of the picture.
+    r = client.post("/api/generation/upload", data={"image": (png((1200, 800), "RGB"), "sheet.png"),
+                                                    "crop": "0.5,0.25,1,1"}, content_type="multipart/form-data")
+    assert r.status_code == 202 and (client.submitted[-1].width, client.submitted[-1].height) == (600, 600)
+
     for data, word in [({}, "Choose"), ({"image": (io.BytesIO(b"not an image"), "x.png")}, "not an image"),
-                       ({"image": (png((100, 100), "RGB"), "tiny.png")}, "too small")]:
+                       ({"image": (png((100, 100), "RGB"), "tiny.png")}, "too small"),
+                       ({"image": (png((1200, 800), "RGB"), "a.png"), "crop": "0,0,0.1,0.1"}, "too small"),
+                       ({"image": (png((1200, 800), "RGB"), "a.png"), "crop": "0.6,0,0.2,1"}, "crop"),
+                       ({"image": (png((1200, 800), "RGB"), "a.png"), "crop": "left"}, "crop")]:
         r = client.post("/api/generation/upload", data=data, content_type="multipart/form-data")
         assert r.status_code == 400 and word in r.get_json()["error"]
-    assert len(client.submitted) == 1
+    assert len(client.submitted) == 2
 
 
 def test_uploaded_artwork_runs_the_pipeline_without_sdxl(tmp_path):

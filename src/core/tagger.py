@@ -27,7 +27,11 @@ KAOMOJI = {"0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", "
 NOT_THE_CHARACTER = {"simple background", "white background", "grey background", "gradient background",
                      "transparent background", "solo", "looking at viewer", "upper body", "full body",
                      "cowboy shot", "portrait", "signature", "watermark", "artist name", "web address",
-                     "border", "letterboxed", "pillarboxed", "english text", "text"}
+                     "border", "letterboxed", "pillarboxed", "english text", "text",
+                     # reference-sheet layout: the import frames one view of the character
+                     "multiple views", "reference sheet", "character sheet", "turnaround", "from side",
+                     "from behind", "multiple girls", "multiple boys", "2girls", "3girls", "4girls",
+                     "2boys", "3boys", "clone", "variations", "zoom layer", "inset"}
 
 
 def prepare(image: Image.Image, size: int = 448) -> np.ndarray:

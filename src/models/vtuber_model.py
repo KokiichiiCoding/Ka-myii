@@ -68,6 +68,8 @@ class GenerationRequest:
     mask_image: Optional[str] = None
     strength: float = 0.9
     edit_prompt: Optional[str] = None  # what to paint into the selection (edit / extend)
+    # Uploads: {"frame": bool, "plain_background": bool, "enhance": 0..0.6} (src/core/importer.py)
+    import_options: Optional[Dict] = None
 
 
 @dataclass

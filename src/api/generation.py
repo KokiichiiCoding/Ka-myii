@@ -177,12 +177,32 @@ def upload_artwork():
                 image = img.convert('RGB')
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
         return jsonify({'success': False, 'error': 'That file is not an image Ka-myii can read (PNG, JPG or WebP)'}), 400
+    if request.form.get('crop'):
+        # "x0,y0,x1,y1" as fractions: the character the user boxed on a sheet or group picture.
+        try:
+            x0, y0, x1, y1 = (float(v) for v in request.form['crop'].split(','))
+            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
+                raise ValueError
+        except ValueError:
+            return jsonify({'success': False, 'error': "'crop' must be four fractions x0,y0,x1,y1"}), 400
+        w, h = image.size
+        image = image.crop((round(x0 * w), round(y0 * h), round(x1 * w), round(y1 * h)))
     if min(image.size) < 256:
         return jsonify({'success': False, 'error': 'The image is too small; use at least 256 px on each side'}), 400
     image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)  # See-through works at 1024-1280 anyway
     title = Path(upload.filename).stem.strip()[:60] or 'artwork'
+    form = request.form
+    try:
+        enhance = _number(form, 'enhance', 0.0, float, 0.0, 0.6)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    options = {'frame': form.get('frame', '1') != '0', 'plain_background': form.get('plain_background', '1') != '0',
+               'enhance': enhance}
+    # A prepared sketch first (seconds; ~1 min with enhance): check the framing, edit or extend,
+    # then separate the layers. "separate=1" goes straight on to the full ~11 minute run.
     return _queue_artwork(image, {'prompt': f'Uploaded artwork: {title}', 'style': 'anime',
-                                  'framing': 'upper_body', 'source': 'upload'})
+                                  'framing': 'upper_body', 'source': 'upload'},
+                          import_options=options, sketch=form.get('separate') != '1')
 
 
 @generation_bp.route('/retry/<model_id>', methods=['POST'])
@@ -207,7 +227,7 @@ def retry_model(model_id: str):
     return _queue_artwork(image, brief)
 
 
-def _queue_artwork(image, brief: dict):
+def _queue_artwork(image, brief: dict, import_options=None, sketch: bool = False):
     """Queue a job that separates ``image`` as is (its image stage imports instead of generating)."""
     import uuid
 
@@ -216,8 +236,9 @@ def _queue_artwork(image, brief: dict):
     path = uploads / f'{uuid.uuid4().hex}.png'
     image.save(path)
     job = job_queue.submit(GenerationRequest(**{**brief, 'width': image.width, 'height': image.height,
-                                                'reference_image': str(path), 'sketch': False,
-                                                'operation': 'generate', 'mask_image': None, 'edit_prompt': None}))
+                                                'reference_image': str(path), 'sketch': sketch,
+                                                'operation': 'generate', 'mask_image': None, 'edit_prompt': None,
+                                                'import_options': import_options}))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
@@ -540,6 +561,39 @@ def paint_expressions(model_id: str):
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
+@generation_bp.route('/open-project', methods=['POST'])
+def open_project():
+    """Reopen a character exported from the Gallery (multipart field "project", the Export zip)
+    as a new result. Response: {"success": true, "model_id": ...}."""
+    from src.core import project
+
+    upload = request.files.get('project')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': 'Choose an exported character (.zip)'}), 400
+    try:
+        model_id = project.import_project(upload.stream, config.OUTPUT_DIR)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info("Opened exported character %s as %s", upload.filename, model_id)
+    return jsonify({'success': True, 'model_id': model_id})
+
+
+@generation_bp.route('/studio/<model_id>', methods=['PUT'])
+def save_studio_settings(model_id: str):
+    """Keep the Live Preview's adjustments (sliders, layers, anchors) with the character, so they
+    survive preview rebuilds, other browsers and project export."""
+    model_dir = model_dir_for(model_id)
+    if not model_dir:
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    if (request.content_length or 0) > 1_000_000:
+        return jsonify({'success': False, 'error': 'Settings are too large'}), 413
+    settings = request.get_json(silent=True)
+    if not isinstance(settings, dict) or not isinstance(settings.get('params'), dict):
+        return jsonify({'success': False, 'error': 'Expected the Live Preview settings JSON'}), 400
+    save_json(settings, model_dir / 'studio.json')
+    return jsonify({'success': True})
+
+
 @generation_bp.route('/rename/<model_id>', methods=['POST'])
 def rename_model(model_id: str):
     """Set (or with an empty name, clear) a character's display name. Files keep their names."""
@@ -793,7 +847,7 @@ def model_dir_for(model_id: str):
 
 @generation_bp.route('/artifact/<model_id>/<kind>', methods=['GET'])
 def get_artifact(model_id: str, kind: str):
-    """Download a rig-ready artifact: 'psd', 'ora', 'flat' or 'package' (zip)."""
+    """Download a rig-ready artifact: 'psd', 'ora', 'flat', 'package' (zip) or 'pngtuber' (zip)."""
     try:
         model_dir = model_dir_for(model_id)
         if not model_dir:
@@ -807,6 +861,15 @@ def get_artifact(model_id: str, kind: str):
                 return jsonify({'success': False, 'error': str(exc)}), 422
             return send_file(artifact_path, mimetype='image/vnd.adobe.photoshop',
                              download_name=f'{model_id}_preview.psd', conditional=True)
+
+        if kind == 'pngtuber':
+            from src.core import pngtuber
+            try:
+                archive = pngtuber.pack(model_dir, model_id)
+            except (FileNotFoundError, ValueError) as exc:
+                return jsonify({'success': False, 'error': str(exc)}), 422
+            return send_file(archive, mimetype='application/zip', as_attachment=True,
+                             download_name=f'{model_id}_pngtuber.zip')
 
         metadata_path = model_dir / "metadata.json"
         artifacts = {}

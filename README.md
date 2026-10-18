@@ -32,8 +32,18 @@ brief ──► SDXL artwork ──► See-through layers ──► Live Preview
   Danbooru tag autocomplete suggests 57k tags, most-used first.
 - **Sketch first.** Generate artwork alone in about a minute, queue a few, then separate
   the layers of the one you like.
-- **Bring your own artwork.** Upload a character you drew or commissioned and get the same
-  layers, PSD, Cubism files and Live Preview, without generating anything.
+- **Bring your own design.** Import a character from Perchance, ChatGPT, an artist or your own
+  sketchbook. Ka-myii finds the figure, frames it, replaces the scenery with white, can clean up
+  small or JPEG-soft images, and writes a tag brief for it. Box one view on a reference sheet.
+- **Edit and extend.** Repaint a region (hair, face, eyes, mouth, top, bottom, accessories, or
+  anything you brush over) from a prompt, or retry it with a new seed. A character cut off by
+  the picture border can be extended to full body, or just given room where it was cropped.
+- **Blink and talk from the character's own art.** Closed eyes and the other mouth shape are
+  painted for each character, so the Live Preview blinks and talks in the artwork's style.
+- **Exports that work today.** A PNGtuber pack (idle / talk / blink PNGs for veadotube mini,
+  PNGTuber Plus or Discord overlays), the layered PSD and ORA, and a Cubism starter project.
+- **Save and reopen.** Every character can be exported as one zip and opened again in the
+  Gallery, here or on another machine. Live Preview adjustments are saved with the character.
 - **Background queue.** Line up several characters, reload or close the tab and come back.
   Cancel works at any stage, and unfinished jobs resume after a restart.
 - **Demo mode.** The whole pipeline (layers, PSD, Cubism files, Live Preview) runs on a
@@ -103,12 +113,36 @@ python app.py --open                   # or: python app.py --dummy --open
    While a job runs, the button becomes **Add to queue**. **Sketch artwork only** stops after
    the artwork (about a minute); use **Separate layers** on the result, or in the Gallery,
    when you find one you like. It keeps the sketch's brief and seed.
-   To split existing art instead, choose **Use my artwork** and pick a PNG, JPG or WebP.
-   One character facing forward on a plain background works best.
-5. **Use the result.** Inspect the layers, open **Live Preview**, or download the **Live2D
-   package**, **PSD** or **ORA**. Everything is saved under `outputs/<id>/` and listed in the
-   **Gallery**, where a character can be reopened with its exact settings and seed, renamed
-   or deleted.
+   To use an existing design instead, choose **Use my artwork** and pick a PNG, JPG or WebP
+   (see *Importing a design* below).
+5. **Use the result.** Inspect the layers, open **Live Preview**, or download the **PNGtuber
+   pack**, **Live2D package**, **PSD** or **ORA**. Everything is saved under `outputs/<id>/`
+   and listed in the **Gallery**, where a character can be reopened with its exact settings and
+   seed, renamed, exported as a zip or deleted. **Open exported character** brings a zip back.
+
+### Importing a design
+
+Pick the image and, if it shows several characters or views, drag a box around the one you
+want. The import first makes a *prepared sketch* (seconds): the figure framed in an SDXL
+portrait, scenery replaced with white (both optional), and a tag brief from the WD tagger.
+**Clean up with AI** lightly redraws small, blurry or JPEG images (about a minute). Check the
+sketch, edit or extend it if needed, then **Separate layers**. One character facing the viewer
+works best; side and back views decompose poorly.
+
+### Editing and extending
+
+**Edit a region** under a sketch or result: pick parts and/or paint over an area, describe what
+should be there (*short blue hair*, *red kimono*) or leave it empty to redraw the selection as it
+is, and **Repaint selection**. **Try again** repaints with a new seed. **Extend to full body**
+draws the rest of a character cut off at the bottom; **Complete cut-off edges** only adds room where the
+artwork touches the border. Each edit is a new sketch, so the original stays in the Gallery.
+
+### Blink and talk
+
+Characters separated by See-through get painted closed eyes and a second mouth shape (open if
+the artwork's mouth is closed, and the other way round), about two minutes after the layers.
+Older characters get them with **Add blink & talk** in the Gallery. They drive the Live Preview's
+blink and lip sync and the PNGtuber pack, and are hidden layers in the PSD for Cubism.
 
 ### Live Preview
 
@@ -116,8 +150,9 @@ Breathing, blinking and gentle hair physics start immediately. **Face detail** z
 face. There are sliders for expressions, head and eyes, anchor adjustment, layer visibility and
 order, transparent PNG snapshots and short recordings. **Use camera** and **Use microphone**
 ask for permission only when clicked, and all processing stays in the browser (Chrome or Edge
-with WebGL recommended; the camera needs `localhost` or HTTPS). Preview adjustments affect the
-browser preview only; they don't rig the Cubism project.
+with WebGL recommended; the camera needs `localhost` or HTTPS). **Save adjustments** keeps
+sliders, layers and anchors with the character (they travel with its export zip). Preview
+adjustments affect the browser preview only; they don't rig the Cubism project.
 
 ### Finishing in Live2D Cubism
 
@@ -226,6 +261,11 @@ node tests/preview_runtime.test.cjs  # browser-runtime checks (optional)
 node tests/tagcomplete.test.cjs
 ```
 
+`tests/e2e` drives the real UI in a browser against a demo-mode server (create → Live Preview →
+saved adjustments; import → crop → region edit → separate; Gallery export → reopen → delete).
+It needs `pip install playwright` and `python -m playwright install chromium`, or an installed
+Edge/Chrome via `KAMYII_E2E_CHANNEL=msedge`; without a browser it is skipped.
+
 ```
 app.py                       Flask entry point
 config.py                    settings (.env overrides)
@@ -238,6 +278,11 @@ src/core/seethrough.py       runs See-through in its own venv as a subprocess
 src/core/psd_exporter.py     layered PSD / ORA
 src/core/model_assembler.py  Cubism scaffold (model3 / cdi3 / physics3, guide)
 src/core/live_preview.py     preview PSD for the browser rig
+src/core/importer.py         imported designs: framing, white background, clean-up
+src/core/tagger.py           WD tagger: tag briefs for imports, edits and expressions
+src/core/regions.py, outpaint.py  region selections and canvas extension for SDXL inpainting
+src/core/expressions.py      painted closed eyes and second mouth shape
+src/core/pngtuber.py, project.py  PNGtuber pack; reopening exported characters
 scripts/                     See-through installer and runner, rebuild_layers.py
 templates/, static/          Studio, Gallery and Live Preview
 ```
@@ -250,6 +295,8 @@ templates/, static/          Studio, Gallery and Live Preview
   Apache-2.0. Downloaded by `scripts/install_seethrough.py` at a pinned commit, not vendored.
 - [Animagine XL 4.0](https://huggingface.co/cagliostrolab/animagine-xl-4.0): Cagliostro
   Research Lab, CreativeML Open RAIL++-M. Downloaded on first use.
+- [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3): SmilingWolf,
+  Apache-2.0, run with ONNX Runtime. Downloaded on first use.
 - [anime-segmentation](https://github.com/SkyTNT/anime-segmentation) IS-Net weights
   (`skytnt/anime-seg`): SkyTNT, Apache-2.0, run with [ONNX Runtime](https://onnxruntime.ai) (MIT).
 - [Anime2.5DRig](https://github.com/852wa/Anime2.5DRig): 852wa, MIT. It is vendored with

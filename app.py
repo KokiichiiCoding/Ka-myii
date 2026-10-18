@@ -44,7 +44,7 @@ def create_app(use_dummy_generators: bool = False):
     """
     app = Flask(__name__)
     app.config['SECRET_KEY'] = config.SECRET_KEY
-    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+    app.config['MAX_CONTENT_LENGTH'] = 1024 ** 3  # an exported character to reopen (~60 MB)...
     # No CORS: the UI is same-origin, and allowing other origins would let any website the
     # user visits drive this local server (queue jobs, delete results).
     app.config['LOCAL_ONLY'] = False
@@ -54,6 +54,12 @@ def create_app(use_dummy_generators: bool = False):
         # DNS rebinding: a website can point its own hostname at 127.0.0.1 and become "same origin".
         if app.config['LOCAL_ONLY'] and request.host.rsplit(':', 1)[0] not in LOOPBACK_HOSTS:
             abort(403)
+
+    @app.before_request
+    def limit_request_size():
+        # ...every other request (artwork uploads, JSON) stays under 16 MB.
+        if request.endpoint != 'generation.open_project' and (request.content_length or 0) > 16 * 1024 * 1024:
+            abort(413)
 
     # Initialize assembly line
     init_assembly_line(use_dummy=use_dummy_generators)
@@ -89,7 +95,9 @@ def create_app(use_dummy_generators: bool = False):
         name = metadata.get('display_name') or metadata.get('name', model_id[:8])
         if name.startswith('model_'):
             name = 'Study ' + name[6:].upper()
+        studio_path = model_dir / 'studio.json'  # the Studio's saved adjustments (PUT /api/generation/studio)
         return render_template('preview.html', model_id=model_id, character_name=name,
+                               studio_settings=load_json(studio_path) if studio_path.exists() else None,
                                preview_psd=url_for('generation.get_artifact', model_id=model_id, kind='preview_psd'))
 
     @app.route('/health')

@@ -41,7 +41,7 @@ try{renderer=window.RigRenderer.create(gl);}catch(err){$('dropStatus').textConte
 const EXPORT_BG={transparent:[0,0,0,0],green:[0,177/255,64/255,1],dark:[20/255,21/255,28/255,1]};
 
 // ---------- model state (rebuilt per PSD) ----------
-let modelId='',modelName='',currentRig=null,background='checker',paused=false,contextLost=false,lastFrame=null,capturePending=false,dirty=true;
+let modelId='',modelName='',kamyiiModel=false,currentRig=null,background='checker',paused=false,contextLost=false,lastFrame=null,capturePending=false,dirty=true;
 let layers=[],A=null,baseAnchors=null,anchorOffsets={},CW=768,CH=768,FS=1,NP=null,BP=null,FC=null,CHEST=null,hasEyeClose2=false;
 let lastPsd=null,lastPre=null,anchorMode=false,anchorPreview=null,highlightLayer=null;
 const bounce={x:0,v:0,dy:0};
@@ -197,7 +197,7 @@ async function loadModel(source,name,opts={}){
     if(ticket!==loadTicket)return;
     setAnchorMode(false);
     applyRig(parsed.rig);
-    modelId=parsed.id||'';modelName=displayName;lastPsd=parsed.psd;lastPre=parsed.pre;
+    modelId=parsed.id||'';modelName=displayName;kamyiiModel=!!opts.kamyii;lastPsd=parsed.psd;lastPre=parsed.pre;
     $('modelName').textContent=displayName;$('modelName').title=displayName;
     document.title=displayName+' — Ka-myii Live Preview';
     resetParams();restoreSettings(true);
@@ -421,8 +421,10 @@ function restoreSettings(quiet=false){
   try{
     if(quiet)for(const k of RT.AUTO_KEYS)setAuto(k,autoDefaults[k]);
     const saved=storageGet('anime25d.settings.'+modelId);
-    if(!saved){if(!quiet)status('No saved adjustments for this character');return false;}
-    const data=applySettings(JSON.parse(saved));
+    // Ka-myii keeps a character's adjustments in its folder: they survive preview rebuilds and project export.
+    const kept=kamyiiModel&&KAMYII.settings;
+    if(!saved&&!kept){if(!quiet)status('No saved adjustments for this character');return false;}
+    const data=applySettings(kept||JSON.parse(saved),{anyModel:!!kept});
     $('utilStatus').textContent='Saved adjustments restored'+layerDiffNote(data);
     if(!quiet){commitHistory();savedSettings=comparableSettings();updateDirty();syncState(true);}
     return true;
@@ -430,7 +432,15 @@ function restoreSettings(quiet=false){
 }
 function saveSettings(){
   if(!layers.length)return;
-  try{storageSet('anime25d.settings.'+modelId,JSON.stringify(settingsSnapshot()));savedSettings=comparableSettings();updateDirty();status('Adjustments saved in this browser');}
+  const snapshot=settingsSnapshot();
+  if(kamyiiModel){
+    fetch('/api/generation/studio/'+encodeURIComponent(KAMYII.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(snapshot)})
+      .then(r=>r.json().then(d=>{if(!r.ok||!d.success)throw new Error(d.error||r.status);}))
+      .then(()=>{KAMYII.settings=snapshot;savedSettings=comparableSettings();updateDirty();status('Adjustments saved with the character');})
+      .catch(err=>status('Could not save the adjustments: '+err.message+'. Export the settings JSON instead',true));
+    return;
+  }
+  try{storageSet('anime25d.settings.'+modelId,JSON.stringify(snapshot));savedSettings=comparableSettings();updateDirty();status('Adjustments saved in this browser');}
   catch(err){status('Could not save in this browser. Export the settings JSON instead',true);}
 }
 $('btnSaveSettings').addEventListener('click',saveSettings);
@@ -479,7 +489,7 @@ $('btnUndo').addEventListener('click',undo);$('btnRedo').addEventListener('click
 function updateDirty(){
   unsaved=!!layers.length&&!OBS_MODE&&comparableSettings()!==savedSettings;
   const b=$('btnSaveSettings');b.textContent=unsaved?'Save adjustments ●':'Save adjustments';
-  b.title=unsaved?'Unsaved changes (Ctrl+S)':'Save in this browser (Ctrl+S)';
+  b.title=unsaved?'Unsaved changes (Ctrl+S)':(kamyiiModel?'Save with the character':'Save in this browser')+' (Ctrl+S)';
 }
 window.addEventListener('beforeunload',e=>{if(unsaved){e.preventDefault();e.returnValue='';}});
 
@@ -1368,7 +1378,7 @@ if(OBS_MODE){
   })();
 }else{
   if(!KAMYII)sync.startPolling();
-  if(KAMYII)loadModel(fetchSource(KAMYII.psd),KAMYII.name,{relay:false});
+  if(KAMYII)loadModel(fetchSource(KAMYII.psd),KAMYII.name,{relay:false,kamyii:true});
   if(CAMERA_MODE)setAuto('cam',true);
 }
 requestAnimationFrame(tick);

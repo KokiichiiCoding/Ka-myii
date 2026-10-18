@@ -53,6 +53,25 @@
         });
         actions.prepend(retry);
       }
+      // Closed eyes and the other mouth shape painted from the character's own art (~2 min, GPU).
+      const seethrough = model.status === 'completed' && model.assets?.some(a => a.metadata?.backend === 'see-through');
+      const queueExpressions = async (button) => {
+        button.disabled = true;
+        try {
+          const {data} = await axios.post(`/api/generation/expressions/${id}`);
+          if (!data.success) throw new Error(data.error);
+          location.href = `/generator`;  // the Studio follows the queued job
+        } catch (error) {
+          $('galleryError').textContent = `Could not queue expressions: ${error.response?.data?.error || error.message}`;
+          $('galleryError').hidden = false; button.disabled = false;
+        }
+      };
+      if (seethrough && !model.metadata?.expressions) {
+        const add = document.createElement('button'); add.type = 'button'; add.className = 'btn';
+        add.textContent = 'Add blink & talk'; add.title = 'Paint closed eyes and an open mouth from this character (~2 min)';
+        add.addEventListener('click', () => queueExpressions(add));
+        actions.append(add);
+      }
       const more = document.createElement('details'); more.className = 'model-more';
       const summary = document.createElement('summary'); summary.textContent = 'More options';
       const remove = document.createElement('button'); remove.type='button'; remove.textContent='Delete character';
@@ -87,7 +106,13 @@
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); });
         input.addEventListener('blur', () => finish(true));
       });
-      more.append(summary,rename,remove);
+      more.append(summary,rename);
+      if (seethrough && model.metadata?.expressions) {
+        const repaint = document.createElement('button'); repaint.type = 'button'; repaint.textContent = 'Repaint blink & talk';
+        repaint.addEventListener('click', () => queueExpressions(repaint));
+        more.append(repaint);
+      }
+      more.append(remove);
       body.append(status,name,details,actions,more);card.append(art,body);grid.append(card);
     }
     if (models.length && !shown.length) {
@@ -107,5 +132,23 @@
   }
   $('searchInput').addEventListener('input',render);
   $('refreshBtn').addEventListener('click',load);
+  // Reopen a character saved with Export (on this or another machine).
+  $('openProjectBtn').addEventListener('click', () => $('projectFile').click());
+  $('projectFile').addEventListener('change', async () => {
+    const file = $('projectFile').files[0];
+    if (!file) return;
+    const form = new FormData(); form.append('project', file);
+    $('openProjectBtn').disabled = true; $('galleryError').hidden = true;
+    $('collectionCount').textContent = `Opening ${file.name}…`;
+    try {
+      const {data} = await axios.post('/api/generation/open-project', form);
+      if (!data.success) throw new Error(data.error);
+      await load();
+    } catch (error) {
+      const reason = error.response?.status === 413 ? 'the file is too large' : (error.response?.data?.error || error.message);
+      $('galleryError').textContent = `Could not open ${file.name}: ${reason}`;
+      $('galleryError').hidden = false; render();
+    } finally { $('openProjectBtn').disabled = false; $('projectFile').value = ''; }
+  });
   load();
 })();

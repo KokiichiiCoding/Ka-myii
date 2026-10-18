@@ -4,7 +4,7 @@
 {% block content %}
 <div class="km-wrap">
   <div class="page-heading"><div><span class="eyebrow">THE CHARACTER WORKSHOP / 02</span><h1>A cast of your own.</h1><p>Your characters, their layers, and a little room to bring them to life.</p></div><a href="/generator" class="btn btn-primary">Create a character ↗</a></div>
-  <div class="collection-tools"><label class="visually-hidden" for="searchInput">Search characters</label><input type="text" id="searchInput" placeholder="Find a character…"><button class="btn" id="refreshBtn" type="button">Refresh</button><span id="collectionCount" class="collection-count" role="status"></span></div>
+  <div class="collection-tools"><label class="visually-hidden" for="searchInput">Search characters</label><input type="text" id="searchInput" placeholder="Find a character…"><button class="btn" id="refreshBtn" type="button">Refresh</button><button class="btn" id="openProjectBtn" type="button" title="Open a character zip saved with Export">Open exported character</button><input type="file" id="projectFile" accept=".zip,application/zip" hidden><span id="collectionCount" class="collection-count" role="status"></span></div>
   <div id="loadingGallery" class="collection-state" role="status">Opening your collection…</div>
   <div id="emptyGallery" class="collection-state" hidden><h2>Every cast begins with one.</h2><p>Create your first character in the Studio.</p><a href="/generator" class="btn">Open Studio ↗</a></div>
   <div id="galleryError" class="alert-km alert-bad" hidden role="alert"></div>
