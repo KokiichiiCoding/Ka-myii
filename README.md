@@ -173,6 +173,22 @@ and *Auto generation of facial motion* from the Parameters palette (5.0+), then 
 runtime. The binary `.moc3` can only be produced by the Cubism Editor, so Ka-myii prepares
 everything up to that step.
 
+### Training a look LoRA
+
+`scripts/build_lora_dataset.py` builds a training set of *rig-ready* character art: it generates
+varied designs with the default checkpoint and keeps only the ones the pipeline handles best (one
+character facing the viewer, head not cut off, eyes and mouth clear, hands down, plain white
+background), checked with the same segmentation and tagger Ka-myii uses. Captions start with the
+trigger `kmyvt`. Add your own art with `--extra <folder>` (only art you may train on).
+
+```bash
+python scripts/build_lora_dataset.py --out datasets/vtmodel --count 320   # ~4-5 h on an 8 GB laptop GPU
+```
+
+Train it with any SDXL LoRA trainer that reads image + same-name `.txt` pairs (the zip in
+`datasets/`), put the `.safetensors` in `models/loras/`, pick it in the Studio and start prompts
+with `kmyvt`.
+
 ## How decomposition works
 
 Ka-myii picks the best available backend:

@@ -493,6 +493,28 @@ Not done / next:
 - Expressions only for See-through characters; demo mode has none (the demo rig blinks by
   squashing). Mouth shapes are two (closed/open); no vowel shapes.
 
+Owner-reported issues (2026-10-18), next up, root causes NOT investigated yet:
+
+- **Blink**: the painted closed eye sometimes "rises" and the two eyes look uneven. The painted
+  layer is `expressions/eye_close.png` (one ellipse per eye, `expressions.eye_mask`), inserted as
+  the rig's `eye_close` after eyewhite/irides/eyelash (`live_preview._with_expressions`); the
+  vendored rig fades it in per side. Check how the rig anchors/deforms `eye_close` vs the open eye
+  parts during head turns and the blink squash (`static/vendor/anime25d/lib/rigger.js`, `app.js`).
+- **Hair physics**: shadows the front hair casts on the face don't follow the swaying hair.
+  Likely baked into See-through's face/skin layer, so they stay put while `front hair` moves.
+
+Roadmap (owner): once emotions are right, emotes such as meme faces and waving.
+
+LoRA dataset (2026-10-18): `scripts/build_lora_dataset.py` generates varied designs with the
+default checkpoint and keeps rig-ready ones (one figure, head not cut off, plain white background,
+no stray ink, WD-tagger checks for eyes/hands/pose/text/rating), captions `kmyvt, <tags>`, writes
+`datasets/<name>/images` + a zip + contact sheet + report.json (rejection reasons). Resumable: rerun
+the same command. Trial: ~40 s per candidate; "upper body" alone often cuts the head at the top,
+hence 50 % cowboy shots. A 320-candidate run (`datasets/vtmodel`) was started 2026-10-18.
+The matching SDXL trainer notebook is outside the repo (owner's
+`Downloads/image_checkpoint_trainer_sdxl.ipynb`): bucketed, cached latents/embeddings, Ka-myii's
+chunked prompt encoding; its data-prep cells were run, GPU training not yet tested on 8 GB.
+
 ## 11. How to work in this repo
 
 - Smallest complete change; reuse existing code and libraries; no speculative abstractions.
