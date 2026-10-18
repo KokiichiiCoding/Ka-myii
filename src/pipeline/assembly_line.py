@@ -139,7 +139,12 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._enter_stage(task_id, "image", "Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            if request.reference_image:  # artwork the upload/separate routes validated and staged
+            if request.operation in ("edit", "extend"):  # repaint part of staged artwork
+                self._ensure_generator(request)
+                base_image_path = self._repaint(request, model_output_dir, task_id)
+                model.request = request = replace(request, reference_image=None, mask_image=None)
+                model.metadata["source"] = request.operation
+            elif request.reference_image:  # artwork the upload/separate routes validated and staged
                 base_image_path = model_output_dir / "base_image.png"
                 shutil.move(request.reference_image, base_image_path)
                 model.request = request = replace(request, reference_image=None)
@@ -223,6 +228,23 @@ class AssemblyLine:
             else:
                 shutil.rmtree(model_output_dir, ignore_errors=True)
             raise
+
+    def _repaint(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str]) -> Path:
+        """Edit / extend: inpaint the staged artwork through the staged mask into a new base image."""
+        from PIL import Image
+
+        staged = [Path(request.reference_image), Path(request.mask_image)]
+        with Image.open(staged[0]) as source, Image.open(staged[1]) as mask:
+            image, mask = source.convert("RGB"), mask.convert("L")
+        painted = self.image_generator.inpaint(
+            image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
+            strength=request.strength, seed=request.seed, task_id=task_id,
+            label="Extending the canvas" if request.operation == "extend" else "Repainting the selection")
+        path = output_dir / "base_image.png"
+        painted.save(path)
+        for file in staged:
+            file.unlink(missing_ok=True)
+        return path
 
     def _wants_expressions(self, assets) -> bool:
         return (not self.use_dummy_generators and config.EXPRESSIONS

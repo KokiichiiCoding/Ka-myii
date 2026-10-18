@@ -33,10 +33,11 @@ NEGATIVE_CLOSED = "open mouth, teeth, tongue, mask, beard, facial hair"
 
 
 def load_layers(assets_dir: Path) -> Dict[str, np.ndarray]:
-    """Alpha (uint8) of each separated layer by name ("02_front hair.png" -> "front hair")."""
+    """Alpha (uint8) of each separated layer by name ("02_front hair.png" -> "front hair"), back to
+    front. Only the numbered layers: character.png is the whole cut-out, not a part."""
     out = {}
-    for path in sorted(Path(assets_dir).glob("*.png")):
-        name = path.stem.split("_", 1)[1] if "_" in path.stem and path.stem.split("_", 1)[0].isdigit() else path.stem
+    for path in sorted(Path(assets_dir).glob("[0-9]*_*.png")):
+        name = path.stem.split("_", 1)[1]
         with Image.open(path) as im:
             out[name] = np.asarray(im.convert("RGBA"))[..., 3]
     return out

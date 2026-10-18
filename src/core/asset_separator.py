@@ -80,6 +80,8 @@ ACCESSORY_TAGS = {"headwear", "eyewear", "earwear", "neckwear", "objects", "tail
 FACE_DETAIL_TAGS = {"nose", "mouth", "eyebrow-l", "eyebrow-r", "eyelash-l", "eyelash-r",
                     "irides-l", "irides-r", "eyewhite-l", "eyewhite-r"}
 MAX_FACE_DETAIL_SHARE = 0.20
+# Mean RGB error above which no part's prediction is taken to show a source pixel at all.
+ALIEN_ERROR = 90
 
 
 # SkyTNT's anime-segmentation IS-Net (Apache-2.0; the model rembg calls "isnet-anime"), run with
@@ -267,8 +269,10 @@ class AssetSeparator:
         # (seen: a hallucinated ribbon blob beside the head); colour keying can cut real white
         # clothing, so it is only trusted for the whole-layer checks above.
         background = ~silhouette if self.cutout_backend == "anime-seg" else None
+        inside = np.stack([np.asarray(c)[..., 3] > 128 for _, c in kept]).any(axis=0)  # before ownership edits
         covered = self._resolve_ownership(kept, src_rgb, background)
-        leftover = self._leftover_layer(source, fg_alpha, covered, trust_mask=self.cutout_backend == "anime-seg")
+        leftover = self._leftover_layer(source, fg_alpha, covered, trust_mask=self.cutout_backend == "anime-seg",
+                                        inside=inside)
         if leftover is not None:
             self._place_leftover(kept, leftover)
 
@@ -329,23 +333,35 @@ class AssetSeparator:
             prefer = covers[owner] & detail_ok.any(axis=0)
             owner = np.where(prefer, topmost_detail, owner)
         claimed = opaque.any(axis=0)
+        # Seen: See-through's witch hat was rejected as a hallucination, and the hat's top went to
+        # the back hair, whose hidden region happened to span it (black hat vs lavender hair). A
+        # pixel no part predicts anywhere near the source belongs to none of them: it is cut from
+        # all of them and left to the leftover/headwear step. Facial details match loosely by
+        # nature (thin lines) and keep their pixels.
+        alien = claimed & (err.min(axis=0) > ALIEN_ERROR) & ~detail[owner]
+        # Only solid regions: scattered mismatches along outlines stay with their best part,
+        # or they would become speckle holes the leftover step's clean-up drops.
+        alien = np.asarray(Image.fromarray(alien.astype(np.uint8) * 255)
+                           .filter(ImageFilter.MinFilter(9)).filter(ImageFilter.MaxFilter(9))) > 0
+        if alien.any():
+            logger.info("Ownership: %d px match no part (mean error > %d); left unclaimed", int(alien.sum()), ALIEN_ERROR)
         for i, (name, canvas) in enumerate(kept):
             a = arrs[i]
-            above = claimed & (owner < i)
+            above = claimed & ((owner < i) | alien)
             cut = above & opaque[i]
             if cut.any():
                 # ...and the semi-transparent fringe around the cut, which would draw the outline.
                 near = np.asarray(Image.fromarray(cut.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(5))) > 0
                 a[cut | (near & above), 3] = 0
                 logger.info("Ownership: cut %d px of %s that the source shows belong to a part below", int(cut.sum()), name)
-            mine = claimed & (owner == i)
+            mine = claimed & (owner == i) & ~alien
             a[mine, :3] = src_rgb[mine]
             canvas.paste(Image.fromarray(a.astype(np.uint8)))
         return np.stack([a[..., 3] > 128 for a in arrs]).any(axis=0)
 
     @staticmethod
     def _leftover_layer(source: Image.Image, fg_alpha: np.ndarray, covered: np.ndarray,
-                        trust_mask: bool = False) -> Optional[Image.Image]:
+                        trust_mask: bool = False, inside: Optional[np.ndarray] = None) -> Optional[Image.Image]:
         """Character pixels no See-through layer covers (seen: cat ears it assigned to nothing; a
         whole red hoodie), so the PSD still holds the whole character. ``None`` when only slivers
         remain. ``trust_mask``: the cut-out came from the segmentation model, not the colour key."""
@@ -355,6 +371,10 @@ class AssetSeparator:
         # what the background is; the border guess misfires when clothing fills most of it.
         background = AssetSeparator._background_like(np.asarray(source.convert("RGBA")),
                                                      sample=(fg_alpha < 16) if trust_mask else None)
+        if trust_mask and inside is not None:
+            # Pixels a part had covered but did not match (pale chest skin under a predicted
+            # shirt) are character, not background seen through a gap.
+            background &= ~inside
         mask = Image.fromarray(((fg_alpha > 128) & ~covered & ~background).astype(np.uint8) * 255)
         # Opening drops the 1–2 px anti-aliasing fringe along every part's outline.
         mask = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))

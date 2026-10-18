@@ -216,7 +216,8 @@ def _queue_artwork(image, brief: dict):
     path = uploads / f'{uuid.uuid4().hex}.png'
     image.save(path)
     job = job_queue.submit(GenerationRequest(**{**brief, 'width': image.width, 'height': image.height,
-                                                'reference_image': str(path), 'sketch': False}))
+                                                'reference_image': str(path), 'sketch': False,
+                                                'operation': 'generate', 'mask_image': None, 'edit_prompt': None}))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
@@ -394,6 +395,86 @@ def delete_model(model_id: str):
             'success': False,
             'error': str(e)
         }), 500
+
+
+def _saved_brief(model_dir: Path) -> dict:
+    """A saved character's request fields that GenerationRequest accepts."""
+    from dataclasses import fields
+
+    metadata_path = model_dir / 'metadata.json'
+    saved = (load_json(metadata_path).get('request') or {}) if metadata_path.exists() else {}
+    known = {f.name for f in fields(GenerationRequest)}
+    return {k: v for k, v in saved.items() if k in known}
+
+
+def _stage(image, name: str) -> str:
+    import uuid
+
+    uploads = config.OUTPUT_DIR / '_uploads'
+    uploads.mkdir(parents=True, exist_ok=True)
+    path = uploads / f'{uuid.uuid4().hex}-{name}.png'
+    image.save(path)
+    return str(path)
+
+
+@generation_bp.route('/parts/<model_id>', methods=['GET'])
+def list_parts(model_id: str):
+    """Parts that can be selected for a region edit of this character."""
+    from src.core import regions
+
+    model_dir = model_dir_for(model_id)
+    if not model_dir or not (model_dir / 'base_image.png').exists():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    return jsonify({'success': True, 'parts': [{'id': p, 'label': regions.LABELS[p]}
+                                               for p in regions.available_parts(model_dir)]})
+
+
+@generation_bp.route('/edit/<model_id>', methods=['POST'])
+def edit_region(model_id: str):
+    """Repaint part of a character's artwork into a new sketch.
+
+    JSON: {"parts": ["hair", ...], "mask": "<PNG data URL painted in the Studio>",
+           "prompt": "short blue hair", "strength": 0.85, "seed": null}
+    The selection is the union of the parts and the painted mask. An empty prompt repaints
+    with the character's own brief (a "retry" of that region).
+    """
+    from secrets import randbits
+    from PIL import Image
+    from src.core import regions
+
+    model_dir = model_dir_for(model_id)
+    base = model_dir / 'base_image.png' if model_dir else None
+    if not base or not base.is_file():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': 'Send the edit as a JSON object'}), 400
+    with Image.open(base) as img:
+        image = img.convert('RGB')
+    try:
+        parts = data.get('parts') or []
+        if not isinstance(parts, list) or any(p not in regions.LABELS for p in parts):
+            raise ValueError('Unknown part')
+        mask = regions.part_mask(model_dir, parts, image.size) | regions.painted_mask(data.get('mask'), image.size)
+        prompt = str(data.get('prompt') or '').strip()
+        if len(prompt) > MAX_PROMPT_CHARS:
+            raise ValueError(f'Keep prompts under {MAX_PROMPT_CHARS} characters')
+        strength = _number(data, 'strength', 0.75, float, 0.3, 1.0)
+        seed = _number(data, 'seed', None, int, 0, 2**32 - 1)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    if not mask.any():
+        return jsonify({'success': False, 'error': 'Select a part or paint over the area to change'}), 400
+
+    brief = _saved_brief(model_dir)
+    brief['prompt'] = brief.get('prompt') or f'Artwork of {model_id[:8]}'
+    job = job_queue.submit(GenerationRequest(**{
+        **brief, 'width': image.width, 'height': image.height, 'operation': 'edit', 'sketch': True,
+        'source': 'upload' if brief.get('source') == 'upload' else 'artwork',
+        'reference_image': _stage(image, 'source'), 'mask_image': _stage(regions.to_image(mask), 'mask'),
+        'edit_prompt': prompt or brief['prompt'], 'strength': strength,
+        'seed': seed if seed is not None else randbits(31)}))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
 @generation_bp.route('/expressions/<model_id>', methods=['POST'])

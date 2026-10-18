@@ -181,3 +181,18 @@ footer.km-foot span{max-width:180px;text-align:right}
 .tc-meta span:first-child{color:var(--warn)}
 
 .rename-input{width:100%;font:inherit;font-size:22px;background:var(--bg);color:var(--text);border:1px solid var(--accent);border-radius:3px;padding:4px 8px;margin:4px 0}
+
+.paint-stage{position:relative;display:inline-block;line-height:0}
+.part-canvas,.mask-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.part-canvas{opacity:.45;mix-blend-mode:screen}
+.mask-canvas{opacity:.5}
+.mask-canvas.painting{pointer-events:auto;cursor:crosshair;touch-action:none}
+.edit-panel{margin-top:18px;border-top:1px solid var(--border);padding-top:14px}
+.edit-panel summary{cursor:pointer;font-size:13px;color:var(--text);list-style-position:inside}
+.edit-panel .chips{margin:10px 0}
+.edit-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.brush-size{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.brush-size input{width:110px}
+.edit-prompt{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:9px 10px;font-size:13px;margin-bottom:10px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.edit-note{min-height:16px;font-size:12px;color:var(--accent);margin:6px 0}

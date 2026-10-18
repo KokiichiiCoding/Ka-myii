@@ -34,6 +34,8 @@ STAGES = {
 STAGES_BY_OPERATION = {
     "expressions": {"expressions": (0.0, 0.9, "Painting closed eyes and mouth…"),
                     "assemble": (0.9, 1.0, "Packaging PSD + Cubism files…")},
+    "edit": {"image": (0.0, 1.0, "Repainting the selection…")},
+    "extend": {"image": (0.0, 1.0, "Extending the canvas…")},
 }
 KEEP_FINISHED = 20
 ACTIVE = ("queued", "running")

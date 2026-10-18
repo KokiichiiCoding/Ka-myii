@@ -67,6 +67,7 @@ class GenerationRequest:
     target_model: Optional[str] = None
     mask_image: Optional[str] = None
     strength: float = 0.9
+    edit_prompt: Optional[str] = None  # what to paint into the selection (edit / extend)
 
 
 @dataclass

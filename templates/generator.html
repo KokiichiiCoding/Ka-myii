@@ -163,7 +163,11 @@
           <div class="canvas-empty" id="canvasEmpty">
             <span class="canvas-registration">K / m</span><div class="empty-title">A character starts with an idea.</div><p>Describe yours in the brief.<br>The artwork will take shape here.</p><span class="canvas-caption">ARTWORK → LAYERS → LIVE PREVIEW</span>
           </div>
-          <img id="resultImg" class="hidden" alt="Generated character">
+          <div class="paint-stage" id="paintStage">
+            <img id="resultImg" class="hidden" alt="Generated character">
+            <canvas id="partCanvas" class="part-canvas hidden" aria-hidden="true"></canvas>
+            <canvas id="maskCanvas" class="mask-canvas hidden" aria-label="Paint over the area to change"></canvas>
+          </div>
           <div class="progress-overlay hidden" id="progressOverlay">
             <div class="spinner-ring"></div>
             <div class="progress-label" id="progressLabel">Starting…</div>
@@ -187,6 +191,30 @@
             <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
             <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
           </div>
+
+          <details class="edit-panel" id="editPanel">
+            <summary><i class="fas fa-paintbrush"></i> Edit a region</summary>
+            <p class="hint">Pick parts and/or paint over the area, then say what should be there. The result is a new
+              sketch (about a minute); separate its layers when you like it. Leave the description empty to redraw the
+              selection as it is.</p>
+            <div class="chips" id="partChips" role="group" aria-label="Parts to repaint"></div>
+            <div class="edit-tools">
+              <button type="button" class="chip" id="paintToggle" aria-pressed="false"><i class="fas fa-paintbrush"></i> Paint</button>
+              <button type="button" class="chip" id="eraseToggle" aria-pressed="false"><i class="fas fa-eraser"></i> Erase</button>
+              <label class="brush-size">Brush <input type="range" id="brushSize" min="6" max="140" value="40"></label>
+              <button type="button" class="chip" id="clearSelection">Clear selection</button>
+            </div>
+            <label for="editPrompt" class="sr-only">What should be there</label>
+            <input type="text" id="editPrompt" class="edit-prompt" maxlength="5000" placeholder="What should be there, e.g. short blue hair, red kimono">
+            <div class="slider-head"><label for="editStrength">Strength</label><span class="val" id="editStrengthVal">0.75</span></div>
+            <input type="range" id="editStrength" min="0.3" max="1" step="0.05" value="0.75">
+            <div class="hint">Lower keeps more of the original shapes; 1 paints the selection from scratch.</div>
+            <div class="edit-note" id="editNote" role="status"></div>
+            <div class="result-actions">
+              <button type="button" class="btn btn-primary" id="editBtn"><i class="fas fa-wand-magic-sparkles"></i> Repaint selection</button>
+              <button type="button" class="btn hidden" id="editRetryBtn"><i class="fas fa-dice"></i> Try again</button>
+            </div>
+          </details>
         </div>
       </div>
 
