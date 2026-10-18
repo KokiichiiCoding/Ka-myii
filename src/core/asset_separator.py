@@ -194,6 +194,8 @@ class AssetSeparator:
 
         # Always provide a clean, background-removed full-character cut-out too.
         cutout_path = output_dir / "character.png"
+        if self.cutout_backend == "anime-seg":  # the PNGtuber pack is built from it
+            self._clip_to_matte([("character", cutout)], np.asarray(cutout.split()[-1]), np.asarray(image))
         cutout.save(cutout_path)
         assets.append(Asset(layer_type="character", file_path=cutout_path, metadata={"order": 999}))
 
@@ -275,6 +277,8 @@ class AssetSeparator:
                                         inside=inside)
         if leftover is not None:
             self._place_leftover(kept, leftover)
+        if self.cutout_backend == "anime-seg":
+            self._clip_to_matte(kept, fg_alpha, np.asarray(source))
 
         assets: List[Asset] = []
         for order, (name, canvas) in enumerate(kept):
@@ -425,6 +429,42 @@ class AssetSeparator:
                 canvas.putalpha(Image.fromarray(part))
                 pieces.append((name, canvas))
         return pieces or [("leftover", leftover)]
+
+    @staticmethod
+    def _clip_to_matte(kept: list, fg_alpha: np.ndarray, source: np.ndarray) -> None:
+        """Outer edges follow the segmentation matte, in place. Seen: See-through's parts reach a
+        few px into the (white) background, a light outline over a dark stream backdrop; the
+        matte's soft edge also gets the background colour un-mixed from its pixels."""
+        sample = fg_alpha < 16
+        if sample.sum() < 100:
+            return
+        # Only the outline: the matte reads 250-254 across most interiors, which must stay solid
+        # (and keep the hidden, inpainted parts lower layers carry).
+        band = (np.asarray(Image.fromarray(sample.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(9))) > 0) & ~sample
+        fg_alpha = np.where(band | sample, fg_alpha, 255).astype(np.uint8)
+        a = fg_alpha.astype(np.float32) / 255
+        px = source[..., :3][sample].astype(np.int16)
+        colours, counts = np.unique(px // 8, axis=0, return_counts=True)
+        plain = (np.abs(px // 8 - colours[counts.argmax()]) <= 1).all(axis=1)
+        bg = np.median(px[plain], axis=0).astype(np.float32)
+        # Un-mixing needs a plain background; over scenery only the alpha is clipped.
+        # Fainter pixels would amplify noise; their alpha hides them anyway.
+        soft = (a >= 0.25) & (a < 1) & (plain.mean() > 0.6)
+        arrs = [np.asarray(canvas).copy() for _, canvas in kept]
+        # In the soft band only the topmost solid part shows: stacked parts each at the matte's
+        # alpha would compose more opaque than the source (a dark outline over white).
+        edge = fg_alpha < 255
+        owner = np.full(fg_alpha.shape, -1)
+        for i in reversed(range(len(arrs))):
+            owner[edge & (owner < 0) & (arrs[i][..., 3] > 128)] = i
+        for i, ((_, canvas), arr) in enumerate(zip(kept, arrs)):
+            arr[edge & (owner >= 0) & (owner != i), 3] = 0
+            arr[..., 3] = np.minimum(arr[..., 3], fg_alpha)
+            fix = soft & (arr[..., 3] > 0)
+            rgb = arr[..., :3].astype(np.float32)
+            rgb[fix] = bg + (rgb[fix] - bg) / a[fix][:, None]
+            arr[..., :3] = np.clip(rgb, 0, 255).round().astype(np.uint8)
+            canvas.paste(Image.fromarray(arr, "RGBA"))
 
     @staticmethod
     def _place_leftover(kept: list, leftover: Image.Image):

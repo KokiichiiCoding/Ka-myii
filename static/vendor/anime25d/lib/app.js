@@ -970,7 +970,7 @@ const camera=window.RigDevices.createCamera({
   onResults:(lm,video)=>{
     const aspect=video.videoWidth&&video.videoHeight?video.videoWidth/video.videoHeight:4/3;
     const out=lm?tracker.update(lm,performance.now()/1000,aspect):null;
-    if(!out){cam.live=false;return;}
+    if(!out)return;   // a frame without a face (a hand, motion blur) holds the pose; 1.2 s without one hands back to idle
     Object.assign(cam,out);cam.live=true;lastTrackingAt=performance.now();
   }
 });

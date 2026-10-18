@@ -458,7 +458,7 @@ reliable import/segmentation, stable tracking, save/reopen, functional exports, 
 
 Verification (owner's laptop, RTX 4070 Laptop 8 GB):
 
-- 64 pytest + 3 e2e (Edge) + 2 node tests.
+- 65 pytest + 3 e2e (Edge) + 2 node tests.
 - Inpaint/expressions on real results: eyes close cleanly, mouth opens (116–126 s per job).
   Hair recolour edit touched only the hair; full-body extension of a hoodie character had no
   visible seams (~1.5 min).
@@ -467,9 +467,28 @@ Verification (owner's laptop, RTX 4070 Laptop 8 GB):
   (`ab1ffc38…` sketch → `4bb6ee7b-e6ea-4885-a91b-f8ea3b305eb5`, 881 s): 20 layers, composite
   mean error 1.18, 0 % holes, expressions painted, PNGtuber states look natural.
 
+- **Tracking dropouts**: a camera frame without a face used to set `cam.live=false` at once, so
+  the avatar jumped toward the idle pose and back at every brief loss (a hand, motion blur).
+  Now a missing face holds the last pose; the existing 1.2 s window hands back to idle.
+  Synthetic still face that vanishes 0.2 s every 1.5 s (headless Edge, steady state): before,
+  15 % of frames fell back to idle, angleX std 0.188, per-frame jumps 0.27; after, 0 %, 0.011,
+  0.031. The re-detection after a loss takes FaceMesh a few hundred ms, hence the hold.
+- **Outline matte** (`AssetSeparator._clip_to_matte`, anime-seg only, also on character.png):
+  See-through's parts reached a few px into the white background (1,258 opaque white px on the
+  imported maid) — a glowing outline over a dark stream backdrop. Within 4 px of the outside,
+  parts are clipped to the matte, only the topmost solid part keeps the soft edge (stacked parts
+  at the matte's alpha composed darker than the source) and the plain background colour is
+  un-mixed from it. **The matte reads 250-254 across most interiors**: clipping there made every
+  layer ~98 % opaque and the owner rule would have erased hidden parts, so the interior is never
+  touched. All eight real results were rebuilt: nothing opaque outside the matte, interiors
+  identical to a no-clip build, composite-vs-source error equal or better except 889 sleeve-edge
+  pixels on `4a66c60e` (which look cleaner on dark). (Interiors at 250-254 alpha are See-through's
+  own; harmless.)
+
 Not done / next:
 
-- Tracking stability was verified only with synthetic devices (section 6); no new smoothing work.
+- Tracking stability: dropout hold added (above); smoothing itself was already a One-Euro filter
+  with calibration; a physical camera is still untried.
 - Physical webcam/mic, Cubism import and Linux GPU runs still need a human.
 - Expressions only for See-through characters; demo mode has none (the demo rig blinks by
   squashing). Mouth shapes are two (closed/open); no vowel shapes.

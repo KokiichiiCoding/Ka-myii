@@ -331,3 +331,30 @@ def test_large_leftover_is_kept_when_the_segmentation_mask_is_trusted():
     layer = np.asarray(AssetSeparator._leftover_layer(source, fg, covered, trust_mask=True))[..., 3]
     assert layer[70, 20] == 255 and layer[10, 50] == 0  # the hoodie is kept...
     assert layer[52, 50] == 0  # ...but not the white gap: the mask's background says white
+
+
+def test_layers_follow_the_matte_without_a_white_rim():
+    """See-through's parts reach into the white background; the matte trims them and the soft
+    edge loses its white tint (seen as a light outline over a dark stream backdrop)."""
+    import numpy as np
+    from PIL import Image
+    from src.core.asset_separator import AssetSeparator
+
+    source = np.full((40, 40, 4), 255, np.uint8)
+    source[10:30, 10:30, :3] = (40, 20, 60)  # a dark figure on white
+    source[10:30, 30, :3] = (148, 138, 158)  # its anti-aliased edge: half figure, half white
+    fg = np.zeros((40, 40), np.uint8); fg[10:30, 10:30] = 255; fg[10:30, 30] = 128
+    part = np.zeros((40, 40, 4), np.uint8)
+    part[8:32, 8:34] = (255, 255, 255, 255)  # a white rim beyond the figure...
+    part[10:30, 10:30] = (40, 20, 60, 255)
+    part[10:30, 30] = (148, 138, 158, 255)
+    fg[14:26, 14:26] = 252  # the matte is rarely exactly 255 inside the figure
+    body = np.zeros((40, 40, 4), np.uint8); body[12:30, 12:30] = (200, 150, 120, 255)  # hidden under the hair
+    kept = [("body", Image.fromarray(body, "RGBA")), ("hair", Image.fromarray(part, "RGBA"))]
+    AssetSeparator._clip_to_matte(kept, fg, source)
+    out, hidden = np.asarray(kept[1][1]), np.asarray(kept[0][1])
+    assert out[9, 20, 3] == 0 and out[20, 32, 3] == 0      # the rim is gone
+    assert out[20, 20].tolist() == [40, 20, 60, 255]         # the figure is untouched, solid inside
+    assert hidden[20, 20].tolist() == [200, 150, 120, 255]   # hidden parts are kept inside
+    assert hidden[20, 30, 3] == 0                            # but not under the hair's soft edge
+    assert out[20, 30, 3] == 128 and np.abs(out[20, 30, :3].astype(int) - (40, 20, 60)).max() <= 3  # un-mixed
