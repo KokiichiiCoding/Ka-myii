@@ -63,6 +63,11 @@
         <div class="hint">Upper body gives the eyes and mouth more pixels for live motion.</div>
       </div>
       <div class="field">
+        <label id="togglesLabel">Expression toggles</label>
+        <div class="chips" id="toggleChips" role="group" aria-labelledby="togglesLabel"></div>
+        <div class="hint">Painted onto the character after its layers, about 15 s each. Switch them on in Live Preview (Shift+1–9).</div>
+      </div>
+      <div class="field">
         <label for="model">Checkpoint</label>
         <select id="model"></select>
         <div class="hint" id="modelHint"></div>
@@ -198,15 +203,39 @@
             <div class="meta-card"><div class="k">Time</div><div class="v" id="metaTime">—</div></div>
             <div class="meta-card"><div class="k">Seed</div><div class="v" id="metaSeed">—</div></div>
           </div>
+          <div class="result-checks hidden" id="resultChecks" role="status" aria-live="polite"></div>
           <div class="result-actions">
             <button type="button" class="btn btn-primary hidden" id="separateBtn"><i class="fas fa-layer-group"></i> Separate layers</button>
             <a class="btn btn-primary" id="livePreview">Live Preview ↗</a>
+            <button type="button" class="btn" id="showFullBody"><i class="fas fa-person"></i> Complete body</button>
             <a class="btn" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
             <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>
             <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
             <a class="btn hidden" id="dlPngtuber" title="Idle, talk and blink PNGs for veadotube mini, PNGTuber Plus or Discord overlays"><i class="fas fa-microphone"></i> PNGtuber pack</a>
             <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
           </div>
+
+          <details class="edit-panel" id="fullBodyPanel">
+            <summary><i class="fas fa-person"></i> Complete the body</summary>
+            <p class="hint">Draw the missing outfit, arms, legs and shoes from this character. Your current model stays saved; the result is a new character. A standing, front-facing pose works best for rigging.</p>
+            <label for="fullBodyPrompt">Outfit details <span class="hint">(optional)</span></label>
+            <input type="text" id="fullBodyPrompt" class="edit-prompt" maxlength="5000" placeholder="Keep the current design, or add details such as black boots and a pleated skirt">
+            <label for="fullBodyProportions">Proportions</label>
+            <select id="fullBodyProportions"><option value="balanced">Balanced · smaller head, natural silhouette</option><option value="tall">Tall · longer body and legs</option><option value="compact">Compact · larger head, stylized silhouette</option></select>
+            <label class="hint"><input type="checkbox" id="fullBodyGuided" checked> Align shoulders, hips and legs to a standing pose</label>
+            <p class="hint">Pose guidance needs SDXL; first use downloads a 2.5 GB model. It runs locally with reduced memory use.</p>
+            <label class="hint"><input type="checkbox" id="fullBodyKeepFace" checked> Preserve the face while blending the outfit</label>
+            <details id="fullBodyFit" class="extension-fit"><summary>Preview the fit before generating</summary>
+              <p class="hint" id="fullBodyFitNote" role="status">A placement guide, not a generated result. The standing axis runs through the neck.</p>
+              <canvas id="fullBodyGuide" width="416" height="608" aria-label="Planned head size and body alignment; drag the dots to set shoulders, hips and ankles" style="display:block;max-width:100%;width:240px;margin:12px auto;border:1px solid var(--border);border-radius:4px;touch-action:none"></canvas>
+              <div class="result-actions"><button type="button" class="btn" id="fitReset" hidden>Reset stance</button></div>
+            </details>
+            <label for="fullBodyOutput">Result</label>
+            <select id="fullBodyOutput"><option value="preview">Full model + Live Preview</option><option value="artwork">Artwork to review first (faster)</option></select>
+            <p class="hint" id="fullBodyNotice">Artwork takes a few minutes; preparing layers and expressions takes longer. You can watch progress or cancel in the queue.</p>
+            <div class="edit-note" id="fullBodyNote" role="status"></div>
+            <div class="result-actions"><button type="button" class="btn btn-primary" id="extendFullBtn">Generate full body</button></div>
+          </details>
 
           <details class="edit-panel" id="editPanel">
             <summary><i class="fas fa-paintbrush"></i> Edit a region</summary>
@@ -231,11 +260,15 @@
               <button type="button" class="btn hidden" id="editRetryBtn"><i class="fas fa-dice"></i> Try again</button>
             </div>
             <div class="divider"></div>
-            <p class="hint">Cut off by the frame? Paint the rest of the character (about a minute and a half). The
-              description above, if any, says what to add (e.g. "black boots").</p>
+            <p class="hint">Missing a hat tip or elbow? Complete cut-off edges while keeping the current framing. Use Complete the body above to add arms and legs.</p>
             <div class="result-actions">
-              <button type="button" class="btn" id="extendFullBtn"><i class="fas fa-person"></i> Extend to full body</button>
               <button type="button" class="btn" id="uncropBtn"><i class="fas fa-expand"></i> Complete cut-off edges</button>
+            </div>
+            <div class="divider"></div>
+            <p class="hint">Small hands or a small face? Redraw each one in its own close-up for more detail (about 30 s each). Hands are found from separated layers or a full body's pose guide.</p>
+            <div class="result-actions">
+              <button type="button" class="btn" id="refineHandsBtn"><i class="fas fa-hand"></i> Refine hands</button>
+              <button type="button" class="btn" id="refineFaceBtn"><i class="fas fa-face-smile"></i> Refine face</button>
             </div>
           </details>
         </div>

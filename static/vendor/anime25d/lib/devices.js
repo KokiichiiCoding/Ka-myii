@@ -148,7 +148,7 @@ function createCamera(opts){
 
 function createMic(opts){
   const o=Object.assign({onState:null},opts);
-  let gen=0,stream=null,ctx=null,analyser=null,buf=null,level=0,raw=0;
+  let gen=0,stream=null,ctx=null,analyser=null,buf=null,level=0,raw=0,wave=null,waveBuf=null;
   const state=(s,msg)=>{o.onState&&o.onState(s,msg);};
   async function start(){
     const token=++gen;let st=null,ac=null;
@@ -163,6 +163,8 @@ function createMic(opts){
       if(token!==gen){st.getTracks().forEach(t=>t.stop());if(ac.state!=='closed')await ac.close();return false;}
       const src=ac.createMediaStreamSource(st);analyser=ac.createAnalyser();analyser.fftSize=512;
       buf=new Uint8Array(analyser.frequencyBinCount);src.connect(analyser);
+      // ~40 ms of raw audio for vowel shapes (visemes.js); the level keeps its own analyser.
+      wave=ac.createAnalyser();wave.fftSize=2048;waveBuf=new Float32Array(wave.fftSize);src.connect(wave);
       st.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(token===gen){stop(true);state('error','Microphone disconnected');}}));
       state('on');
       return true;
@@ -177,7 +179,7 @@ function createMic(opts){
   function stop(quiet){
     gen++;
     if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
-    if(ctx)ctx.close().catch(()=>{});ctx=null;analyser=null;buf=null;level=0;raw=0;
+    if(ctx)ctx.close().catch(()=>{});ctx=null;analyser=null;buf=null;level=0;raw=0;wave=null;waveBuf=null;
     if(!quiet)state('off');
   }
   // Speech band energy (≈190 Hz–3.7 kHz) → 0..1 with gain and a noise gate.
@@ -190,7 +192,12 @@ function createMic(opts){
     level+=(v-level)*0.45;
     return level;
   }
-  return {start,stop,sample,get active(){return !!analyser;},get raw(){return raw;},get level(){return level;}};
+  function frame(){
+    if(!wave)return null;
+    wave.getFloatTimeDomainData(waveBuf);
+    return {samples:waveBuf,rate:ctx.sampleRate};
+  }
+  return {start,stop,sample,frame,get active(){return !!analyser;},get raw(){return raw;},get level(){return level;}};
 }
 
 root.RigDevices={createCamera,createMic,createTicker,FM_VERSION};

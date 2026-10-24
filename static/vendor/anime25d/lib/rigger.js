@@ -31,6 +31,7 @@
     'mouth_close': 'mouthclose mouthclosed closedmouth 閉じ口 口閉じ',
     'nose':        'nose 鼻 はな',
     'ears':        'ears ear 耳',
+    'cat ears':    'catears catear nekomimi kemonomimi animalears 猫耳 ねこみみ ネコミミ',
     'earwear':     'earwear earring earrings イヤリング ピアス 耳飾り',
     'neck':        'neck 首',
     'neckwear':    'neckwear necktie tie necklace choker ネクタイ ネックレス チョーカー 首飾り',
@@ -41,7 +42,7 @@
     'footwear':    'footwear shoes shoe boots 靴 ブーツ',
     'headwear':    'headwear hat cap hairpin hairband 帽子 カチューシャ 髪飾り ヘアピン',
     'eyewear':     'eyewear glasses 眼鏡 メガネ めがね',
-    'tail':        'tail しっぽ 尻尾 シッポ',
+    'tail':        'tail cattail nekotail しっぽ 尻尾 シッポ',
     'wings':       'wings wing 羽 翼 羽根',
     'objects':     'objects object 小物 持ち物'
   };
@@ -64,6 +65,8 @@
     // "eye_close2" / "eyeclose2" / "閉じ目2" select the long closed-eye variant.
     // A separator before the number ("eye_close_2") is a numbered part instead.
     if (/^(eye_?close|eye close|閉じ目)2$/.test(n)) return 'eye_close2';
+    var animalSide=/^(.+?)[ _-](left|right|l|r)$/.exec(n);
+    if(animalSide&&canonical(animalSide[1])==='cat ears')return 'cat ears';
     var direct = canonical(n);
     if (direct) return direct;
     var m = /^(.+?)[ _-]?(\d+)$/.exec(n);
@@ -130,29 +133,48 @@
     'objects':     { depth: 1.00, group: 'auto' },
     'earwear':     { depth: 0.97, group: 'head', phys: 'sway' },
     'ears':        { depth: 0.96, group: 'head' },
+    'cat ears':    { depth: 1.00, group: 'head', split: true },
     'face':        { depth: 1.00, group: 'head' },
-    'facedetail':  { depth: 1.02, group: 'head' },
+    'facedetail':  { depth: 1.00, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
-    'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
-    'mouth_open':  { depth: 1.08, group: 'head', fade: 'mouthOpen' },
-    'nose':        { depth: 1.15, group: 'head' },
-    'eyewhite':    { depth: 1.06, group: 'head', split: true, fade: 'eyeOpen' },
-    'eyebrow':     { depth: 1.14, group: 'head', split: true },
-    'irides':      { depth: 1.08, group: 'head', split: true, fade: 'eyeOpen' },
-    'eyelash':     { depth: 1.12, group: 'head', split: true, fade: 'eyeOpen' },
-    'eye_close':   { depth: 1.12, group: 'head', split: true, fade: 'eyeClose' },
-    'eye_close2':  { depth: 1.12, group: 'head', split: true, fade: 'eyeClose2' },
+    'mouth_close': { depth: 1.00, group: 'head', fade: 'mouthClose' },
+    'mouth_open':  { depth: 1.00, group: 'head', fade: 'mouthOpen' },
+    // Painted vowel mouths (A I U E O) for lip sync; they crossfade in place of mouth_open.
+    'mouth_a':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_i':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_u':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_e':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_o':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'nose':        { depth: 1.00, group: 'head' },
+    'eyewhite':    { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eyebrow':     { depth: 1.00, group: 'head', split: true },
+    'irides':      { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eyelash':     { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eye_close':   { depth: 1.00, group: 'head', split: true, fade: 'eyeClose' },
+    'eye_close2':  { depth: 1.00, group: 'head', split: true, fade: 'eyeClose2' },
     'eyewear':     { depth: 1.18, group: 'head' },
     'side hair':   { depth: 1.22, group: 'head', phys: 'hair' },
     'front hair':  { depth: 1.28, group: 'head', phys: 'hair' },
     'ahoge':       { depth: 1.30, group: 'head', phys: 'hair' }
   };
+  var TOGGLE_SLOT = { depth: 1.00, group: 'head', fade: 'toggle' };
+  // Alternate looks ("toggle Hair: short bob", src/core/variants.py): toggles that replace a part.
+  var VARIANT_PARTS = { hair: ['front hair', 'side hair', 'back hair'], top: ['topwear', 'neckwear'],
+                        bottom: ['bottomwear'], headwear: ['headwear'] };
+  var VARIANT_SLOTS = { hair: { depth: 1.00, group: 'head', fade: 'toggle', phys: 'hair' },
+                        headwear: { depth: 1.20, group: 'head', fade: 'toggle' },
+                        top: { depth: 0.90, group: 'body', fade: 'toggle' },
+                        bottom: { depth: 0.88, group: 'body', fade: 'toggle' } };
+  // Painted mouth emotes stand in for the animated mouth (and its vowel shapes) while on.
+  var MOUTH_EMOTES = /^toggle (tongue out|cat mouth|fang)$/;
+  var MOUTH_LAYERS = ['mouth_open', 'mouth_close', 'mouth_a', 'mouth_i', 'mouth_u', 'mouth_e', 'mouth_o', 'mouth_grin', 'mouth_round'];
   // Human readable role names used by the editor and diagnostics.
   var ROLE_LABELS = {
     'wings': 'Wings', 'tail': 'Tail', 'back hair': 'Back hair', 'footwear': 'Shoes', 'legwear': 'Legs',
     'bottomwear': 'Lower clothing', 'neck': 'Neck', 'topwear': 'Upper clothing', 'neckwear': 'Neckwear',
-    'handwear': 'Arms and hands', 'objects': 'Objects', 'earwear': 'Earrings', 'ears': 'Ears', 'face': 'Face',
+    'handwear': 'Arms and hands', 'objects': 'Objects', 'earwear': 'Earrings', 'ears': 'Ears', 'cat ears': 'Cat ears', 'face': 'Face',
     'facedetail': 'Face details', 'headwear': 'Headwear', 'mouth_close': 'Closed mouth', 'mouth_open': 'Open mouth',
+    'mouth_a': 'A mouth', 'mouth_i': 'I mouth', 'mouth_u': 'U mouth', 'mouth_e': 'E mouth', 'mouth_o': 'O mouth',
     'nose': 'Nose', 'eyewhite': 'Eye whites', 'eyebrow': 'Eyebrows', 'irides': 'Irises', 'eyelash': 'Eyelashes',
     'eye_close': 'Closed eyes', 'eye_close2': 'Long closed eyes', 'eyewear': 'Glasses', 'side hair': 'Side hair',
     'front hair': 'Front hair', 'ahoge': 'Ahoge'
@@ -516,6 +538,26 @@
     };
   }
 
+  function closedLidY(part,eye) {
+    if(!part)return null;
+    const d=part.img.data,w=part.w,h=part.h,values=[];
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=(y*w+x)*4;
+      if(d[i+3]>180&&x+part.x>=eye.x0&&x+part.x<=eye.x1)values.push((d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722));
+    }
+    if(!values.length)return null;
+    values.sort((a,b)=>a-b);
+    const bg=values[Math.floor(values.length*.7)],cut=bg-35;
+    let total=0,cy=0;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=(y*w+x)*4,px=x+part.x,py=y+part.y;
+      if(d[i+3]<180||px<eye.x0||px>eye.x1||py<eye.y0-(eye.y1-eye.y0)*.3||py>eye.y1+(eye.y1-eye.y0)*.4)continue;
+      const ink=Math.max(0,cut-(d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722));
+      total+=ink;cy+=py*ink;
+    }
+    return total>0?cy/total:null;
+  }
+
   // ---------- main ----------
   function buildRig(psd, opts) {
     opts = opts || {};
@@ -563,18 +605,35 @@
     }
 
     // build parts
+    // A reversible browser-only alternative to painted eye patches with copied hair/brows.
+    if(opts.simpleBlink)entries=entries.filter(function(e){return !/^eye_close2?$/.test(baseName(e.name));});
+
     var parts = [], z = 0, sided = {};
     for (var ei = 0; ei < entries.length; ei++) {
       var e = entries[ei];
-      var bn = baseName(e.name);
-      var slot = Object.prototype.hasOwnProperty.call(SLOTS, bn) ? SLOTS[bn] : null;
+      var bn = baseName(e.name), firstPart = parts.length;
+      var variant = /^toggle (hair|top|bottom|headwear): /.exec(bn);
+      var slot = Object.prototype.hasOwnProperty.call(SLOTS, bn) ? SLOTS[bn]
+        : variant ? VARIANT_SLOTS[variant[1]]
+        : /^toggle ./.test(bn) ? TOGGLE_SLOT : null;   // "toggle blush": an overlay switched on and off
       if (!slot || slot.group === 'auto') {
         var c0 = centroidOf(e.alpha, W, H);
         var guessed = (c0 && c0.cy < FACE.y1) ? 'head' : 'body';
         if (!slot) warnings.push('Unknown layer name "' + e.name + '"; it follows the ' + (guessed === 'head' ? 'head' : 'body'));
         slot = { depth: slot ? slot.depth : 1.0, group: guessed, unknown: !slot };
       }
-      if (slot.split) {
+      var eyeToggle = /^toggle (heart eyes|star eyes|spiral eyes|> < eyes)$/.test(bn);
+      if (eyeToggle) {
+        var eyeMasks = {l:new Uint8Array(W*H),r:new Uint8Array(W*H)};
+        for(var ep=0;ep<e.alpha.length;ep++)if(e.alpha[ep])eyeMasks[ep%W<FACE.cx?'l':'r'][ep]=1;
+        ['l','r'].forEach(function(side, index){
+          if(!eyeMasks[side])return;
+          // Fractional order keeps all following artist layer IDs stable across this upgrade.
+          var part=makePart(e.name+'_'+side,e.layer,e.alpha,eyeMasks[side],W,H,slot,z+(index+1)/100,side.toUpperCase(),null);
+          if(part){part.toggleKey=e.name;part.toggleEye=bn==='toggle > < eyes'?'closed':'open';parts.push(part);}
+        });
+        z++;
+      } else if (slot.split) {
         var masks = splitSides(e.alpha, W, H, FACE.cx);
         var got = false;
         ['l', 'r'].forEach(function (s) {
@@ -612,6 +671,8 @@
         var rec3 = makePart(e.name, e.layer, e.alpha, null, W, H, slot, z, null, null);
         if (rec3) { if (slot.unknown) rec3.unknown = true; parts.push(rec3); z++; }
       }
+      if (variant) for (var vp = firstPart; vp < parts.length; vp++) { parts[vp].replaces = VARIANT_PARTS[variant[1]]; parts[vp].variantPart = variant[1]; }
+      if (MOUTH_EMOTES.test(bn)) for (var mp = firstPart; mp < parts.length; mp++) { parts[mp].replaces = MOUTH_LAYERS; parts[mp].variantPart = 'mouth'; }
     }
 
     // anchors
@@ -625,7 +686,9 @@
         var ic = ir ? centroidOf(ir, W, H) : centroidOf(ew, W, H);
         a.icx = ic.cx; a.icy = ic.cy;
         var cc = ec ? centroidOf(ec, W, H) : null;
-        a.closeY = cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
+        var closed = parts.find(function(p){return p.fade==='eyeClose' && p.side===s.toUpperCase();});
+        var lidY = closedLidY(closed,a);
+        a.closeY = lidY != null ? lidY : cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
         anchors[K] = a;
       }
     });
@@ -694,7 +757,17 @@
         warnings.push('No mouth_close layer, so a generic closed mouth was placed (adjust it with the Mouth sliders)');
       }
     }
-    for (var zi = 0; zi < parts.length; zi++) parts[zi].z = zi;
+    var stableZ=0,lastToggle=null,toggleBase=0;
+    for (var zi = 0; zi < parts.length; zi++) {
+      if(parts[zi].toggleKey){
+        if(lastToggle!==parts[zi].toggleKey){toggleBase=stableZ++;lastToggle=parts[zi].toggleKey;}
+        parts[zi].z=toggleBase+(parts[zi].side==='L'?.01:.02);
+      }else{parts[zi].z=stableZ++;lastToggle=null;}
+      if(parts[zi].fade==='eyeClose'||parts[zi].fade==='eyeClose2'){
+        var eye=anchors['eye'+parts[zi].side];
+        if(eye)parts[zi].closeY=closedLidY(parts[zi],eye) ?? eye.closeY;
+      }
+    }
 
     return { canvas: { w: W, h: H }, layers: parts, anchors: anchors, warnings: warnings, synth: synth };
   }

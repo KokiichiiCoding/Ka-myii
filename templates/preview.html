@@ -21,6 +21,7 @@
   <span id="modelName">Loading character…</span>
   <button class="obs-chip" type="button" id="obsChip" hidden title="Open OBS link settings">OBS</button>
   <a class="collection-link" href="/generator?model={{ model_id }}">← Artwork & exports</a><div class="header-actions">
+    <a class="btn" id="btnFullBody" href="/generator?model={{ model_id }}#fullbody" title="Generate the missing arms, legs and outfit from this saved character">Full body ↗</a>
     <button class="btn primary" type="button" id="btnOpen" title="Open PSD (Ctrl+O)">Open PSD</button>
     <div class="btn-group" role="group" aria-label="History">
       <button class="btn icon" type="button" id="btnUndo" disabled title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
@@ -41,6 +42,7 @@
     <div id="stageLabel">PREVIEW <span>Checkerboard is not included in exports</span></div>
     <div id="stageTools">
       <span id="recBadge" hidden>● REC</span>
+      <button class="stage-btn" type="button" id="btnBlinkEdit" data-model-action disabled aria-pressed="false">Position blink</button>
       <button class="stage-btn" type="button" id="btnAnchorMode" data-model-action disabled aria-pressed="false" title="Edit anchors (E)">Edit anchors</button>
       <button class="stage-btn" type="button" id="btnZoom" title="Wheel to zoom, drag to pan, click to fit (F)">Fit</button>
       <span id="fps" aria-hidden="true"></span>
@@ -76,14 +78,14 @@
 
     <section class="sec" data-sec="auto"><h2>Animation</h2>
       <div class="toggles">
-        <button type="button" class="tg on" id="tgIdle">Breathing</button>
+        <button type="button" class="tg on" id="tgIdle">Idle motion</button>
         <button type="button" class="tg on" id="tgBlink">Auto blink</button>
         <button type="button" class="tg on" id="tgRand">Look around</button>
         <button type="button" class="tg on" id="tgTalk">Demo speech</button>
         <button type="button" class="tg" id="tgCam">Use camera</button>
         <button type="button" class="tg" id="tgMouse">Follow pointer</button>
         <button type="button" class="tg" id="tgMic">Use microphone</button>
-        <button type="button" class="tg on" id="tgPhys">Hair physics</button>
+        <button type="button" class="tg on" id="tgPhys">Physics</button>
       </div>
     </section>
     <section class="sec" data-sec="preset"><h2>Expressions</h2>
@@ -95,13 +97,60 @@
         <button class="btn" type="button" data-preset="jito">Unimpressed<kbd>5</kbd></button>
         <button class="btn" type="button" data-preset="winkL">Wink left<kbd>6</kbd></button>
         <button class="btn" type="button" data-preset="winkR">Wink right<kbd>7</kbd></button>
+        <button class="btn" type="button" data-preset="grin">Toothy smile</button>
+        <button class="btn" type="button" data-preset="jawdrop">Jaw dropped</button>
       </div>
       <p class="section-hint">Press the same expression again to clear.<kbd>0</kbd>  clears the expression.</p>
+      <div class="btns presets" id="toggleBtns" role="group" aria-label="Toggles" hidden></div>
+      {% if toggle_options %}
+      <details class="paint-toggles">
+        <summary>Paint toggles</summary>
+        <div class="picks">{% for t in toggle_options %}<label><input type="checkbox" value="{{ t.id }}"{% if t.painted %} checked disabled{% endif %}> {{ t.label }}</label>{% endfor %}</div>
+        <button class="btn" type="button" id="btnPaintToggles">Paint selected</button>
+        <div class="variant-form">
+          <label for="variantPart">Alternate look</label>
+          <select id="variantPart"><option value="hair">Hair</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="headwear">Headwear</option></select>
+          <input type="text" id="variantPrompt" maxlength="200" placeholder="e.g. short black bob, red hoodie" aria-label="Describe the alternate design">
+          <button class="btn" type="button" id="btnPaintVariant">Paint alternate</button>
+        </div>
+        <p class="section-hint" id="paintStatus" role="status">Blush, tears and emote eyes are painted in this character's style (about 15 s each on the GPU). Manga symbols, Gloom and Sparkle aura are drawn locally without diffusion. A I U E O mouths are five painted lip-sync shapes (about a minute): the microphone picks the vowel you say. An alternate look repaints one part with what was under it filled in (about 30 s) and switches like a toggle, hiding the part it replaces. Switch them with the buttons above or Shift+1–9; OBS follows.</p>
+      </details>
+      {% endif %}
     </section>
     <section class="sec" data-sec="head"><h2>Head pose</h2>
       <div class="row"><label>Turn</label><input type="range" id="pAngleX" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Nod</label><input type="range" id="pAngleY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Tilt</label><input type="range" id="pAngleZ" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+    </section>
+    <section class="sec" data-sec="blink" id="blinkSection"><h2>Blink alignment</h2>
+      <p class="section-hint">Fix an older model’s uneven blink. Hold both eyes closed, then drag each eye on the stage or enter offsets below. Left/right refer to the image.</p>
+      <div class="btns">
+        <button type="button" class="btn primary" id="btnBlinkEdit2" data-model-action disabled aria-pressed="false">Position blink</button>
+        <button type="button" class="btn" id="btnBlinkDone" data-model-action disabled>Test motion</button>
+      </div>
+      <div class="btns blink-views" role="group" aria-label="Blink comparison">
+        <button type="button" class="btn compact" data-blink-view="both" aria-pressed="true">Both closed</button>
+        <button type="button" class="btn compact" data-blink-view="open" aria-pressed="false">Open</button>
+        <button type="button" class="btn compact" data-blink-view="L" aria-pressed="false">Left wink</button>
+        <button type="button" class="btn compact" data-blink-view="R" aria-pressed="false">Right wink</button>
+      </div>
+      <label class="blink-style" for="blinkStyle">Blink artwork<select id="blinkStyle"><option value="0">Original painted blink</option><option value="1">Clean fallback blink</option></select></label>
+      <p class="section-hint">If the painting includes duplicate brows or hair, try the clean fallback. It uses a simple lid without changing your artwork.</p>
+      <div class="blink-offsets" role="group" aria-label="Closed eye position in image pixels">
+        <span></span><span>Horizontal</span><span>Vertical</span>
+        <span>Image left</span><input id="blinkLX" type="number" disabled min="-200" max="200" step="1" value="0" aria-label="Left blink horizontal offset"><input id="blinkLY" type="number" disabled min="-200" max="200" step="1" value="0" aria-label="Left blink vertical offset">
+        <span>Image right</span><input id="blinkRX" type="number" disabled min="-200" max="200" step="1" value="0" aria-label="Right blink horizontal offset"><input id="blinkRY" type="number" disabled min="-200" max="200" step="1" value="0" aria-label="Right blink vertical offset">
+      </div>
+      <div class="row"><label>Left blink tilt</label><input type="range" id="pEyeTiltL" min="-30" max="30" step="0.5" value="0"><span class="val"></span></div>
+      <div class="row"><label>Right blink tilt</label><input type="range" id="pEyeTiltR" min="-30" max="30" step="0.5" value="0"><span class="val"></span></div>
+      <div class="row"><label>Left blink size</label><input type="range" id="pEyeScaleL" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Right blink size</label><input type="range" id="pEyeScaleR" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
+      <div class="btns">
+        <button type="button" class="btn" id="btnBlinkMatch" data-model-action disabled>Match open eye line</button>
+        <button type="button" class="btn" id="btnBlinkReset" data-model-action disabled>Reset blink alignment</button>
+        <button type="button" class="btn primary" id="btnBlinkSave" data-model-action disabled>Save adjustments</button>
+      </div>
+      <p class="section-hint" id="blinkHelp" role="status">Positioning changes the preview; the original artwork stays intact. Arrow keys nudge 1 px; Shift nudges 10 px.</p>
     </section>
     <section class="sec" data-sec="eyes"><h2>Eyes</h2>
       <div class="row"><label>Left eye open</label><input type="range" id="pEyeL" min="0" max="1" step="0.01" value="1"><span class="val"></span></div>
@@ -109,8 +158,6 @@
       <div class="row"><label>Look sideways</label><input type="range" id="pEyeX" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Look up / down</label><input type="range" id="pEyeY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Iris scale</label><input type="range" id="pIrisScale" min="0.5" max="1.3" step="0.01" value="1"><span class="val"></span></div>
-      <div class="row"><label>Closed eye scale / L</label><input type="range" id="pEyeScaleL" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
-      <div class="row"><label>Closed eye scale / R</label><input type="range" id="pEyeScaleR" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
       <div class="row"><label>Close threshold</label><input type="range" id="pEyeEase" min="0" max="1" step="0.01" value="0.3"><span class="val"></span></div>
       <div class="row"><label>Closed eye height</label><input type="range" id="pEyeCY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Closed eye angle</label><input type="range" id="pEyeCAng" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
@@ -122,10 +169,15 @@
       <div class="row"><label>Right brow angle</label><input type="range" id="pBrowAngR" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
     </section>
     <section class="sec" data-sec="mouth"><h2>Mouth</h2>
+      <div class="field-row"><label for="mouthArtwork">Mouth artwork</label><select id="mouthArtwork"><option value="1">Expressive shapes</option><option value="0">Original only</option></select></div>
+      <div class="row"><label>Show teeth</label><input type="range" id="pMouthTeeth" min="0" max="1" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Jaw drop</label><input type="range" id="pJawDrop" min="0" max="1" step=".01" value="0"><span class="val"></span></div>
+      <p class="section-hint">Speech blends through small openings. Use Demo speech to try it, or enable your microphone or camera.</p>
+      <div class="row"><label>Lip response</label><input type="range" id="pMouthResponse" min="0" max="1" step=".01" value="0.65"><span class="val"></span></div><div class="row"><label>Rounded shape</label><input type="range" id="pMouthRound" min="0" max="1" step=".01" value="0"><span class="val"></span></div>
       <div class="row"><label>Open</label><input type="range" id="pMouthOpen" min="0" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Smile</label><input type="range" id="pMouthForm" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Closed mouth height</label><input type="range" id="pMouthCY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
-      <div class="row"><label>Close threshold</label><input type="range" id="pMouthEase" min="0" max="1" step="0.01" value="0.72"><span class="val"></span></div>
+      <div class="row"><label>Artwork blend</label><input type="range" id="pMouthEase" min="0" max="1" step="0.01" value="0.72"><span class="val"></span></div>
       <div class="row"><label>Closed mouth angle</label><input type="range" id="pMouthCAng" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Mouth scale</label><input type="range" id="pMouthScale" min="0.5" max="1.5" step="0.01" value="1"><span class="val"></span></div>
     </section>
@@ -137,14 +189,46 @@
       <div class="row"><label>Right section</label><input type="range" id="pBangR" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
     </section>
     <section class="sec" data-sec="body"><h2>Body & physics</h2>
+      <div class="btns" role="group" aria-label="Motion feel"><button type="button" class="btn compact" data-motion="0.2">Gentle</button><button type="button" class="btn compact" data-motion="1">Lively</button><button type="button" class="btn compact" data-motion="1.4">Bouncy</button><button type="button" class="btn compact" id="btnNaturalSway">Natural sway</button><button type="button" class="btn compact" id="btnSpringNod">Springy nod</button><button type="button" class="btn compact" id="btnHeadSway">Head sway</button></div>
+      <div class="row"><label>Nod depth</label><input type="range" id="pNodDepth" min="0" max="1.5" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Head sway</label><input type="range" id="pSwayDepth" min="0" max="1" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Nod speed (Hz)</label><input type="range" id="pNodSpeed" min="0.4" max="3.4" step=".1" value="2.6"><span class="val"></span></div>
+      <p class="section-hint">Springy nod adds a head dip and rebound with quieter shoulders and trailing hair. Head sway tilts the head side to side at half the nod speed while the neck bends and the shoulders stay put. 0 turns either off; camera mode follows your own head instead.</p>
+      <div class="row"><label>Bounce</label><input type="range" id="pMotionBounce" min="0" max="1.5" step=".01" value="1"><span class="val"></span></div>
+      <p class="section-hint">Hair and body follow through after a turn. Physics must be on; Idle adds movement while you are still.</p>
+      <div class="row"><label>Weight shift</label><input type="range" id="pWeightShift" min="0" max="2" step=".01" value=".4"><span class="val"></span></div>
+      <div class="row"><label>Breathing depth</label><input type="range" id="pBreathing" min="0" max="1.5" step=".01" value="1"><span class="val"></span></div>
+      <p class="section-hint">Natural sway shifts weight through the hips, pauses, then settles on the other side. Feet stay planted. Weight shift and breathing require Idle; camera mode follows your own head.</p>
+      <div class="row"><label>Body turn</label><input type="range" id="pBodyTurn" min="-1" max="1" step=".01" value="0"><span class="val"></span></div>
       <div class="row"><label>Body tilt</label><input type="range" id="pBody" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Shoulder shrug</label><input type="range" id="pShrug" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Body motion</label><input type="range" id="pBodyMotion" min="0" max="2" step="0.01" value="1"><span class="val"></span></div>
+      <p class="section-hint">Body motion adds a torso arc, shoulder roll and breathing. The torso follows your head with a short delay; the lower body stays planted. Body turn and Body tilt also work as manual poses.</p>
       <div class="row"><label>Arm height</label><input type="range" id="pArmY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Arm position</label><input type="range" id="pArmPos" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
+      <p class="section-hint">No arms or legs in the picture? <a href="/generator?model={{ model_id }}#fullbody">Complete the body ↗</a> paints them in as a new character to separate.</p>
       <div class="row"><label>Breathing sway</label><input type="range" id="pBust" min="0" max="4" step="0.01" value="2.5"><span class="val"></span></div>
       <div class="row"><label>Breathing origin</label><input type="range" id="pBustY" min="-3" max="3" step="0.01" value="1"><span class="val"></span></div>
       <div class="row"><label>Back hair sway</label><input type="range" id="pPhysAmp" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
       <div class="row"><label>Back hair softness</label><input type="range" id="pSoft" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
       <div class="row"><label>Accessory sway</label><input type="range" id="pAccAmp" min="0" max="3" step="0.01" value="1"><span class="val"></span></div>
+      <p class="section-hint">Earrings, tails, hats and bows. A hat's brim and tip trail the head; the part on the head stays put.</p>
+    </section>
+    <section class="sec" data-sec="companions"><h2>Nekomimi & tail</h2>
+      <p class="section-hint">Fit animated cat ears and a tail to any character. The ears twitch and the tail swishes with Idle; both react to turns with Physics on.</p>
+      <div class="field-row"><label for="nekoStyle">Cat ears</label><select id="nekoStyle"><option value="0">Off</option><option value="1">On</option></select></div>
+      <div class="field-row"><label for="tailStyle">Cat tail</label><select id="tailStyle"><option value="0">Off</option><option value="1">On</option></select></div>
+      <div class="field-row"><label for="furPalette">Fur colour</label><select id="furPalette"><option value="0">Match hair</option><option value="1">Ivory</option><option value="2">Charcoal</option><option value="3">Copper</option></select></div>
+      <div class="row"><label>Ear size</label><input type="range" id="pEarSize" min="0.4" max="1.8" step=".01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Ear spacing</label><input type="range" id="pEarSpread" min="0.4" max="1.8" step=".01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Ear height</label><input type="range" id="pEarLift" min="-0.6" max="0.6" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Ear twitch</label><input type="range" id="pEarMotion" min="0" max="2" step=".01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Tail size</label><input type="range" id="pTailSize" min="0.3" max="1.8" step=".01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Tail horizontal</label><input type="range" id="pTailX" min="-1.5" max="1.5" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Tail vertical</label><input type="range" id="pTailY" min="-1.5" max="1.5" step=".01" value="0"><span class="val"></span></div>
+      <div class="row"><label>Tail swish</label><input type="range" id="pTailMotion" min="0" max="2" step=".01" value="1"><span class="val"></span></div>
+      <div class="field-row"><label for="tailSide">Tail side</label><select id="tailSide"><option value="1">Image right</option><option value="-1">Image left</option></select></div>
+      <p class="section-hint">Save adjustments to keep the fit. These additions appear in preview PNGs and recordings; the artist PSD and Cubism package keep the original artwork. Turn ears off when the character already has them.</p>
     </section>
     <section class="sec" data-sec="anchors"><h2>Reference points</h2>
       <p class="section-hint">Drag reference points on the artwork to refine the eye, mouth and neck placement.</p>
@@ -190,7 +274,7 @@
         <button class="btn" type="button" id="btnPng2" data-model-action disabled>Save PNG</button>
         <button class="btn" type="button" id="btnRecord2" data-model-action disabled>Start recording</button>
       </div>
-      <p class="section-hint" id="recordStatus">Record at the original artwork size. Transparent WebM works in Chrome and Edge.</p>
+      <p class="section-hint" id="recordStatus">Record at artwork resolution, with extra space for fitted ears and tails. Transparent WebM works in Chrome and Edge.</p>
     </section>
     <section class="sec" data-sec="save"><h2>Save & settings</h2>
       <div class="btns">
@@ -212,6 +296,10 @@
         <button class="btn" type="button" data-bg="dark">Dark</button>
       </div>
     </section>
+    <section class="sec" data-sec="shading"><h2>Hair shading</h2>
+      <div class="row"><label>Shadow follow</label><input type="range" id="pShadowFollow" min="0" max="1" step="0.01" value="1"><span class="val">1</span></div>
+      <p class="section-hint">Moves the shading beneath the bangs with the hair. Lower this if your artwork has lighting painted across the forehead.</p>
+    </section>
     <section class="sec" data-sec="layers"><h2>Layers</h2><p class="section-hint">Back to front. Drag to reorder; expand a layer to adjust opacity and depth.</p><button class="btn compact" type="button" id="btnResetLayers" data-model-action disabled>Reset layers</button><div id="layers"><p class="section-hint">Layers appear after loading</p></div></section>
     <section class="sec" data-sec="info"><h2>Model diagnostics</h2><div id="rigInfo">Loading character…</div><ul id="diagnostics"></ul></section>
   </div>
@@ -230,11 +318,43 @@
 <script src="lib/rigger.js"></script>
 <script src="lib/genericparts.js"></script>
 <script src="lib/runtime.js"></script>
+<script src="lib/motion.js"></script>
+<script src="lib/visemes.js"></script>
 <script src="lib/face-features.js"></script>
 <script src="lib/renderer.js"></script>
 <script src="lib/devices.js"></script>
 <script src="lib/recorder.js"></script>
 <script src="lib/obs-sync.js"></script>
 <script src="lib/app.js?v=m2"></script>
+<script>
+// Queue a painting job, follow it, and reload when its layers are ready.
+async function paintAndReload(button, url, body) {
+  const status = document.getElementById('paintStatus');
+  button.disabled = true;
+  try {
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const queued = await r.json();
+    if (!r.ok) throw new Error(queued.error || 'Could not queue the painting');
+    for (;;) {
+      const {job, error} = await (await fetch('/api/generation/jobs/' + queued.task_id)).json();
+      if (!job) throw new Error(error || 'Lost track of the painting; reload the page');
+      if (job.state === 'completed') { status.textContent = 'Done. Reloading…'; location.reload(); return; }
+      if (job.state === 'failed' || job.state === 'cancelled') throw new Error(job.error || 'Painting ' + job.state);
+      status.textContent = job.state === 'queued' ? 'Waiting for the GPU…' : (job.message || 'Painting…') + ' ' + Math.floor(job.progress || 0) + '%';
+      await new Promise((done) => setTimeout(done, 2000));
+    }
+  } catch (err) { status.textContent = err.message; button.disabled = false; }
+}
+document.getElementById('btnPaintToggles')?.addEventListener('click', (event) => {
+  const toggles = [...document.querySelectorAll('.paint-toggles input:checked:not(:disabled)')].map((i) => i.value);
+  if (!toggles.length) { document.getElementById('paintStatus').textContent = 'Choose the toggles to paint.'; return; }
+  paintAndReload(event.currentTarget, '/api/generation/expressions/' + KamyiiPreview.id, {toggles});
+});
+document.getElementById('btnPaintVariant')?.addEventListener('click', (event) => {
+  const prompt = document.getElementById('variantPrompt').value.trim();
+  if (!prompt) { document.getElementById('paintStatus').textContent = 'Describe the alternate design first.'; return; }
+  paintAndReload(event.currentTarget, '/api/generation/variant/' + KamyiiPreview.id, {part: document.getElementById('variantPart').value, prompt});
+});
+</script>
 </body>
 </html>

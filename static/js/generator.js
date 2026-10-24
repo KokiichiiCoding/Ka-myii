@@ -36,6 +36,7 @@
     paintToggle: $('paintToggle'), eraseToggle: $('eraseToggle'), brushSize: $('brushSize'),
     clearSelection: $('clearSelection'), editPrompt: $('editPrompt'), editStrength: $('editStrength'),
     editStrengthVal: $('editStrengthVal'), editBtn: $('editBtn'), editRetryBtn: $('editRetryBtn'), editNote: $('editNote'),
+    fullBodyProportions: $('fullBodyProportions'), fullBodyKeepFace: $('fullBodyKeepFace'), fullBodyGuided: $('fullBodyGuided'), fullBodyPanel: $('fullBodyPanel'), fullBodyPrompt: $('fullBodyPrompt'), fullBodyOutput: $('fullBodyOutput'), fullBodyNote: $('fullBodyNote'),
     extendFullBtn: $('extendFullBtn'), uncropBtn: $('uncropBtn'),
   };
   let shownModelId = null; // the result on the canvas
@@ -86,6 +87,8 @@
           }
           els.canvasEmpty.classList.add('hidden');
           await showResult({model_id:savedId, model:data.model});
+          // Live Preview's "Extend to full body" link opens the extension controls.
+          if (['#extend','#fullbody'].includes(location.hash)) { els.fullBodyPanel.open = true; els.extendFullBtn.scrollIntoView({block: 'center'}); els.extendFullBtn.focus(); }
         }
       } catch (err) { showError('This character could not be opened. Return to the collection and try again.'); }
     }
@@ -177,6 +180,16 @@
         };
         els.styleChips.appendChild(chip);
       });
+      $('toggleChips').replaceChildren(...(data.toggles || []).map((t) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'chip';
+        chip.textContent = t.label;
+        chip.dataset.toggle = t.id;
+        chip.setAttribute('aria-pressed', 'false');
+        chip.onclick = () => chip.setAttribute('aria-pressed', String(chip.classList.toggle('active')));
+        return chip;
+      }));
 
       // checkpoints
       els.model.innerHTML = '';
@@ -234,6 +247,7 @@
     try {
       const { data } = await axios.get('/api/generation/model-status');
       els.modelNotice.classList.toggle('hidden', !data.is_dummy);
+      $('fullBodyNotice').textContent=data.is_dummy?'Demo mode uses placeholder artwork. Start Ka-myii in real mode to draw a detailed full body.':'Artwork takes a few minutes; preparing layers and expressions takes longer. You can watch progress or cancel in the queue.';
       $('seethroughNotice').classList.toggle('hidden', data.is_dummy || data.seethrough !== false);
       $('gpuNotice').classList.toggle('hidden', data.is_dummy || data.device === 'cuda');
     } catch (e) { /* ignore */ }
@@ -441,6 +455,7 @@
       seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
       loras: els.lora.value ? [{ id: els.lora.value, weight: parseFloat(els.loraWeight.value) }] : null,
       sketch,
+      toggles: [...document.querySelectorAll('#toggleChips .active')].map((c) => c.dataset.toggle),
     };
     if (!busy) lastSeed = payload.seed;
     return () => axios.post('/api/generation/generate', payload);
@@ -479,7 +494,14 @@
     els.metaSeed.textContent = model.request?.source === 'upload' ? '—' : (model.request?.seed ?? lastSeed ?? 'random');
     // A sketch has artwork only: offer to separate it instead of the layer downloads.
     shownModelId = mid;
+    extensionGuideRequest++; fitGuides = null; fitView = null;
+    if ($('fullBodyFit').open) drawExtensionGuide();
+    // Reload/bookmark the result now on the canvas, including a newly extended character.
+    const resultUrl = new URL(location.href);
+    resultUrl.searchParams.set('model', mid);
+    history.replaceState(null, '', resultUrl.pathname + resultUrl.search + resultUrl.hash);
     prepareEditor(mid);
+    renderChecks(model, mid);
     const sketch = model.status === 'sketch';
     els.separateBtn.classList.toggle('hidden', !sketch);
     for (const el of [$('livePreview'), els.dlPackage, els.dlPsd, els.dlOra]) el.classList.toggle('hidden', sketch);
@@ -541,7 +563,46 @@
     };
     els.editBtn.onclick = () => submitEdit(false);
     els.extendFullBtn.onclick = () => submitExtend('full_body');
+    $('fullBodyFit').addEventListener('toggle', () => { if ($('fullBodyFit').open) drawExtensionGuide(); });
+    els.fullBodyProportions.addEventListener('change', () => { fitGuides = null; if ($('fullBodyFit').open) drawExtensionGuide(); });
+    $('fitReset').onclick = () => { fitGuides = null; drawExtensionGuide(); };
+    // Drag a shoulder, hip or ankle dot; its mirror moves with it, so pairs stay level.
+    const guide = $('fullBodyGuide'); let dragging = null;
+    const at = (e) => { const r = guide.getBoundingClientRect(); return [(e.clientX - r.left) * guide.width / r.width, (e.clientY - r.top) * guide.height / r.height]; };
+    const handleAt = (e) => {
+      if (!fitView?.g.pose_points) return null;
+      const s = guide.height / fitView.g.canvas[1], [x, y] = at(e);
+      for (const [name, pair] of Object.entries(GUIDE_POINTS))
+        for (const i of pair) { const [px, py] = fitView.g.pose_points[i]; if (Math.hypot(px * s - x, py * s - y) < 14) return name; }
+      return null;
+    };
+    guide.addEventListener('pointerdown', (e) => {
+      dragging = handleAt(e);
+      if (dragging) { fitGuides = currentGuides(); guide.setPointerCapture(e.pointerId); e.preventDefault(); }
+    });
+    guide.addEventListener('pointermove', (e) => {
+      if (!dragging) { guide.style.cursor = handleAt(e) ? 'grab' : ''; return; }
+      const g = fitView.g, s = guide.height / g.canvas[1], [x, y] = at(e).map((v) => v / s), axis = g.pose_points[1][0];
+      const order = GUIDE_NAMES.indexOf(dragging), above = fitGuides[GUIDE_NAMES[order - 1]], below = fitGuides[GUIDE_NAMES[order + 1]];
+      const half = Math.min(Math.max(Math.abs(x - axis), 8), g.canvas[0] / 2 - 2);
+      const yy = Math.min(Math.max(y, above ? above[1] + 12 : 4), below ? below[1] - 12 : g.canvas[1] * .97);
+      fitGuides[dragging] = [half, yy];
+      const [a, b] = GUIDE_POINTS[dragging];
+      g.pose_points[a] = [axis - half, yy]; g.pose_points[b] = [axis + half, yy];
+      guide.style.cursor = 'grabbing'; paintFitGuide();
+    });
+    for (const ev of ['pointerup', 'pointercancel']) guide.addEventListener(ev, () => { if (dragging) { dragging = null; drawExtensionGuide(); } });
+    $('showFullBody').onclick = () => { els.fullBodyPanel.open = true; els.fullBodyPanel.scrollIntoView({block:'center',behavior:'smooth'}); els.fullBodyPrompt.focus(); };
     els.uncropBtn.onclick = () => submitExtend('uncrop');
+    for (const [id, target] of [['refineHandsBtn', 'hands'], ['refineFaceBtn', 'face']]) $(id).onclick = async () => {
+      if (!shownModelId) return;
+      els.editNote.textContent = ''; $(id).disabled = true;
+      try {
+        const { data } = await axios.post(`/api/generation/refine/${encodeURIComponent(shownModelId)}`, { target });
+        if (busy) { els.editNote.textContent = 'Added to the queue.'; refreshQueue(); } else track(data.job);
+      } catch (err) { els.editNote.textContent = err.response?.data?.error || 'Could not queue the refinement'; }
+      finally { $(id).disabled = false; }
+    };
     els.editRetryBtn.onclick = () => submitEdit(true);
     const mask = els.maskCanvas;
     let last = null;
@@ -628,15 +689,130 @@
     ctx.fillStyle = 'rgb(80,200,190)'; ctx.fillRect(0, 0, c.width, c.height);
   }
 
+  let extensionGuideRequest = 0, fitGuides = null, fitView = null;
+  // OpenPose joints the owner can drag (outpaint.pose_points): [left, right] of each pair.
+  const GUIDE_POINTS = { shoulders: [2, 5], hips: [8, 11], ankles: [10, 13] }, GUIDE_NAMES = Object.keys(GUIDE_POINTS);
+  function currentGuides() {
+    const p = fitView.g.pose_points, out = {};
+    for (const [name, [a, b]] of Object.entries(GUIDE_POINTS)) out[name] = [(p[b][0] - p[a][0]) / 2, p[a][1]];
+    return out;
+  }
+  async function drawExtensionGuide() {
+    if (!shownModelId) return;
+    const revision = ++extensionGuideRequest, mid = shownModelId;
+    const note = $('fullBodyFitNote'); if (!fitView) note.textContent = 'Measuring the head and standing axis…';
+    try {
+      const params = { proportions: els.fullBodyProportions.value };
+      if (fitGuides) params.guides = JSON.stringify(fitGuides);
+      const { data } = await axios.get(`/api/generation/extend/${encodeURIComponent(mid)}/plan`, { params });
+      if (revision !== extensionGuideRequest || mid !== shownModelId) return;
+      let source = fitView?.mid === mid ? fitView.source : null;
+      if (!source) {
+        source = new Image();
+        source.src = `/api/generation/preview/${encodeURIComponent(mid)}`;
+        await new Promise((resolve, reject) => { source.onload = resolve; source.onerror = reject; });
+        if (revision !== extensionGuideRequest || mid !== shownModelId) return;
+      }
+      fitView = { mid, g: data.info, source };
+      paintFitGuide();
+      $('fitReset').hidden = !fitGuides;
+      note.textContent = (data.info.measured
+        ? 'Measured from this character. The face is retained; the outfit blends into a newly drawn body.'
+        : 'Approximate fit: separate the current artwork first for a precise head measurement.')
+        + (data.info.pose_points ? ' Drag the shoulder, hip and ankle dots to set the stance; pairs stay level.' : '') + ' Guide only—generated anatomy can vary.';
+    } catch (err) { if (revision===extensionGuideRequest) note.textContent = err.response?.data?.error || 'Could not load the fit guide. You can still generate a full body.'; }
+  }
+
+  function paintFitGuide() {
+    const { g, source } = fitView, c = $('fullBodyGuide'), ctx = c.getContext('2d');
+    {
+      const s = c.height / g.canvas[1], [x,y,w,h] = g.placed;
+      ctx.clearRect(0,0,c.width,c.height); ctx.fillStyle='#f2eee6';ctx.fillRect(0,0,c.width,c.height);
+      ctx.drawImage(source,x*s,y*s,w*s,h*s);
+      // The same shoulder/hip/ankle targets used by generation, shown before spending GPU time.
+      if(g.pose_points){
+        const links=[[1,2],[1,5],[2,3],[3,4],[5,6],[6,7],[1,8],[8,9],[9,10],[1,11],[11,12],[12,13]];
+        ctx.strokeStyle='#bc9d87';ctx.lineWidth=2;
+        for(const [a,b] of links){ctx.beginPath();ctx.moveTo(...g.pose_points[a].map(v=>v*s));ctx.lineTo(...g.pose_points[b].map(v=>v*s));ctx.stroke();}
+      }
+      ctx.strokeStyle='#9b735d';ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.beginPath();
+      ctx.moveTo(g.standing_axis*s,0);ctx.lineTo(g.standing_axis*s,g.foot_y*s);
+      ctx.moveTo(20,g.foot_y*s);ctx.lineTo(c.width-20,g.foot_y*s);ctx.stroke();ctx.setLineDash([]);
+      if (g.result_geometry) {
+        const a=g.result_geometry,hh=a.head_height*s,crown=a.crown_y*s;
+        ctx.strokeStyle='#9b735d';ctx.font='11px sans-serif';ctx.fillStyle='#624b3e';
+        for(let i=0;i<=Math.floor(g.target_heads);i++) {const yy=crown+hh*i;
+          ctx.beginPath();ctx.moveTo(12,yy);ctx.lineTo(26,yy);ctx.stroke();ctx.fillText(String(i),30,yy+4);}
+      }
+      if (g.pose_points) for (const pair of Object.values(GUIDE_POINTS)) for (const i of pair) {
+        const [px, py] = g.pose_points[i];
+        ctx.beginPath(); ctx.arc(px * s, py * s, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#d0674f'; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    }
+  }
+
+  // Automatic checks of a drawn full body (src/core/checks.py), each with a one-click fix.
+  const CHECK_FIXES = { reseed: 'Try another seed', uncrop: 'Make room', repaint: 'Repaint this area', refine_hands: 'Refine hands' };
+  function renderChecks(model, mid) {
+    const box = $('resultChecks'), found = model.metadata?.checks, ext = model.request?.extension || {};
+    box.innerHTML = '';
+    box.classList.toggle('hidden', !Array.isArray(found));
+    if (!Array.isArray(found)) return;
+    const title = document.createElement('div');
+    title.textContent = found.length ? 'Automatic checks found:' : 'Automatic checks: no second face, cropped shoes or uneven shoulders found.';
+    box.appendChild(title);
+    for (const f of found) {
+      const row = document.createElement('div'); row.className = 'check-row';
+      const text = document.createElement('span'); text.textContent = f.message; row.appendChild(text);
+      if (CHECK_FIXES[f.fix] && (f.fix !== 'reseed' || ext.source_model)) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'btn'; b.textContent = CHECK_FIXES[f.fix];
+        b.onclick = () => fixCheck(f, mid, ext, b);
+        row.appendChild(b);
+      }
+      box.appendChild(row);
+    }
+    const note = document.createElement('div'); note.className = 'edit-note'; note.id = 'checkNote'; box.appendChild(note);
+  }
+
+  async function fixCheck(f, mid, ext, button) {
+    const id = encodeURIComponent(mid);
+    button.disabled = true; $('checkNote').textContent = '';
+    try {
+      let res;
+      if (f.fix === 'reseed') res = await axios.post(`/api/generation/extend/${encodeURIComponent(ext.source_model)}`, {
+        mode: 'full_body', prompt: ext.outfit || '', proportions: ext.proportions || 'balanced',
+        keep_face: ext.keep_face !== false, guided: !!ext.guided, guides: ext.guides || null, separate: false });
+      else if (f.fix === 'uncrop') res = await axios.post(`/api/generation/extend/${id}`, { mode: 'uncrop' });
+      else if (f.fix === 'repaint') res = await axios.post(`/api/generation/edit/${id}`, { parts: [], mask: boxMask(f.box), prompt: f.prompt || '', strength: 0.65 });
+      else res = await axios.post(`/api/generation/refine/${id}`, { target: 'hands' });
+      if (busy) { $('checkNote').textContent = 'Added to the queue.'; refreshQueue(); } else track(res.data.job);
+    } catch (err) { $('checkNote').textContent = err.response?.data?.error || 'Could not queue the fix'; }
+    finally { button.disabled = false; }
+  }
+
+  function boxMask([x0, y0, x1, y1]) {
+    const c = document.createElement('canvas'), ctx = c.getContext('2d');
+    c.width = els.resultImg.naturalWidth; c.height = els.resultImg.naturalHeight;
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    ctx.ellipse((x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, 0, 0, Math.PI * 2); ctx.fill();
+    return c.toDataURL('image/png');
+  }
+
   async function submitExtend(mode) {
     if (!shownModelId) return;
-    els.editNote.textContent = '';
+    const note = mode==='full_body'?els.fullBodyNote:els.editNote;
+    note.textContent = '';
     for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = true;
     try {
       const { data } = await axios.post(`/api/generation/extend/${encodeURIComponent(shownModelId)}`,
-        { mode, prompt: els.editPrompt.value.trim() });
-      if (busy) { els.editNote.textContent = 'Added to the queue.'; refreshQueue(); } else track(data.job);
-    } catch (err) { els.editNote.textContent = err.response?.data?.error || 'Could not queue the extension'; }
+        { mode, prompt: (mode==='full_body'?els.fullBodyPrompt:els.editPrompt).value.trim(),
+          proportions: els.fullBodyProportions.value, keep_face: els.fullBodyKeepFace.checked, guided: els.fullBodyGuided.checked,
+          guides: mode === 'full_body' ? fitGuides : null,
+          separate: mode==='full_body' && els.fullBodyOutput.value==='preview' });
+      if (busy) { note.textContent = 'Added to the queue.'; refreshQueue(); } else track(data.job);
+    } catch (err) { note.textContent = err.response?.data?.error || 'Could not queue the extension'; }
     finally { for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = false; }
   }
 

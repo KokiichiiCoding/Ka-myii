@@ -139,11 +139,13 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._enter_stage(task_id, "image", "Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            if request.operation in ("edit", "extend"):  # repaint part of staged artwork
+            if request.operation in ("edit", "extend", "refine"):  # repaint part of staged artwork
                 self._ensure_generator(request)
                 base_image_path = self._repaint(request, model_output_dir, task_id)
-                model.request = request = replace(request, reference_image=None, mask_image=None)
+                model.request = request = replace(request, reference_image=None, mask_image=None, pose_image=None)
                 model.metadata["source"] = request.operation
+                if request.operation == "extend" and (request.extension or {}).get("mode") == "full_body":
+                    model.metadata["checks"] = self._review(base_image_path, request.extension)
             elif request.reference_image:  # artwork the upload/separate routes validated and staged
                 base_image_path = model_output_dir / "base_image.png"
                 shutil.move(request.reference_image, base_image_path)
@@ -172,11 +174,14 @@ class AssemblyLine:
             assets = self._separate_assets(base_image_path, model_output_dir, request.custom_layers, task_id)
             model.assets = assets
             logger.info(f"Assets separated: {len(assets)} layers")
+            kept = self._keep_head(request, model_output_dir)
+            if kept:
+                model.metadata["kept_head_layers"] = kept
 
             # Stage 2b: the character's own closed eyes and other mouth state, for Live Preview.
             if self._wants_expressions(assets):
                 self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.8)
-                made = self._paint_expressions(request, model_output_dir, task_id)
+                made = self._paint_expressions(request, model_output_dir, task_id, keep=True)
                 if made:
                     model.metadata["expressions"] = made
                     assets = model.assets = assets + expressions.as_assets(model_output_dir, made, assets)
@@ -259,49 +264,118 @@ class AssemblyLine:
         """Edit / extend: inpaint the staged artwork through the staged mask into a new base image."""
         from PIL import Image
 
-        staged = [Path(request.reference_image), Path(request.mask_image)]
-        with Image.open(staged[0]) as source, Image.open(staged[1]) as mask:
-            image, mask = source.convert("RGB"), mask.convert("L")
+        staged = [Path(request.reference_image)]
+        with Image.open(staged[0]) as source:
+            image = source.convert("RGB")
+        if request.operation == "refine":
+            return self._refine(request, image, staged, output_dir, task_id)
+        staged.append(Path(request.mask_image))
+        with Image.open(staged[1]) as mask:
+            mask = mask.convert("L")
+        pose = None
+        if request.pose_image:
+            staged.append(Path(request.pose_image))
+            with Image.open(staged[-1]) as source:
+                pose = source.convert("RGB")
         painted = self.image_generator.inpaint(
             image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
             strength=request.strength, seed=request.seed, task_id=task_id,
-            # An outpaint join needs a wide blend; a narrow one left lines where the artwork ended.
-            feather=20 if request.operation == "extend" else 6,
+            # The extend mask is a change map: the model redraws the art's cut edges gradually into
+            # the new body. A hard mask plus a separate seam pass left straight joins and ghosts.
+            graded=request.operation == "extend", pose=pose,
             label="Extending the canvas" if request.operation == "extend" else "Repainting the selection")
-        if request.operation == "extend":
-            # Seam fix: a standard checkpoint does not harmonise across a long mask boundary, so the
-            # join showed as straight lines. A band straddling the boundary is redrawn gently.
-            from PIL import ImageChops, ImageFilter
-
-            hard = mask.point(lambda v: 255 if v > 127 else 0)
-            seam = ImageChops.subtract(hard.filter(ImageFilter.MaxFilter(57)), hard.filter(ImageFilter.MinFilter(57)))
-            painted = self.image_generator.inpaint(
-                painted, seam, request.edit_prompt or request.prompt, negative=request.negative_prompt,
-                strength=0.45, seed=request.seed, task_id=task_id, feather=12, label="Blending the join")
         path = output_dir / "base_image.png"
         painted.save(path)
         for file in staged:
             file.unlink(missing_ok=True)
         return path
 
+    def _keep_head(self, request: GenerationRequest, model_dir: Path) -> list:
+        """An extended body keeps its source character's head layers where they still match."""
+        import re
+        from src.core import heads
+
+        info = request.extension or {}
+        source = str(info.get("source_model") or "")
+        if not re.fullmatch(r"[\w-]+", source) or not (self.output_base_dir / source / "assets").is_dir():
+            return []  # not an extension, the source was deleted, or a crafted project path
+        try:
+            return heads.transfer(self.output_base_dir / source, model_dir, info)
+        except Exception as exc:
+            logger.warning("Could not keep the original head layers, using the new separation: %s", exc)
+            return []
+
+    def _refine(self, request: GenerationRequest, image, staged, output_dir: Path, task_id: Optional[str]) -> Path:
+        """Redraw each box (a hand, the face) in its own tight crop (src/core/refine.py)."""
+        from PIL import Image, ImageDraw
+
+        for i, (x0, y0, x1, y1) in enumerate(request.regions or []):
+            mask = Image.new("L", image.size, 0)
+            ImageDraw.Draw(mask).ellipse((x0, y0, x1, y1), fill=255)
+            image = self.image_generator.inpaint(
+                image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
+                strength=request.strength, seed=None if request.seed is None else request.seed + i,
+                task_id=task_id, context=0.15, feather=10, label=f"Refining {i + 1} of {len(request.regions)}")
+        path = output_dir / "base_image.png"
+        image.save(path)
+        for file in staged:
+            file.unlink(missing_ok=True)
+        return path
+
+    def _review(self, path: Path, info: dict) -> list:
+        """Automatic checks of a drawn full body (src/core/checks.py); [] when they can't run."""
+        from PIL import Image
+        from src.core import checks, outpaint, tagger
+
+        try:
+            with Image.open(path) as img:
+                image = img.convert("RGB")
+            # Never a 378 MB download inside an extension: tag checks only when the tagger is there.
+            tiles = checks.face_tiles(image, info)
+            tagged = None if self.use_dummy_generators else tagger.tag_images([image] + tiles, download=False)
+            tags, tile_tags = (tagged[0], tagged[1:]) if tagged else (None, None)
+            findings = checks.review(image, outpaint.character_mask(image), info, tags, tile_tags)
+        except Exception as exc:
+            logger.warning("Automatic checks failed, continuing without: %s", exc)
+            return []
+        logger.info("Checks for %s: %s", path.parent.name, ", ".join(f["id"] for f in findings) or "all clear")
+        return findings
+
     def _wants_expressions(self, assets) -> bool:
         return (not self.use_dummy_generators and config.EXPRESSIONS
                 and any(a.metadata.get("backend") == "see-through" for a in assets)
                 and any(a.layer_type.startswith(("irides", "mouth")) for a in assets))
 
-    def _paint_expressions(self, request: GenerationRequest, model_dir: Path, task_id: Optional[str]) -> Dict:
-        """Expression layers, or {} when painting fails (the character is complete without)."""
+    def _paint_expressions(self, request: GenerationRequest, model_dir: Path, task_id: Optional[str],
+                           keep: bool = False) -> Dict:
+        """Expression layers, or {} when painting fails (the character is complete without).
+        ``keep``: reuse closed eyes and a mouth already there (carried over with a kept head)."""
         try:
-            self._ensure_generator(request)
-            return expressions.generate(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            made = expressions.read(model_dir) if keep else {}
+            if not (made.get("eye_close") and (made.get("mouth_open") or made.get("mouth_close"))):
+                self._ensure_generator(request)
+                made = expressions.generate(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            # A brief carries its toggles into an extension; ones carried over with the head stay.
+            toggles = [t for t in request.toggles or [] if t not in made.get("toggles", {})]
+            if toggles:
+                if any(expressions.TOGGLES[t].prompt is not None for t in toggles):
+                    self._ensure_generator(request)
+                made = expressions.paint_toggles(self.image_generator, model_dir, toggles,
+                                                 seed=request.seed, task_id=task_id)
+            if request.visemes and not made.get("visemes"):
+                self._ensure_generator(request)
+                made = expressions.paint_visemes(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            return made
         except InterruptedError:
             raise
         except Exception as exc:
             logger.warning("Expression painting failed, continuing without: %s", exc, exc_info=True)
             return {}
 
-    def add_expressions(self, model_id: str, task_id: Optional[str] = None) -> str:
-        """Paint expression layers onto an existing separated character and repackage it."""
+    def add_expressions(self, model_id: str, task_id: Optional[str] = None, toggles=None, visemes=False,
+                        variant=None) -> str:
+        """Paint expression layers (or only the given toggles and/or vowel mouths) onto an
+        existing separated character and repackage it."""
         from src.utils.helpers import load_json
 
         model_dir = self.output_base_dir / model_id
@@ -311,14 +385,38 @@ class AssemblyLine:
         assets = [a for a in model.assets if not a.metadata.get("expression") and Path(a.file_path).exists()]
         if not any(a.metadata.get("backend") == "see-through" for a in assets):
             raise ValueError("Expressions need a character separated by See-through")
-        self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.1)
         request = model.request or GenerationRequest(prompt="")
-        made = self._paint_expressions(request, model_dir, task_id)
-        if not made or not any(k in made for k in ("eye_close", "mouth_open", "mouth_close")):
-            raise RuntimeError("Could not paint expressions for this character (see the log)")
+        if variant:
+            from src.core import variants
+
+            self._enter_stage(task_id, "expressions", "Painting the alternate look...", 0.1)
+            self._ensure_generator(request)
+            made = variants.paint(self.image_generator, model_dir, variant["part"], variant["prompt"],
+                                  seed=request.seed, task_id=task_id, brief=request.prompt)
+        elif toggles or visemes:
+            self._enter_stage(task_id, "expressions", "Painting expression toggles...", 0.1)
+            if visemes or any(expressions.TOGGLES[name].prompt is not None for name in toggles or []):
+                self._ensure_generator(request)  # vector-only emotes need neither weights nor GPU
+            made = expressions.read(model_dir)
+            if toggles:
+                made = expressions.paint_toggles(self.image_generator, model_dir, toggles, seed=request.seed,
+                                                 task_id=task_id)
+            if visemes:
+                made = expressions.paint_visemes(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            missing = [expressions.TOGGLES[t].label for t in toggles or [] if t not in made.get("toggles", {})]
+            missing += ["the vowel mouths"] if visemes and len(made.get("visemes", {})) < len(expressions.VISEMES) else []
+            if missing:
+                raise RuntimeError("Could not find where to paint: " + ", ".join(missing))
+        else:
+            self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.1)
+            made = self._paint_expressions(request, model_dir, task_id)
+            if not made or not any(k in made for k in ("eye_close", "mouth_open", "mouth_close")):
+                raise RuntimeError("Could not paint expressions for this character (see the log)")
         self._enter_stage(task_id, "assemble", "Repackaging PSD + Cubism files...", 0.9)
         assets = assets + expressions.as_assets(model_dir, made, assets)
         final_model_path = self._assemble_model(assets, model_dir, model.name)
+        # A rename can land while painting/repackaging; preserve the latest owner metadata.
+        data = load_json(metadata_path)
         data["assets"] = [{"layer_type": a.layer_type, "file_path": str(a.file_path), "metadata": a.metadata}
                           for a in assets]
         data.setdefault("metadata", {})["expressions"] = made

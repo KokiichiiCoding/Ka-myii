@@ -133,9 +133,45 @@ works best; side and back views decompose poorly.
 
 **Edit a region** under a sketch or result: pick parts and/or paint over an area, describe what
 should be there (*short blue hair*, *red kimono*) or leave it empty to redraw the selection as it
-is, and **Repaint selection**. **Try again** repaints with a new seed. **Extend to full body**
-draws the rest of a character cut off at the bottom; **Complete cut-off edges** only adds room where the
-artwork touches the border. Each edit is a new sketch, so the original stays in the Gallery.
+is, and **Repaint selection**. **Try again** repaints with a new seed. **Complete cut-off edges**
+adds room where artwork touches the border (for example a cropped hat). These edits create a
+new sketch; your original stays in the Gallery.
+
+To add missing arms, legs and outfit, click **Full body ↗** in Live Preview, or **Complete body**
+beside the Studio result. The separate **Complete the body** panel accepts optional outfit details.
+Choose **Full model + Live Preview** to draw, separate and prepare the result in one queued job,
+or **Artwork to review first** for a faster sketch with a **Separate layers** action afterwards.
+**Proportions** offers Balanced, Tall and Compact silhouettes. The head is measured from crown
+to chin, including substantial hair rather than only the visible face. The neck sets the standing
+axis. **Preview the fit before generating** shows the retained artwork, head-size ruler and the
+shoulder/hip/ankle guide. Drag the shoulder, hip or ankle dots to set the stance (each pair
+mirrors, so shoulders and hips stay level); **Reset stance** goes back to the measured one.
+Large hats get more headroom; feet have space below the ankle targets.
+**Preserve the face** retains a coherent head while the neck, collar and outfit are redrawn from
+the jaw down into one body (so no old collar or shading is left floating). The body is sized from
+the face width, as in the checkpoint's own full bodies (a head is about 1.33 face widths), so
+voluminous hair cannot make the face small; a check flags a head that still looks too big or
+too small for the body.
+
+After a full body is drawn, **automatic checks** look for a second face (the tagger, run on
+tiles down the body), shoes or a hat cut off by the border, and an uneven shoulder line (hair
+is ignored), and each finding offers a fix: **Try another seed**, **Make room** or **Repaint
+this area**. When the full body is separated into layers, the original character's eyes,
+eyebrows, nose and mouth layers (separated at its larger size) replace the re-separated ones
+wherever the new picture still shows them, and its painted blink/talk/toggle layers come along.
+
+**Refine hands** / **Refine face** (in Edit a region) redraws each hand, or the face, in its own
+close-up at SDXL's native resolution and pastes it back: a new sketch, about 30 s per part.
+Hands are found from separated layers or a full body's pose guide.
+
+**Align shoulders, hips and legs** uses a local SDXL pose model (first use: ~2.5 GB download).
+It gives the extension a structural guide tied to the retained head, reducing doubled heads and
+misaligned shoulders. FP8 weight storage with FP16 computation, early text-encoder release,
+CPU offload and tiled decoding keep this path suitable for the 8 GB laptop. The original checkpoint
+file is never modified; the models are unloaded afterwards. Turn alignment off for SD 1.5 or
+unguided experiments; dramatic unguided extensions can drift. All extensions create new characters
+and preserve the source. See [quality notes and next steps](docs/OUTPUT_QUALITY.md).
+Demo mode demonstrates the workflow with placeholder artwork; detailed completion needs real mode.
 
 ### Blink and talk
 
@@ -143,6 +179,29 @@ Characters separated by See-through get painted closed eyes and a second mouth s
 the artwork's mouth is closed, and the other way round), about two minutes after the layers.
 Older characters get them with **Add blink & talk** in the Gallery. They drive the Live Preview's
 blink and lip sync and the PNGtuber pack, and are hidden layers in the PSD for Cubism.
+
+**A I U E O mouths** (a toggle chip in the Studio brief, or Paint toggles in Live Preview) are
+five painted vowel shapes, about a minute. With the microphone, the vowel you say picks the
+mouth: linear prediction finds the first two formants of each ~40 ms frame and compares them
+with Japanese vowel formants scaled to your voice's pitch (no training). Auto talk picks vowels
+at random and the camera uses the mouth's width; without them the mouth keeps its painted A.
+
+### Expression toggles
+
+Pick **Expression toggles** in the Studio brief (Blush, Tears, Sweat drop, Anger vein, Heart eyes,
+Star eyes, > < eyes, Spiral eyes, Gloom, Sparkle aura, Question mark, Exclamation, Zzz, Music
+notes, Floating hearts, Tongue out, Cat mouth, Fang) and they are painted in the character's own
+style after its layers, about 15 s each (symbols such as the sweat drop, anger vein, ?, !, Zzz,
+notes and hearts are drawn locally, need no GPU and bob gently with Idle). Mouth emotes stand in
+for the talking mouth while on. For an existing character use **Paint toggles** under Expressions in
+Live Preview. Each appears there as an on/off button (**Shift+1–9** as hotkeys; OBS follows) and
+as a hidden `toggle …` layer in the PSD/ORA. Any PSD layer named `toggle <name>` becomes a toggle.
+
+**Alternate look** (in the same panel) repaints the hair, top, bottom or headwear from a short
+description (*short black bob*, *red hoodie*) and switches like a toggle, hiding the part it
+replaces. It is painted over the character with that part taken away: See-through's other layers
+are complete underneath, so a shoulder under shorter hair is the real layer, and what nothing
+covered is drawn. One alternate per part is shown at a time.
 
 ### Live Preview
 
@@ -153,6 +212,48 @@ ask for permission only when clicked, and all processing stays in the browser (C
 with WebGL recommended; the camera needs `localhost` or HTTPS). **Save adjustments** keeps
 sliders, layers and anchors with the character (they travel with its export zip). Preview
 adjustments affect the browser preview only; they don't rig the Cubism project.
+
+**Body & physics** has Gentle, Lively and Bouncy motion presets, plus a Bounce control.
+**Natural sway** adds slower weight transfers with a pause at each end. **Weight shift** sets
+how far the hips move over planted feet; **Breathing depth** controls a slower inhale/exhale.
+Camera mode follows the tracked head instead of adding the idle weight-transfer loop.
+**Springy nod** adds a quicker head-led dip and rebound, quieter shoulders and a little
+head compression, with **Nod depth** and **Nod speed** controls. Depth 0 disables it; the other
+motion presets also return to the regular idle style. With camera tracking, your own nod drives
+the head rather than a repeating animation. Hair tips lag vertically as well as sideways, with
+the shading beneath the bangs following the same motion.
+Head tilt reaches about 16° (the **Tilt** slider, idle motion, or your own tilt about 1:1 on
+camera). The head rolls on the neck, the neck bends from the jaw down to still shoulders,
+a choker follows the neck, and long hair slides with the head. The **Neck pivot** anchor sets
+where the bend starts; the shirt collar bends with the neck. **Head sway** tilts side to side at
+half the nod speed (combine it with Springy nod for a dance-like bob). **Shoulder shrug** lifts
+the shoulders and arms. **Body motion** adds a visible torso arc and shoulder roll; the body
+follows the head with a short spring delay while the hips and feet stay planted. **Body turn**
+and **Body tilt** also set manual poses. The head, collar, clothing and arms share the torso motion. Hats, bows and
+ribbons trail the head and settle with Physics on (**Accessory sway** sets how much).
+**Toothy smile**, **Surprised** and **Jaw dropped** provide teeth and rounded O shapes on older
+characters too. **Mouth** has Show teeth, Rounded shape, Jaw drop and a gradual blend through
+small speech openings; try **Demo speech** without enabling a device. Choose **Original only**
+under Mouth artwork to use just the character's painted mouths. The extra shapes are preview
+artwork included in PNG snapshots and recordings; artist PSD/ORA/Cubism exports stay unchanged.
+The torso design follows [Live2D's motion guidance](https://docs.live2d.com/en/cubism-editor-tutorials/motion-hint/);
+[implementation notes](docs/MOTION_NOTES.md) describe the approach and limits.
+
+**Nekomimi & tail** fits optional animated cat ears and a swishing cat tail to existing models.
+Choose a hair-matched or preset fur colour, adjust the ear spacing/height and tail position/size,
+and choose either tail side. **Idle motion** adds ear twitches and swishing; **Physics** adds
+follow-through on turns. Save adjustments to keep the fit. These additions appear in preview
+PNG snapshots and recordings, with transparent padding where needed. They are preview artwork;
+the original layered PSD, ORA, PNGtuber pack and Cubism package keep the character's original parts.
+Separately named `cat ears` / `nekomimi` PSD layers also get ear motion; ordinary human `ears`
+stay rigid.
+
+
+**Paint toggles** can also add **Gloom** and **Sparkle aura**. These original manga overlays,
+like Sweat drop and Anger vein, are drawn locally without diffusion. Sparkles gently float and
+pulse with Idle. Heart, Star and Spiral eyes follow each eyelid independently during a blink;
+> < eyes replace the ordinary eye states. Eye designs are mutually exclusive while cheek and
+symbol emotes can combine. Toggles save with the character and export as hidden artist layers.
 
 ### Finishing in Live2D Cubism
 
@@ -185,9 +286,14 @@ trigger `kmyvt`. Add your own art with `--extra <folder>` (only art you may trai
 python scripts/build_lora_dataset.py --out datasets/vtmodel --count 320   # ~4-5 h on an 8 GB laptop GPU
 ```
 
-Train it with any SDXL LoRA trainer that reads image + same-name `.txt` pairs (the zip in
-`datasets/`), put the `.safetensors` in `models/loras/`, pick it in the Studio and start prompts
-with `kmyvt`.
+Train it with `scripts/train_lora.py` (SDXL LoRA, fits 8 GB; prints a progress bar and a summary
+per epoch, logs `training_log.csv`, `--resume` after an interruption, installs the result in
+`models/loras/`), or any SDXL LoRA trainer that reads image + same-name `.txt` pairs (the zip in
+`datasets/`). Pick the LoRA in the Studio and start prompts with `kmyvt`.
+
+```bash
+python scripts/train_lora.py --dataset datasets/vtmodel.zip --epochs 12
+```
 
 ## How decomposition works
 
@@ -328,3 +434,9 @@ Generated images are subject to the license of the checkpoint you use.
 ## License
 
 MIT; see [LICENSE](LICENSE). Third-party components keep their own licenses (above).
+
+Pose-guided extension uses [xinsir/controlnet-openpose-sdxl-1.0](https://huggingface.co/xinsir/controlnet-openpose-sdxl-1.0),
+Apache-2.0, pinned to `23f966cd5cfdd3f7729c903e243d87152162d2b7`.
+Weights are downloaded to the Hugging Face cache, not bundled or committed. Pose-guide artwork
+and manga overlays are generated by Ka-myii's own code. Live2D/creator reference videos are used
+for study only; their artwork and animation files are not redistributed.

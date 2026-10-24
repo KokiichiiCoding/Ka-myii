@@ -27,15 +27,16 @@ logger = logging.getLogger(__name__)
 STAGES = {
     "image": (0.0, 0.12, "Painting the character…"),
     "separate": (0.12, 0.86, "Separating layers…"),
-    "expressions": (0.86, 0.97, "Painting closed eyes and mouth…"),
+    "expressions": (0.86, 0.97, "Painting expressions…"),
     "assemble": (0.97, 1.0, "Packaging PSD + Cubism files…"),
 }
 # Jobs that only run some stages spread the bar over those.
 STAGES_BY_OPERATION = {
-    "expressions": {"expressions": (0.0, 0.9, "Painting closed eyes and mouth…"),
+    "expressions": {"expressions": (0.0, 0.9, "Painting expressions…"),
                     "assemble": (0.9, 1.0, "Packaging PSD + Cubism files…")},
     "edit": {"image": (0.0, 1.0, "Repainting the selection…")},
     "extend": {"image": (0.0, 1.0, "Extending the canvas…")},
+    "refine": {"image": (0.0, 1.0, "Refining details…")},
 }
 KEEP_FINISHED = 20
 ACTIVE = ("queued", "running")

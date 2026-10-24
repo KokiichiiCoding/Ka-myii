@@ -118,7 +118,7 @@
     return {
       ax: clamp(-(m.yaw - n.yaw) * 3.2 * g('headGain'), -1, 1),
       ay: clamp(-(m.pitch - n.pitch) * 3.0 * g('headGain'), -1, 1),
-      az: clamp(-(m.roll - n.roll) * 1.4 * g('headGain'), -1, 1),
+      az: clamp(-(m.roll - n.roll) * 3.6 * g('headGain'), -1, 1),   // ≈1:1 with the rig's 16° roll
       eL: eL, eR: eR,
       mo: clamp((m.mouthOpen - n.mouthOpen - 0.02) / (0.30 / g('mouthGain')), 0, 1),
       ex: m.hasIris ? clamp(-(m.gazeX - n.gazeX) * 5 * g('gazeGain'), -1, 1) : 0,

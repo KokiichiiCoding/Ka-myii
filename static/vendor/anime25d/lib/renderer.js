@@ -8,12 +8,15 @@
  */
 (function(root){
 'use strict';
-const VS='attribute vec2 aPos;attribute vec2 aUV;uniform vec2 uRes;varying vec2 vUV;'+
-  'void main(){vUV=aUV;vec2 c=aPos/uRes*2.0-1.0;gl_Position=vec4(c.x,-c.y,0.0,1.0);}';
+const VS='attribute vec2 aPos;attribute vec2 aUV;attribute vec2 aFlow;uniform vec2 uRes;uniform vec2 uOffset;varying vec2 vUV;varying vec2 vFlow;'+
+  'void main(){vUV=aUV;vFlow=aFlow;vec2 c=(aPos+uOffset)/uRes*2.0-1.0;gl_Position=vec4(c.x,-c.y,0.0,1.0);}';
 const FS='#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n'+
-  'varying vec2 vUV;uniform sampler2D uTex;uniform sampler2D uMask;uniform vec2 uRes;uniform float uAlpha;'+
+  'varying vec2 vUV;varying vec2 vFlow;uniform sampler2D uTex;uniform sampler2D uMask;uniform vec2 uRes;uniform float uAlpha;'+
   'uniform vec2 uMaskCh;uniform float uUseMask;uniform float uMaskOut;'+
   'void main(){vec4 c=texture2D(uTex,vUV);'+
+  // Shift painted shading within the skin; keep its silhouette/alpha in place.
+  'if(dot(vFlow,vFlow)>0.00000001){vec4 moved=texture2D(uTex,clamp(vUV-vFlow,0.0,1.0));'+
+  'if(moved.a>0.8)c.rgb=moved.rgb*(c.a/moved.a);}'+
   'if(uMaskOut>0.5){gl_FragColor=vec4(c.a);return;}'+
   'float m=1.0;if(uUseMask>0.5){m=dot(texture2D(uMask,gl_FragCoord.xy/uRes).rg,uMaskCh);}'+
   'gl_FragColor=c*(uAlpha*m);}';
@@ -32,9 +35,9 @@ function createRenderer(gl){
     for(const s of gl.getAttachedShaders(prog)){gl.detachShader(prog,s);gl.deleteShader(s);}
     if(!gl.getProgramParameter(prog,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(prog));
     gl.useProgram(prog);
-    loc={pos:gl.getAttribLocation(prog,'aPos'),uv:gl.getAttribLocation(prog,'aUV')};
-    for(const u of ['uRes','uAlpha','uTex','uMask','uMaskCh','uUseMask','uMaskOut'])loc[u]=gl.getUniformLocation(prog,u);
-    gl.enableVertexAttribArray(loc.pos);gl.enableVertexAttribArray(loc.uv);
+    loc={pos:gl.getAttribLocation(prog,'aPos'),uv:gl.getAttribLocation(prog,'aUV'),flow:gl.getAttribLocation(prog,'aFlow')};
+    for(const u of ['uRes','uOffset','uAlpha','uTex','uMask','uMaskCh','uUseMask','uMaskOut'])loc[u]=gl.getUniformLocation(prog,u);
+    gl.enableVertexAttribArray(loc.pos);gl.enableVertexAttribArray(loc.uv);gl.enableVertexAttribArray(loc.flow);
     gl.uniform1i(loc.uTex,0);gl.uniform1i(loc.uMask,1);
     gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
@@ -63,23 +66,26 @@ function createRenderer(gl){
   }
   // Upload one mesh + texture. `mesh` = {positions, uvs, indices, image}.
   function upload(L,mesh){
-    L.vboPos=gl.createBuffer();L.vboUV=gl.createBuffer();L.ibo=gl.createBuffer();
+    L.vboPos=gl.createBuffer();L.vboUV=gl.createBuffer();L.vboFlow=gl.createBuffer();L.ibo=gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER,L.vboPos);gl.bufferData(gl.ARRAY_BUFFER,mesh.positions,gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER,L.vboUV);gl.bufferData(gl.ARRAY_BUFFER,mesh.uvs,gl.STATIC_DRAW);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,L.ibo);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,mesh.indices,gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER,L.vboFlow);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.uvs.length),gl.DYNAMIC_DRAW);
     L.nIdx=mesh.indices.length;
     gl.activeTexture(gl.TEXTURE0);L.tex=texture(mesh.image);
-    if(!L.vboPos||!L.vboUV||!L.ibo||!L.tex||gl.getError()!==gl.NO_ERROR)throw new Error('Not enough graphics memory. Use a smaller PSD');
+    if(!L.vboPos||!L.vboUV||!L.vboFlow||!L.ibo||!L.tex||gl.getError()!==gl.NO_ERROR)throw new Error('Not enough graphics memory. Use a smaller PSD');
   }
   function dispose(L){
     if(L.tex)gl.deleteTexture(L.tex);if(L.vboPos)gl.deleteBuffer(L.vboPos);
-    if(L.vboUV)gl.deleteBuffer(L.vboUV);if(L.ibo)gl.deleteBuffer(L.ibo);
-    L.tex=L.vboPos=L.vboUV=L.ibo=null;
+    if(L.vboUV)gl.deleteBuffer(L.vboUV);if(L.ibo)gl.deleteBuffer(L.ibo);if(L.vboFlow)gl.deleteBuffer(L.vboFlow);
+    L.tex=L.vboPos=L.vboUV=L.vboFlow=L.ibo=null;
   }
   function positions(L,data){gl.bindBuffer(gl.ARRAY_BUFFER,L.vboPos);gl.bufferSubData(gl.ARRAY_BUFFER,0,data);}
+  function flow(L,data){gl.bindBuffer(gl.ARRAY_BUFFER,L.vboFlow);gl.bufferSubData(gl.ARRAY_BUFFER,0,data);}
   function bind(L){
     gl.bindBuffer(gl.ARRAY_BUFFER,L.vboPos);gl.vertexAttribPointer(loc.pos,2,gl.FLOAT,false,0,0);
     gl.bindBuffer(gl.ARRAY_BUFFER,L.vboUV);gl.vertexAttribPointer(loc.uv,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,L.vboFlow);gl.vertexAttribPointer(loc.flow,2,gl.FLOAT,false,0,0);
     gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,L.tex);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,L.ibo);
   }
@@ -89,7 +95,7 @@ function createRenderer(gl){
    */
   function draw(frame){
     const W=frame.width,H=frame.height;
-    gl.useProgram(prog);gl.uniform2f(loc.uRes,W,H);gl.uniform1f(loc.uUseMask,0);
+    gl.useProgram(prog);gl.uniform2f(loc.uRes,W,H);gl.uniform2f(loc.uOffset,frame.offsetX||0,frame.offsetY||0);gl.uniform1f(loc.uUseMask,0);
     const hasMask={L:false,R:false};
     if(frame.masks.length&&frame.items.some(i=>i.clip)){
       ensureMask(W,H);
@@ -120,7 +126,7 @@ function createRenderer(gl){
     gl.uniform1f(loc.uUseMask,0);
   }
   init();
-  return {init,upload,dispose,positions,draw,texture};
+  return {init,upload,dispose,positions,flow,draw,texture};
 }
 root.RigRenderer={create:createRenderer};
 })(typeof self!=='undefined'?self:this);

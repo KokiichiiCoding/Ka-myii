@@ -152,6 +152,16 @@ def test_long_prompts_are_chunked_at_commas_not_truncated():
     assert chunk_token_ids([], COMMA) == [[]]
 
 
+def test_graded_inpaint_redraws_each_pixel_for_its_share_of_the_steps():
+    import numpy as np
+    from src.core.image_generator import free_during
+
+    change = np.array([0.0, 0.25, 0.5, 1.0])
+    redrawn = sum(free_during(change, step, 20).astype(int) for step in range(20))
+    assert list(redrawn) == [0, 5, 10, 20]                 # 0.5 ≈ the last half of the steps
+    assert list(free_during(change, 99, 20)) == [False, True, True, True]  # kept pixels stay kept
+
+
 def test_seethrough_order_priors_keep_real_parts_and_leftovers(workdir, monkeypatch):
     """Real run regressions: See-through stacked an iris under its eye white (the colour check then
     deleted the eye white), emitted few-pixel accessory specks and assigned cat ears to no layer."""

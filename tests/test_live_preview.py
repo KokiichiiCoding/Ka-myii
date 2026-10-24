@@ -183,3 +183,111 @@ def test_visible_source_colours_are_retained_but_hidden_inpainting_is_preserved(
     assert neck.getpixel((20, 20)) == (200, 160, 120, 255)
     assert neck.getpixel((40, 40)) == (180, 140, 100, 255)
     assert face.getpixel((40, 40)) == (220, 170, 130, 255)
+
+
+def test_preview_skin_removes_hidden_ghosts_without_changing_rest_art(tmp_path):
+    from src.core.live_preview import _clean_hidden_skin
+    skin = Image.new("RGBA", (100, 120), (240, 200, 180, 255))
+    skin.paste((80, 70, 60, 255), (40, 20, 60, 55))  # faint duplicate bangs baked into skin
+    hair = Image.new("RGBA", skin.size)
+    hair.paste((30, 20, 40, 255), (35, 10, 65, 60))
+    before = Image.alpha_composite(skin, hair)
+    cleaned = _clean_hidden_skin([("face", skin), ("front hair", hair)])
+    assert np.all(np.asarray(cleaned[0][1])[..., :3] == (240, 200, 180)), "No quantized rings in interpolated constant skin"
+    assert np.array_equal(np.asarray(Image.alpha_composite(cleaned[0][1], hair)), np.asarray(before))
+    assert np.array_equal(np.asarray(cleaned[0][1])[..., 3], np.asarray(skin)[..., 3])
+    assert skin.getpixel((50, 35))[:3] == (80, 70, 60), "The artist layer must not be edited"
+    # A translucent strand cannot safely cover a skin edit at rest.
+    hair.putalpha(200)
+    assert np.array_equal(np.asarray(_clean_hidden_skin([("face", skin), ("front hair", hair)])[0][1]), np.asarray(skin))
+
+
+def test_preview_heals_faint_ink_at_translucent_facial_edges_only():
+    from src.core.live_preview import _clean_hidden_skin
+    face = Image.new("RGBA", (100, 120), (240, 200, 180, 255))
+    face.paste((100, 80, 75, 255), (40, 29, 60, 34))  # copied brow, including a faint fringe
+    brow = Image.new("RGBA", face.size)
+    brow.paste((40, 20, 20, 190), (40, 30, 60, 32))  # no fully opaque pixels
+    repaired = _clean_hidden_skin([("face", face), ("eyebrow", brow)])[0][1]
+    assert max(abs(a-b) for a,b in zip(repaired.getpixel((50, 30)), (240, 200, 180, 255))) <= 2
+    assert repaired.getpixel((10, 70)) == face.getpixel((10, 70)), "Keep unrelated face painting"
+    assert np.array_equal(np.asarray(repaired)[..., 3], np.asarray(face)[..., 3])
+    assert face.getpixel((50, 30)) == (100, 80, 75, 255), "Leave the artist face layer untouched"
+
+
+def test_preview_heals_ghosts_between_eye_parts():
+    from src.core.live_preview import _clean_hidden_skin
+    face = Image.new("RGBA", (100, 120), (240, 200, 180, 255))
+    face.paste((80, 60, 50, 255), (25, 32, 40, 34))
+    white = Image.new("RGBA", face.size)
+    white.paste("white", (24, 36, 42, 46))
+    repaired = _clean_hidden_skin([("face", face), ("eyewhite", white)])[0][1]
+    assert repaired.getpixel((32, 33)) == (240, 200, 180, 255), "Clear the socket, including a gap outside the white"
+    assert np.array_equal(np.asarray(repaired)[..., 3], np.asarray(face)[..., 3])
+
+
+def test_preview_fills_ink_shaped_eye_holes_without_growing_face_outline():
+    from src.core.live_preview import _clean_hidden_skin
+    face = Image.new("RGBA", (100, 120))
+    face.paste((240, 200, 180, 255), (10, 10, 90, 110))
+    face.paste((0, 0, 0, 0), (25, 32, 40, 34))  # transparent original eyelid stroke
+    white = Image.new("RGBA", face.size)
+    white.paste("white", (24, 36, 42, 46))
+    healed = _clean_hidden_skin([("face", face), ("eyewhite", white)])[0][1]
+    assert healed.getpixel((32, 33)) == (240, 200, 180, 255), "Do not expose dark back hair through an old eyelid hole"
+    assert healed.getpixel((0, 0))[3] == healed.getpixel((95, 50))[3] == 0
+    assert face.getpixel((32, 33))[3] == 0, "Only the preview cache is repaired"
+
+
+def test_preview_reveals_the_neck_not_a_painted_copy_when_a_choker_moves():
+    from src.core.live_preview import _clean_hidden_skin
+    neck = Image.new("RGBA", (100, 120))
+    neck.paste((240, 200, 180, 255), (30, 0, 70, 100))   # pivot row: 0 + .85 * 99 = 84
+    neck.paste((20, 20, 20, 255), (35, 40, 65, 46))      # the separator's copy of the band
+    shirt = Image.new("RGBA", neck.size)
+    shirt.paste((170, 170, 190, 255), (35, 40, 65, 46))  # grey copy of the band in the clothing
+    shirt.paste((235, 235, 240, 255), (0, 80, 100, 120))  # the real shirt, partly below the pivot
+    choker = Image.new("RGBA", neck.size)
+    choker.paste((10, 10, 10, 255), (35, 40, 65, 46))
+    choker.paste((50, 110, 210, 255), (45, 82, 55, 88))  # pendant straddling the pivot row
+    items = [("neck", neck), ("topwear", shirt), ("neckwear", choker)]
+    rest = lambda layers: np.asarray(Image.alpha_composite(Image.alpha_composite(layers[0][1], layers[1][1]), layers[2][1]))
+    healed = _clean_hidden_skin(items)
+    assert np.array_equal(rest(healed), rest(items)), "Under an opaque choker the rest pose is unchanged"
+    assert healed[1][1].getpixel((50, 43))[3] == 0, "No grey band where the choker was"
+    assert healed[0][1].getpixel((50, 43)) == (240, 200, 180, 255), "Neck skin, not a copied band"
+    assert healed[1][1].getpixel((50, 83))[3] == 0 and healed[1][1].getpixel((50, 86))[3] == 255, "Below the pivot nothing moves"
+    assert healed[1][1].getpixel((10, 90)) == (235, 235, 240, 255), "The shirt elsewhere is kept"
+    assert shirt.getpixel((50, 43))[3] == 255, "Only the preview cache is repaired"
+    # Clothing drawn above the neckwear (a collar over a tie) is left alone.
+    assert _clean_hidden_skin([("neck", neck), ("neckwear", choker), ("topwear", shirt)])[2][1] is shirt
+
+
+def test_preview_cloth_under_hair_loses_painted_strand_copies():
+    from src.core.live_preview import _clean_hidden_skin
+    shirt = Image.new("RGBA", (100, 100), (235, 235, 240, 255))
+    shirt.paste((60, 60, 70, 255), (40, 20, 44, 80))      # the separator's copy of a strand
+    shirt.paste((0, 0, 0, 0), (60, 10, 61, 80))           # the hair's outline cut out of the shirt
+    hair = Image.new("RGBA", shirt.size)
+    hair.paste((200, 200, 220, 255), (30, 0, 60, 90))      # the hair hanging over it
+    healed = _clean_hidden_skin([("topwear", shirt), ("front hair", hair)])
+    rest = lambda layers: np.asarray(Image.alpha_composite(layers[0][1], layers[1][1]))
+    assert np.array_equal(rest(healed)[:, :60], rest([("topwear", shirt), ("front hair", hair)])[:, :60]), "The rest pose is unchanged"
+    assert healed[0][1].getpixel((42, 50)) == (235, 235, 240, 255), "A shrug reveals cloth, not a strand"
+    assert healed[0][1].getpixel((60, 50)) == (235, 235, 240, 255), "or a crack where the hair's outline was"
+    assert healed[0][1].getpixel((90, 50)) == (235, 235, 240, 255), "Cloth away from the hair is kept"
+    assert shirt.getpixel((42, 50)) == (60, 60, 70, 255), "Only the preview cache is repaired"
+
+
+def test_preview_heals_mouth_holes_and_fringe_for_narrow_expression_shapes():
+    from src.core.live_preview import _clean_hidden_skin
+    face = Image.new("RGBA", (100, 120))
+    face.paste((240, 200, 180, 255), (10, 10, 90, 110))
+    face.paste((0, 0, 0, 0), (35, 72, 65, 77))
+    mouth = Image.new("RGBA", face.size)
+    mouth.paste((80, 30, 40, 190), (34, 71, 66, 78))
+    repaired = _clean_hidden_skin([("face", face), ("mouth_open", mouth)])[0][1]
+    assert repaired.getpixel((50, 74)) == (240, 200, 180, 255)
+    assert repaired.getpixel((0, 0))[3] == 0
+    assert repaired.getpixel((20, 50)) == face.getpixel((20, 50))
+    assert face.getpixel((50, 74))[3] == 0, "The artist layer is unchanged"

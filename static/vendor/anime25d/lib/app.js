@@ -43,8 +43,11 @@ const EXPORT_BG={transparent:[0,0,0,0],green:[0,177/255,64/255,1],dark:[20/255,2
 // ---------- model state (rebuilt per PSD) ----------
 let modelId='',modelName='',kamyiiModel=false,currentRig=null,background='checker',paused=false,contextLost=false,lastFrame=null,capturePending=false,dirty=true;
 let layers=[],A=null,baseAnchors=null,anchorOffsets={},CW=768,CH=768,FS=1,NP=null,BP=null,FC=null,CHEST=null,hasEyeClose2=false;
-let lastPsd=null,lastPre=null,anchorMode=false,anchorPreview=null,highlightLayer=null;
+let renderBox={left:0,top:0,w:768,h:768,key:''};
+let lastPsd=null,lastPre=null,anchorMode=false,anchorPreview=null,highlightLayer=null,blinkEditor=false,blinkView='both',rigSimpleBlink=false;
 const bounce={x:0,v:0,dy:0};
+const motion={x:{x:0,v:0},y:{x:0,v:0},earL:{x:0,v:0},earR:{x:0,v:0},tail:{x:0,v:0},hatX:{x:0,v:0},hatY:{x:0,v:0},torsoYaw:{x:0,v:0},torsoRoll:{x:0,v:0},torsoLift:{x:0,v:0},torsoShift:{x:0,v:0},nodTime:0,palette:-1};
+const Motion=window.RigMotion;
 function invalidate(){dirty=true;}
 
 function makeThumb(img){
@@ -61,13 +64,13 @@ function prepareLayers(rig){
   const maxTexture=gl.getParameter(gl.MAX_TEXTURE_SIZE),maxViewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS);
   if(rig.canvas.w>maxViewport[0]||rig.canvas.h>maxViewport[1]||rig.canvas.w>maxTexture||rig.canvas.h>maxTexture)throw new Error('The canvas is larger than this device can draw ('+Math.min(maxViewport[0],maxTexture)+' px). Use a smaller PSD');
   try{
-    for(const Lr of rig.layers){
+    for(const Lr of [...Motion.parts(rig),...rig.layers].sort((a,b)=>a.z-b.z)){
       if(Lr.w>maxTexture||Lr.h>maxTexture)throw new Error('An image part is larger than this device\'s limit of '+maxTexture+' px');
-      const L=Object.assign({visible:true,opacity:1},Lr,{id:String(Lr.z)+':'+Lr.name});
+      const L=Object.assign({visible:Lr.fade!=='toggle',opacity:1},Lr,{id:String(Lr.z)+':'+Lr.name});
       delete L.img;
       L.defaultDepth=L.depth;L.defaultOpacity=L.opacity;
       prepared.push(L);
-      const cell=(L.phys?30:42)*Math.max(0.6,W/768);
+      const cell=(L.companion?10:L.name==='face'||L.fade==='eyeClose'||L.fade==='eyeClose2'||L.fade==='toggle'?8:L.phys||L.group==='body'?24:42)*Math.max(0.6,W/768);   // the collar and shoulders bend body layers
       const {nx,ny}=RT.meshSize(L.w,L.h,cell),nv=(nx+1)*(ny+1);
       const base=new Float32Array(nv*2),uv=new Float32Array(nv*2);
       let k=0;
@@ -75,14 +78,14 @@ function prepareLayers(rig){
       const idx=new Uint16Array(nx*ny*6);let q=0;
       for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const a=j*(nx+1)+i,b=a+1,c=a+nx+1,d=c+1;idx[q++]=a;idx[q++]=b;idx[q++]=c;idx[q++]=b;idx[q++]=d;idx[q++]=c;}
       L.base=base;L.cur=new Float32Array(base);
-      L.bn=Rigger.baseName(L.name.replace(/_(l|r)$/,''));
+      L.bn=L.expression?'mouth_open':Rigger.baseName(L.name.replace(/_(l|r)$/, ''));
       if(L.strands&&L.strands.length){
         const S=L.strands,nS=S.length;
         let spacing=120;
         if(nS>1){const ds=[];for(let s=1;s<nS;s++)ds.push(S[s].x-S[s-1].x);ds.sort((a,b)=>a-b);spacing=ds[ds.length>>1];}
         const sig=Math.max(1,spacing*0.6);
         L.sw=new Float32Array(nv*nS);L.su=new Float32Array(nv);
-        L.spr=S.map((s,i)=>({stiff:{x:0,v:0,dx:0},soft:{x:0,v:0,dx:0},phase:i*1.37+L.z}));
+        L.spr=S.map((s,i)=>({stiff:{x:0,v:0,dx:0},soft:{x:0,v:0,dx:0},liftStiff:{x:0,v:0,dx:0},liftSoft:{x:0,v:0,dx:0},phase:i*1.37+L.z}));
         for(let v=0;v<nv;v++){
           const x=base[v*2],y=base[v*2+1];let tot=0;
           for(let s=0;s<nS;s++){const w=Math.exp(-Math.pow((x-S[s].x)/sig,2));L.sw[v*nS+s]=w;tot+=w;}
@@ -92,12 +95,88 @@ function prepareLayers(rig){
           L.su[v]=clamp((y-rY)/Math.max(1,tY-rY),0,1);
         }
       }
+      if(L.spr)L.liftSpr=L.spr.map(sp=>({stiff:sp.liftStiff,soft:sp.liftSoft}));
+      if(L.su)L.bindings=Array.from(L.su,(u,i)=>({u,weights:L.sw.subarray(i*L.strands.length,(i+1)*L.strands.length)}));
+      if(L.group!=='body'&&!L.companion)L.outline=Motion.rowExtents(Lr.img,L.x,L.y,32);
       const image=(typeof ImageData!=='undefined')?new ImageData(Lr.img.data,Lr.img.width,Lr.img.height):Lr.img;
       L.thumb=makeThumb(image);
       renderer.upload(L,{positions:L.cur,uvs:uv,indices:idx,image});
     }
+    bindHairShading(prepared,rig);
     return prepared;
   }catch(err){prepared.forEach(renderer.dispose);throw err;}
+}
+// Skin shading near bangs is painted into the face by decomposition. Advect its
+// texture with the same strand field as the hair, keeping facial ink and alpha fixed.
+function bindHairShading(prepared,rig){
+  const hairs=prepared.filter(L=>L.bn==='front hair'&&L.strands?.length);
+  const fs=rig.anchors.faceScale,radius=Math.max(8,24*fs);
+  function alpha(img,L,x,y){x=Math.round(x-L.x);y=Math.round(y-L.y);return x>=0&&y>=0&&x<img.width&&y<img.height?img.data[(y*img.width+x)*4+3]/255:0;}
+  function outsideBox(x,y,b,pad){
+    const dx=Math.max(b.x0-x,x-b.x1,0),dy=Math.max(b.y0-y,y-b.y1,0);
+    return smooth(Math.hypot(dx,dy)/pad);
+  }
+  for(const skin of prepared.filter(L=>L.bn==='face'||L.fade==='eyeClose'||L.fade==='eyeClose2')){
+    const src=rig.layers.find(L=>L.z===skin.z),bindings=[];
+    skin.flow=new Float32Array(skin.base.length);
+    for(let k=0;k<skin.base.length;k+=2){
+      const x=skin.base[k],y=skin.base[k+1];let protection=1,best=null;
+      // Do not transport the eye sockets, brows, nose or outline with the hair.
+      for(const side of ['L','R']){
+        const eye=rig.anchors['eye'+side];if(!eye)continue;
+        const closed=skin.fade==='eyeClose'||skin.fade==='eyeClose2';
+        protection*=outsideBox(x,y,{x0:eye.x0-4*fs,x1:eye.x1+4*fs,y0:closed?eye.closeY-3*fs:eye.y0-6*fs,y1:closed?eye.closeY+3*fs:eye.y1+4*fs},8*fs);
+      }
+      for(const part of rig.layers){const bn=Rigger.baseName(part.name.replace(/_(l|r)$/,''));
+        if(bn==='eyebrow'||bn==='nose'||bn==='mouth_open'||bn==='mouth_close')protection*=outsideBox(x,y,{x0:part.x,x1:part.x+part.w,y0:part.y,y1:part.y+part.h},6*fs);
+      }
+      if(protection<.001||alpha(src.img,src,x,y)<.98)continue;
+      // A zero-flow rim protects the cutout edge even under large movement.
+      let rim=1;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]])rim=Math.min(rim,alpha(src.img,src,x+dx*radius*.65,y+dy*radius*.65));
+      if(rim<.98)continue;
+      for(const hair of hairs){
+        const art=rig.layers.find(L=>L.z===hair.z);let coverage=0;
+        for(let dy=-radius;dy<=radius;dy+=radius/3)for(let dx=-radius;dx<=radius;dx+=radius/3){
+          const weight=Math.max(0,1-Math.hypot(dx,dy)/radius);
+          coverage=Math.max(coverage,alpha(art.img,art,x+dx,y+dy)*weight);
+        }
+        const weight=smooth(coverage)*protection;
+        if(weight>.001&&(!best||weight>best.weight))best={k,hair,weight,x,y,binding:RT.strandBinding(hair.strands,x,y)};
+      }
+      if(best)bindings.push(best);
+    }
+    skin.shadingBindings=bindings;
+  }
+}
+function hairShift(L,binding,e){
+  const front=!!FRONTISH[L.bn],accessory=L.phys==='sway';
+  const dx=auto.phys?RT.strandShift(binding,L.spr,accessory?e.accAmp*1.4:front?e.fhAmp:e.physAmp,accessory?.8:front?e.fhSoft:e.soft,front,front?(18+4*e.motionBounce)*FS:60*FS,accessory?1.2:undefined):0;
+  return dx;
+}
+function hairLift(L,binding,e){
+  if(!auto.phys||!L.liftSpr)return 0;
+  const front=!!FRONTISH[L.bn],accessory=L.phys==='sway';
+  return RT.strandShift(binding,L.liftSpr,accessory?e.accAmp*.6:front?e.fhAmp:e.physAmp,
+    accessory?.7:front?e.fhSoft:e.soft,front,(front?8:26)*FS,accessory?1.2:undefined);
+}
+function bangShift(L,x,u,e){
+  if(L.bn!=='front hair')return 0;
+  const fw=A.face.x1-A.face.x0,fc=A.face.cx,f=36,s1=smooth((x-(fc-fw*.22))/f+.5),s2=smooth((x-(fc+fw*.22))/f+.5);
+  return (e.bangL*(1-s1)+e.bangC*s1*(1-s2)+e.bangR*s2)*Math.pow(u,1.4)*22*FS;
+}
+function moveHairShading(L,e){
+  if(!L.flow)return;
+  L.flow.fill(0);
+  for(const b of L.shadingBindings){
+    if(!b.hair.visible||b.hair.opacity<.01)continue;
+    const dx=hairShift(b.hair,b.binding,e)+bangShift(b.hair,b.x,b.binding.u,e);
+    // The hair's additional parallax also moves its painted shadow across skin.
+    const dd=b.hair.depth-L.depth,scale=b.weight*b.hair.opacity*e.shadowFollow;
+    L.flow[b.k]=(dx+FS*e.angleX*40*dd)*scale/L.w;
+    L.flow[b.k+1]=(hairLift(b.hair,b.binding,e)+Math.abs(dx)*.12-FS*e.angleY*dd*(30+(b.y-FC.y)*.05))*scale/L.h;
+  }
+  renderer.flow(L,L.flow);
 }
 // Front-hair block weights depend on the face anchor, so they follow anchor edits.
 function buildBangWeights(L){
@@ -110,7 +189,7 @@ function applyAnchors(){
   if(!baseAnchors)return;
   const a=JSON.parse(JSON.stringify(baseAnchors)),o=anchorOffsets,off=k=>o[k]||{};
   a.face.cx+=off('face').dx||0;a.face.cy+=off('face').dy||0;
-  for(const s of ['L','R']){const e=a['eye'+s];if(!e)continue;e.icx+=off('eye'+s).dx||0;e.icy+=off('eye'+s).dy||0;e.closeY+=off('eye'+s+'Close').dy||0;}
+  for(const s of ['L','R']){const e=a['eye'+s];if(!e)continue;e.icx+=off('eye'+s).dx||0;e.icy+=off('eye'+s).dy||0;e.closeY+=off('eye'+s+'Close').dy||0;e.closeX=(e.x0+e.x1)/2+(off('eye'+s+'Close').dx||0);}
   const m=off('mouth');for(const k of ['cx','x0','x1'])a.mouth[k]+=m.dx||0;for(const k of ['cy','y0','y1'])a.mouth[k]+=m.dy||0;
   a.neckPivot.cx+=off('neck').dx||0;a.neckPivot.cy+=off('neck').dy||0;
   A=a;FS=A.faceScale;NP=A.neckPivot;BP=A.bodyPivot;FC={x:A.face.cx,y:A.face.cy};
@@ -119,17 +198,20 @@ function applyAnchors(){
   for(const L of layers)buildBangWeights(L);
   const n=Object.keys(anchorOffsets).length;
   $('anchorSummary').textContent=n?n+' manually adjusted anchors':'Using automatic anchor positions';
-  renderOverlay();invalidate();
+  syncBlinkEditor();renderOverlay();invalidate();
 }
 function applyRig(rig){
   if(contextLost)throw new Error('Wait for the renderer to recover, then load again');
+  blinkEditor=false;anchorMode=false;anchorPreview=null;
   const prepared=prepareLayers(rig);
   layers.forEach(renderer.dispose);layers=prepared;currentRig=rig;
-  CW=rig.canvas.w;CH=rig.canvas.h;
+  CW=rig.canvas.w;CH=rig.canvas.h;renderBox={left:0,top:0,w:CW,h:CH,key:''};
   baseAnchors=JSON.parse(JSON.stringify(rig.anchors));anchorOffsets={};
   applyAnchors();
-  Object.assign(bounce,{x:0,v:0,dy:0});lastFrame=null;blinkT=-1;blinkVariant=1;irisBounceT=-1;
+  Object.assign(bounce,{x:0,v:0,dy:0});
+  for(const k of ['x','y','earL','earR','tail','hatX','hatY','torsoYaw','torsoRoll','torsoLift','torsoShift'])Object.assign(motion[k],{x:0,v:0});motion.palette=-1;motion.nodTime=0;lastFrame=null;blinkT=-1;blinkVariant=1;irisBounceT=-1;
   hasEyeClose2=layers.some(L=>L.bn==='eye_close2');maskFailed=false;
+  visemeOrder=layers.filter(L=>L.fade==='viseme').sort((a,b)=>a.z-b.z).map(L=>L.bn.slice(6));visemeSet=new Set(visemeOrder);visemes=oneVowel('a');visemeTarget=oneVowel('a');
   cv.width=CW;cv.height=CH;
   $('overlay').setAttribute('viewBox','0 0 '+CW+' '+CH);
   resetView();fit();
@@ -196,7 +278,7 @@ async function loadModel(source,name,opts={}){
     const parsed=await parseModel(buf,genericOpts().generic,ticket);
     if(ticket!==loadTicket)return;
     setAnchorMode(false);
-    applyRig(parsed.rig);
+    applyRig(parsed.rig);rigSimpleBlink=false;setSlider('simpleBlink',0);
     modelId=parsed.id||'';modelName=displayName;kamyiiModel=!!opts.kamyii;lastPsd=parsed.psd;lastPre=parsed.pre;
     $('modelName').textContent=displayName;$('modelName').title=displayName;
     document.title=displayName+' — Ka-myii Live Preview';
@@ -282,10 +364,10 @@ window.addEventListener('drop',e=>{
 
 // ---------- parameters ----------
 const P={angleX:0,angleY:0,angleZ:0,eyeOpenL:1,eyeOpenR:1,eyeX:0,eyeY:0,brow:0,
-  mouthOpen:0,mouthForm:0,mouthCY:0,body:0,physAmp:0.6,soft:0.7,
+  mouthOpen:0,mouthForm:0,mouthTeeth:0,jawDrop:0,mouthExpressive:1,mouthCY:0,body:0,physAmp:0.95,soft:0.85,
   browAngL:0,browAngR:0,browAngSym:0,bangL:0,bangC:0,bangR:0,
-  armY:0,armPos:0,bust:0.4,bustY:1,irisScale:1,mouthEase:0.72,eyeEase:0.3,
-  fhAmp:0.65,fhSoft:0.4,eyeCY:0,eyeCAng:0,mouthCAng:0,eyeScaleL:1,eyeScaleR:1,mouthScale:1,accAmp:1};
+  armY:0,armPos:0,shrug:0,bodyMotion:1,bodyTurn:0,weightShift:.4,breathing:1,bust:0.4,bustY:1,irisScale:1,mouthEase:0.72,eyeEase:0.3,mouthRound:0,mouthResponse:0.65,motionBounce:1,nodDepth:0,nodSpeed:2.6,swayDepth:0,
+  fhAmp:0.95,fhSoft:0.65,eyeCY:0,eyeCAng:0,mouthCAng:0,eyeScaleL:1,eyeScaleR:1,mouthScale:1,accAmp:1,shadowFollow:1,eyeTiltL:0,eyeTiltR:0,simpleBlink:0,neko:0,tail:0,furPalette:0,earSize:1,earSpread:1,earLift:0,earMotion:1,tailSize:1,tailX:0,tailY:0,tailSide:1,tailMotion:1};
 const DEFAULTS=Object.assign({},P);
 const T=Object.assign({},P);
 const cur=Object.assign({},P);
@@ -294,13 +376,14 @@ const autoDefaults={...auto};
 if(OBS_MODE)$('tgTalk').classList.remove('on');
 
 const sliders={pAngleX:'angleX',pAngleY:'angleY',pAngleZ:'angleZ',pEyeL:'eyeOpenL',pEyeR:'eyeOpenR',
-  pEyeX:'eyeX',pEyeY:'eyeY',pBrow:'brow',pMouthOpen:'mouthOpen',pMouthForm:'mouthForm',
+  pEyeX:'eyeX',pEyeY:'eyeY',pBrow:'brow',pMouthOpen:'mouthOpen',pMouthForm:'mouthForm',pMouthTeeth:'mouthTeeth',pJawDrop:'jawDrop',
   pBody:'body',pPhysAmp:'physAmp',pSoft:'soft',pMouthCY:'mouthCY',
   pBrowAngL:'browAngL',pBrowAngR:'browAngR',pBrowAngSym:'browAngSym',
-  pBangL:'bangL',pBangC:'bangC',pBangR:'bangR',pArmY:'armY',pArmPos:'armPos',
+  pBangL:'bangL',pBangC:'bangC',pBangR:'bangR',pArmY:'armY',pArmPos:'armPos',pShrug:'shrug',pBodyMotion:'bodyMotion',pBodyTurn:'bodyTurn',pWeightShift:'weightShift',pBreathing:'breathing',
   pBust:'bust',pBustY:'bustY',pIrisScale:'irisScale',pMouthEase:'mouthEase',pEyeEase:'eyeEase',
   pFhAmp:'fhAmp',pFhSoft:'fhSoft',pEyeCY:'eyeCY',pEyeCAng:'eyeCAng',pMouthCAng:'mouthCAng',
-  pEyeScaleL:'eyeScaleL',pEyeScaleR:'eyeScaleR',pMouthScale:'mouthScale',pAccAmp:'accAmp'};
+  pEyeScaleL:'eyeScaleL',pEyeScaleR:'eyeScaleR',pMouthScale:'mouthScale',pAccAmp:'accAmp',pShadowFollow:'shadowFollow',pEyeTiltL:'eyeTiltL',pEyeTiltR:'eyeTiltR',pMouthRound:'mouthRound',pMouthResponse:'mouthResponse',pMotionBounce:'motionBounce',pNodDepth:'nodDepth',pNodSpeed:'nodSpeed',pSwayDepth:'swayDepth',
+  pEarSize:'earSize',pEarSpread:'earSpread',pEarLift:'earLift',pEarMotion:'earMotion',pTailSize:'tailSize',pTailX:'tailX',pTailY:'tailY',pTailMotion:'tailMotion'};
 const sliderOf={};
 const parameterRanges={};
 // Attach a number box to every range row. onValue(value, final) is called on edits.
@@ -327,6 +410,34 @@ for(const id in sliders){
   el.addEventListener('dblclick',()=>{T[key]=b.set(DEFAULTS[key]);if(paused&&lastFrame)lastFrame[key]=T[key];invalidate();commitHistory();});
   el.title='Double-click to reset';T[key]=Number(el.value);
 }
+parameterRanges.simpleBlink=[0,1];
+sliderOf.simpleBlink={range:[0,1],set(value){const v=value>=.5?1:0;$('blinkStyle').value=String(v);return v;}};
+for(const [id,key,range] of [['mouthArtwork','mouthExpressive',[0,1]],['nekoStyle','neko',[0,1]],['tailStyle','tail',[0,1]],['furPalette','furPalette',[0,3]],['tailSide','tailSide',[-1,1]]]){
+  const el=$(id);parameterRanges[key]=range;
+  sliderOf[key]={range,set(value){el.value=String(key==='tailSide'?(value<0?-1:1):Math.round(value));return Number(el.value);}};
+  el.addEventListener('change',()=>{setSlider(key,Number(el.value));commitHistory();});
+}
+for(const button of document.querySelectorAll('[data-motion]'))button.addEventListener('click',()=>{
+  const amount=Number(button.dataset.motion);
+  for(const [key,value] of Object.entries({nodDepth:0,swayDepth:0,motionBounce:amount,fhAmp:.55+.4*amount,fhSoft:.35+.3*amount,physAmp:.55+.4*amount,soft:.5+.35*amount}))setSlider(key,value);
+  setAuto('phys',true);invalidate();commitHistory();
+});
+$('btnNaturalSway').addEventListener('click',()=>{
+  for(const [key,value] of Object.entries({nodDepth:0,swayDepth:0,motionBounce:.4,bodyMotion:.85,weightShift:.9,breathing:1,fhAmp:.75,physAmp:.8}))setSlider(key,value);
+  setAuto('idle',true);setAuto('phys',true);invalidate();commitHistory();
+});
+$('btnSpringNod').addEventListener('click',()=>{
+  for(const [key,value] of Object.entries({nodDepth:.85,nodSpeed:2.6,swayDepth:0,motionBounce:1,fhAmp:.95,fhSoft:.8,physAmp:1,soft:.95}))setSlider(key,value);
+  setAuto('idle',true);setAuto('phys',true);invalidate();commitHistory();
+});
+$('btnHeadSway').addEventListener('click',()=>{
+  for(const [key,value] of Object.entries({swayDepth:.75,nodDepth:0,nodSpeed:2,motionBounce:1,fhAmp:.95,fhSoft:.8,physAmp:1,soft:.95}))setSlider(key,value);
+  setAuto('idle',true);setAuto('phys',true);invalidate();commitHistory();
+});
+function rebuildBlinkArtwork(simple){
+  if(!lastPsd)return;
+  applyRig(Rigger.buildRig(lastPsd,{...genericOpts(),simpleBlink:!!simple}));rigSimpleBlink=!!simple;
+}
 function setSlider(key,val){
   const b=sliderOf[key];if(!b)return;
   T[key]=b.set(val);if(paused&&lastFrame)lastFrame[key]=T[key];invalidate();
@@ -348,26 +459,28 @@ Object.entries(toggleIds).forEach(([key,id])=>{syncToggle(key);$(id).addEventLis
 
 const PRESET_ORDER=['neutral','smile','usume','surprise','jito','winkL','winkR'];
 const presets={
-  neutral:{eyeOpenL:1,eyeOpenR:1,brow:0,mouthOpen:0,mouthForm:0,irisScale:1},
+  neutral:{eyeOpenL:1,eyeOpenR:1,brow:0,mouthOpen:0,mouthForm:0,mouthRound:0,mouthTeeth:0,jawDrop:0,irisScale:1},
   smile:{eyeOpenL:0,eyeOpenR:0,brow:0.45,mouthOpen:0,mouthForm:0.9,irisScale:1},
   usume:{eyeOpenL:0.5,eyeOpenR:0.5,brow:0.35,mouthOpen:1,mouthForm:0.8,irisScale:1},
-  surprise:{eyeOpenL:1,eyeOpenR:1,brow:1,mouthOpen:0.75,mouthForm:-0.1,irisScale:0.7},
+  surprise:{eyeOpenL:1,eyeOpenR:1,brow:1,mouthOpen:.85,mouthForm:-.1,mouthRound:1,jawDrop:.35,irisScale:.7},
   jito:{eyeOpenL:0.4,eyeOpenR:0.4,brow:-0.6,mouthOpen:0,mouthForm:-0.4,irisScale:1},
   winkL:{eyeOpenL:0,eyeOpenR:1,brow:0.2,mouthOpen:0.4,mouthForm:0.7,irisScale:1},
-  winkR:{eyeOpenL:1,eyeOpenR:0,brow:0.2,mouthOpen:0.4,mouthForm:0.7,irisScale:1}};
+  winkR:{eyeOpenL:1,eyeOpenR:0,brow:0.2,mouthOpen:0.4,mouthForm:0.7,irisScale:1},
+  grin:{eyeOpenL:.85,eyeOpenR:.85,brow:.25,mouthOpen:.6,mouthForm:.9,mouthTeeth:1,irisScale:1},
+  jawdrop:{eyeOpenL:1,eyeOpenR:1,brow:1,mouthOpen:1,mouthForm:-.25,mouthRound:1,jawDrop:1,irisScale:.75}};
 let activePreset=null;
 function highlightPresets(){document.querySelectorAll('[data-preset]').forEach(b=>{const on=b.dataset.preset===activePreset;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));});}
 function togglePreset(name){
   if(!presets[name])return;
   if(activePreset===name){activePreset=null;for(const k in presets.neutral)setSlider(k,presets.neutral[k]);}
-  else{for(const k in presets[name])setSlider(k,presets[name][k]);activePreset=name;}
+  else{for(const [k,v] of Object.entries({...presets.neutral,...presets[name]}))setSlider(k,v);activePreset=name;}
   highlightPresets();commitHistory();syncState(true);
 }
 function clearPreset(){if(!activePreset)return;togglePreset(activePreset);}
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>togglePreset(b.dataset.preset)));
 function resetParams(){
   activePreset=null;highlightPresets();
-  for(const key in sliderOf)setSlider(key,DEFAULTS[key]);
+  for(const key in sliderOf)if(key!=='simpleBlink')setSlider(key,DEFAULTS[key]);
   Object.assign(cur,T);
 }
 $('btnReset').addEventListener('click',()=>{resetParams();commitHistory();$('utilStatus').textContent='All sliders reset';});
@@ -392,14 +505,26 @@ setBackground(background);
 
 // ---------- settings, history, dirty state ----------
 function settingsSnapshot(){
-  return {format:RT.SETTINGS_FORMAT,version:RT.SETTINGS_VERSION,app:'Anime2.5DRig '+APP_VERSION,modelId,modelName,params:{...T},preset:activePreset,
+  return {format:RT.SETTINGS_FORMAT,version:RT.SETTINGS_VERSION,rigRevision:3,app:'Anime2.5DRig '+APP_VERSION,modelId,modelName,params:{...T},preset:activePreset,
     auto:Object.fromEntries(RT.AUTO_KEYS.map(k=>[k,auto[k]])),background,
     layers:layers.map(L=>({id:L.id,visible:L.visible,opacity:L.opacity,depth:L.depth})),anchors:JSON.parse(JSON.stringify(anchorOffsets))};
 }
 function comparableSettings(){const s=settingsSnapshot();delete s.modelName;delete s.app;return JSON.stringify(s);}
 function defaultLayerOrder(){return layers.slice().sort((a,b)=>a.z-b.z).map(L=>L.id);}
 function applySettings(value,opts={}){
+  // One older both-eyes toggle becomes two blink-aware halves; keep visibility/opacity/depth.
+  if(Array.isArray(value.layers))value={...value,layers:value.layers.flatMap(r=>{
+    const children=layers.filter(L=>L.toggleKey&&r.id===Math.floor(L.z)+':'+L.toggleKey);
+    return children.length?children.map(L=>({...r,id:L.id})):r;
+  })};
   const data=RT.settings(value,modelId,parameterRanges,layers.map(L=>L.id),DEFAULTS,{anyModel:!!opts.anyModel,anchorLimit:Math.max(CW,CH)});
+  if(!!data.params.simpleBlink!==rigSimpleBlink)rebuildBlinkArtwork(data.params.simpleBlink);
+  data.missingLayers-=layers.filter(L=>(L.companion||L.expression)&&!value.layers.some(r=>r.id===L.id)).length;
+  // Upgrade old automatic depth values; retain deliberate per-layer depth edits.
+  if(!value.rigRevision){
+    const legacy={facedetail:1.02,nose:1.15,eyewhite:1.06,irides:1.08,eyelash:1.12,eye_close:1.12,eye_close2:1.12,eyebrow:1.14,mouth_open:1.08,mouth_close:1.08};
+    for(const r of data.layers){const L=layers.find(L=>L.id===r.id);if(L&&Math.abs(r.depth-legacy[L.bn])<1e-6)r.depth=L.defaultDepth;}
+  }
   activePreset=null;
   for(const [key,n] of Object.entries(data.params))setSlider(key,n);
   activePreset=data.preset;highlightPresets();
@@ -409,7 +534,7 @@ function applySettings(value,opts={}){
   layers=RT.mergeLayerOrder(defaultLayerOrder(),data.layers.map(r=>r.id)).map(id=>{
     const L=byId.get(id),r=records.get(id);
     if(r){L.visible=r.visible;L.opacity=r.opacity;L.depth=r.depth;}
-    else{L.visible=true;L.opacity=L.defaultOpacity;L.depth=L.defaultDepth;}
+    else{L.visible=L.fade!=='toggle';L.opacity=L.defaultOpacity;L.depth=L.defaultDepth;}
     return L;
   });
   anchorOffsets=data.anchors;applyAnchors();
@@ -473,13 +598,10 @@ function commitHistory(){
 function restoreHistory(snap,label){
   if(!snap)return;
   const s=JSON.parse(snap);
-  for(const k in s.p)setSlider(k,s.p[k]);
-  activePreset=s.preset;highlightPresets();
-  setBackground(s.bg);
-  anchorOffsets=s.a||{};applyAnchors();
-  const byId=new Map(layers.map(L=>[L.id,L]));
-  layers=s.l.map(([id,visible,opacity,depth])=>Object.assign(byId.get(id),{visible,opacity,depth}));
-  renderLayerList();invalidate();updateHistoryButtons();updateDirty();syncState(true);
+  if(!!s.p.simpleBlink!==rigSimpleBlink)rebuildBlinkArtwork(s.p.simpleBlink);
+  applySettings({...settingsSnapshot(),params:s.p,preset:s.preset,background:s.bg,anchors:s.a||{},
+    layers:s.l.map(([id,visible,opacity,depth])=>({id,visible,opacity,depth}))},{anyModel:true});
+  updateHistoryButtons();updateDirty();syncState(true);
   status(label);
 }
 function undo(){if(history.canUndo)restoreHistory(history.undo(),'Undone');}
@@ -499,7 +621,7 @@ function togglePause(){
 }
 $('btnPause').addEventListener('click',togglePause);
 $('btnResetLayers').addEventListener('click',()=>{
-  layers.sort((a,b)=>a.z-b.z);for(const L of layers){L.visible=true;L.depth=L.defaultDepth;L.opacity=L.defaultOpacity;}
+  layers.sort((a,b)=>a.z-b.z);for(const L of layers){L.visible=L.fade!=='toggle';L.depth=L.defaultDepth;L.opacity=L.defaultOpacity;}
   renderLayerList();invalidate();commitHistory();status('Layers reset');
 });
 
@@ -528,7 +650,7 @@ async function toggleRecording(){
       onProgress:(t,total)=>{$('recBadge').textContent='● REC '+t.toFixed(1)+' / '+total+'s';}});
     download(res.blob,baseFileName()+'.'+res.format.ext);
     const note=prefs.exportBg==='transparent'&&!res.format.alpha?' (this format does not keep transparency)':'';
-    status('Video exported ('+CW+' × '+CH+' px, '+res.seconds.toFixed(1)+' s, '+(res.blob.size/1e6).toFixed(1)+' MB)'+note);
+    status('Video exported ('+cv.width+' × '+cv.height+' px, '+res.seconds.toFixed(1)+' s, '+(res.blob.size/1e6).toFixed(1)+' MB)'+note);
   }catch(err){
     if(err.name==='AbortError')status('Recording cancelled');else status('Could not record: '+err.message,true);
   }finally{setRecordingUi(false);invalidate();}
@@ -593,7 +715,7 @@ $('btnReadme').addEventListener('click',openReadme);$('btnReadme2').addEventList
 $('readmeClose').addEventListener('click',closeDialog);$('shortcutClose').addEventListener('click',closeDialog);
 document.querySelectorAll('.overlay-dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d)closeDialog();}));
 const SHORTCUTS=[
-  [['Space'],'Pause / Play'],[['1','–','7'],'Expressions (same key clears)'],[['0'],'Clear expression'],
+  [['Space'],'Pause / Play'],[['1','–','7'],'Expressions (same key clears)'],[['0'],'Clear expression'],[['Shift','1','–','9'],'Switch toggles (blush, tears…)'],
   [['Ctrl','Z'],'Undo'],[['Ctrl','Shift','Z'],'Redo (or Ctrl+Y)'],[['Ctrl','S'],'Save adjustments in this browser'],
   [['Ctrl','O'],'Open PSD'],[['E'],'Edit anchors mode'],[['F'],'Fit the preview'],
   [['B'],'Change background'],[['Wheel'],'Zoom the preview'],[['Drag'],'Pan the zoomed preview'],
@@ -632,6 +754,7 @@ document.addEventListener('keydown',e=>{
     if(layers.length&&!/BUTTON|INPUT/.test(tag)&&!t.closest('[role="button"]')){e.preventDefault();togglePause();}
     return;
   }
+  if(e.shiftKey&&/^Digit[1-9]$/.test(e.code)){const L=toggleLayers()[e.code.slice(5)-1];if(L){e.preventDefault();flipToggle(L);}return;}
   if(/^[0-7]$/.test(e.key)&&layers.length){e.preventDefault();if(e.key==='0')clearPreset();else togglePreset(PRESET_ORDER[Number(e.key)-1]);return;}
   if(k==='e'&&layers.length){e.preventDefault();setAnchorMode(!anchorMode);return;}
   if(k==='f'){e.preventDefault();resetView();return;}
@@ -655,7 +778,26 @@ function moveLayer(from,to){
   const [L]=layers.splice(from,1);layers.splice(to,0,L);
   renderLayerList();invalidate();commitHistory();
 }
+function toggleLayers(){
+  const seen=new Set();return layers.filter(L=>{if(L.fade!=='toggle'||seen.has(L.bn))return false;seen.add(L.bn);return true;}).sort((a,b)=>a.z-b.z);
+}
+function flipToggle(L){
+  const on=!layers.some(p=>p.bn===L.bn&&p.visible);
+  // Competing designs are exclusive: one set of emote eyes, one alternate per part.
+  for(const p of layers){if(p.bn===L.bn)p.visible=on;else if(on&&(L.toggleEye&&p.toggleEye||L.variantPart&&p.variantPart===L.variantPart))p.visible=false;}
+  renderLayerList();invalidate();commitHistory();syncState(true);
+}
+function renderToggles(){
+  const box=$('toggleBtns'),list=toggleLayers();if(!box)return;
+  box.replaceChildren(...list.map((L,i)=>{
+    const b=document.createElement('button'),name=L.bn.slice(7);b.type='button';b.className='btn'+(L.visible?' active':'');
+    b.setAttribute('aria-pressed',String(L.visible));b.textContent=name[0].toUpperCase()+name.slice(1);
+    if(i<9){const k=document.createElement('kbd');k.textContent='⇧'+(i+1);b.append(k);}
+    b.addEventListener('click',()=>flipToggle(L));return b;}));
+  box.hidden=!list.length;
+}
 function renderLayerList(){
+  renderToggles();
   const container=$('layers');container.replaceChildren();
   layers.forEach((L,i)=>{
     const card=document.createElement('div');card.className='layer-card';card.classList.toggle('is-hidden',!L.visible);card.dataset.index=i;
@@ -756,8 +898,8 @@ $('controlSearch').addEventListener('input',applySearch);
 const stage=$('stage'),vp=$('viewport'),view={z:1,x:0,y:0};let fitScale=1,baseLeft=0,baseTop=0;
 function fit(){
   const W=stage.clientWidth,H=stage.clientHeight;
-  fitScale=Math.max(1e-3,Math.min(W/CW,H/CH));
-  const w=CW*fitScale,h=CH*fitScale;baseLeft=(W-w)/2;baseTop=(H-h)/2;
+  fitScale=Math.max(1e-3,Math.min(W/renderBox.w,H/renderBox.h));
+  const w=renderBox.w*fitScale,h=renderBox.h*fitScale;baseLeft=(W-w)/2;baseTop=(H-h)/2;
   vp.style.width=w+'px';vp.style.height=h+'px';applyView();
 }
 function applyView(){
@@ -781,8 +923,8 @@ if(KAMYII){
     if(!A)return;
     const faceHeight=Math.max(1,A.face.y1-A.face.y0);
     view.z=clamp(CH/(faceHeight*3.8),1,8);
-    view.x=stage.clientWidth/2-baseLeft-A.face.cx*fitScale*view.z;
-    view.y=stage.clientHeight*0.35-baseTop-A.face.cy*fitScale*view.z;
+    view.x=stage.clientWidth/2-baseLeft-(A.face.cx-renderBox.left)*fitScale*view.z;
+    view.y=stage.clientHeight*0.35-baseTop-(A.face.cy-renderBox.top)*fitScale*view.z;
     applyView();
   });
   $('stageTools').insertBefore(portraitButton,$('btnZoom'));
@@ -826,15 +968,15 @@ function anchorHandles(){
   for(const s of ['L','R']){
     const e=A['eye'+s];if(!e)continue;const name=s==='L'?'Left eye':'Right eye';
     out.push({key:'eye'+s,label:name,x:e.icx,y:e.icy,axes:['dx','dy'],place:'above'});
-    out.push({key:'eye'+s+'Close',label:name+' closed position',x:s==='L'?e.x0-4:e.x1+4,y:e.closeY,axes:['dy'],cls:'close',guide:[e.x0,e.x1],place:s==='L'?'left':'right'});
+    out.push({key:'eye'+s+'Close',label:name+' closed position',x:blinkEditor?e.closeX:(s==='L'?e.x0-4:e.x1+4),y:e.closeY+(blinkEditor?T.eyeCY*14*FS:0),axes:['dx','dy'],cls:'close',guide:[e.x0,e.x1],place:s==='L'?'left':'right',eye:e});
   }
   out.push({key:'mouth',label:'Mouth',x:A.mouth.cx,y:A.mouth.cy,axes:['dx','dy']});
   out.push({key:'neck',label:'Neck pivot',x:NP.cx,y:NP.cy,axes:['dx','dy']});
   if(layers.some(L=>L.bn==='topwear'))out.push({key:'chest',label:'Chest',x:CHEST.cx,y:CHEST.cy+T.bustY*70*FS,axes:['dx','dy'],cls:'chest'});
-  return out;
+  return blinkEditor?out.filter(h=>h.cls==='close'):out;
 }
 let dragAnchor=null;
-function psdPerPx(){const r=overlay.getBoundingClientRect();return r.width>0?CW/r.width:1;}
+function psdPerPx(){const r=overlay.getBoundingClientRect();return r.width>0?renderBox.w/r.width:1;}
 function renderOverlay(){
   if(OBS_MODE)return;
   overlay.replaceChildren();
@@ -847,6 +989,12 @@ function renderOverlay(){
     if(h.guide)overlay.append(svg('line',{class:'guide',x1:h.guide[0],x2:h.guide[1],y1:h.y,y2:h.y,'stroke-width':u,'stroke-dasharray':4*u+' '+4*u}));
     const g=svg('g',{class:'handle'+(h.cls?' '+h.cls:''),tabindex:'0',role:'button','aria-label':h.label+' (drag or use the arrow keys)','data-key':h.key});
     if(dragAnchor&&dragAnchor.key===h.key)g.classList.add('dragging');
+    if(blinkEditor){
+      const w=(h.eye.x1-h.eye.x0)*1.25,height=Math.max(18*FS,(h.eye.y1-h.eye.y0)*.8);
+      g.append(svg('rect',{class:'blink-box',x:h.x-w/2,y:h.y-height/2,width:w,height,'stroke-width':u}));
+      const original=baseAnchors[h.key.slice(0,4)];
+      g.append(svg('line',{class:'blink-origin',x1:original.x0,x2:original.x1,y1:original.closeY,y2:original.closeY,'stroke-width':u,'stroke-dasharray':2*u+' '+3*u}));
+    }
     g.append(svg('circle',{cx:h.x,cy:h.y,r:7*u,'stroke-width':2*u}));
     const place=h.place||'right';
     const tx=svg('text',{x:place==='left'?h.x-11*u:place==='above'?h.x:h.x+11*u,y:place==='above'?h.y-12*u:h.y+4*u,'font-size':12*u,'stroke-width':3*u,
@@ -857,7 +1005,7 @@ function renderOverlay(){
     overlay.append(g);
   }
 }
-function toPsd(e){const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*CW,y:(e.clientY-r.top)/r.height*CH};}
+function toPsd(e){const r=overlay.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*renderBox.w+renderBox.left,y:(e.clientY-r.top)/r.height*renderBox.h+renderBox.top};}
 function startAnchorDrag(e,h){
   if(e.button!==undefined&&e.button!==0)return;
   e.preventDefault();e.stopPropagation();
@@ -875,7 +1023,7 @@ function startAnchorDrag(e,h){
   const up=ev=>{
     if(ev.pointerId!==id)return;
     window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);
-    dragAnchor=null;anchorPreview=null;commitHistory();renderOverlay();invalidate();
+    dragAnchor=null;if(!blinkEditor)anchorPreview=null;commitHistory();renderOverlay();invalidate();
     overlay.querySelector('[data-key="'+h.key+'"]')?.focus({preventScroll:true});
   };
   window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up);
@@ -899,15 +1047,81 @@ function setAnchorMode(on){
   on=!!on&&layers.length>0&&!OBS_MODE;
   if(anchorMode===on)return;
   anchorMode=on;anchorPreview=null;
+  if(!on)blinkEditor=false;
+  syncBlinkEditor();
   for(const id of ['btnAnchorMode','btnAnchorMode2'])$(id).setAttribute('aria-pressed',String(on));
   $('anchorHint').hidden=!on;
-  if(!on)Object.assign(cur,T);
+  if(!on){Object.assign(cur,T);lastFrame=null;}
   renderOverlay();invalidate();
-  if(on)status('Editing anchors: adjust the reference points on a still pose');
+  if(on)status(blinkEditor?'Drag each closed eye; arrow keys nudge. Save adjustments when aligned.':'Editing anchors: adjust the reference points on a still pose');
 }
 $('btnAnchorMode').addEventListener('click',()=>setAnchorMode(!anchorMode));
 $('btnAnchorMode2').addEventListener('click',()=>setAnchorMode(!anchorMode));
 $('btnResetAnchors').addEventListener('click',()=>{anchorOffsets={};applyAnchors();commitHistory();syncState(true);status('Anchors reset to the detected positions');});
+
+// ---------- manual blink placement (saved with existing character settings) ----------
+function syncBlinkEditor(){
+  for(const id of ['btnBlinkEdit','btnBlinkEdit2'])$(id).setAttribute('aria-pressed',String(blinkEditor));
+  $('blinkSection').classList.toggle('editing',blinkEditor);
+  for(const side of ['L','R'])for(const [axis,suffix] of [['dx','X'],['dy','Y']]){
+    const el=$('blink'+side+suffix),value=anchorOffsets['eye'+side+'Close']?.[axis]||0;
+    if(document.activeElement!==el)el.value=value;
+    el.disabled=!A?.['eye'+side];
+  }
+  for(const button of document.querySelectorAll('[data-blink-view]'))button.setAttribute('aria-pressed',String(button.dataset.blinkView===blinkView));
+  $('blinkHelp').textContent=blinkEditor?'Drag a box on the stage, or enter offsets. Arrow keys: 1 px; Shift: 10 px. Save adjustments keeps this on your character.':'Placement affects the preview. Use Test motion to check it, then Save adjustments. Your original artwork stays intact.';
+}
+function editBlink(on=true){
+  if(!layers.length)return;
+  const was=blinkEditor;blinkEditor=!!on;
+  if(on){
+    setAnchorMode(true);syncBlinkEditor();
+    $('controlSearch').value='';applySearch();collapseSection($('blinkSection'),false);
+    // Focus the drawing so small full-body eyes are easy to grab.
+    if(!was){
+      view.z=clamp(stage.clientWidth/(Math.max(1,A.face.x1-A.face.x0)*1.8*fitScale),1,10);
+      view.x=stage.clientWidth/2-baseLeft-(A.face.cx-renderBox.left)*fitScale*view.z;
+      view.y=stage.clientHeight*.48-baseTop-(A.face.cy-renderBox.top)*fitScale*view.z;applyView();
+    }
+    if(stage.getBoundingClientRect().right<$('panel').getBoundingClientRect().left+2)$('blinkSection').scrollIntoView({block:'nearest'});
+  }else setAnchorMode(false);
+  renderOverlay();invalidate();
+}
+for(const id of ['btnBlinkEdit','btnBlinkEdit2'])$(id).addEventListener('click',()=>editBlink(!blinkEditor));
+$('btnBlinkDone').addEventListener('click',()=>{editBlink(false);if(paused)togglePause();});
+for(const button of document.querySelectorAll('[data-blink-view]'))button.addEventListener('click',()=>{blinkView=button.dataset.blinkView;editBlink();});
+for(const side of ['L','R'])for(const [axis,suffix] of [['dx','X'],['dy','Y']]){
+  const el=$('blink'+side+suffix);
+  el.addEventListener('input',()=>{
+    if(!Number.isFinite(el.valueAsNumber))return;
+    editBlink();const offset={...anchorOffsets['eye'+side+'Close'],[axis]:clamp(el.valueAsNumber,-200,200)};el.value=offset[axis];
+    setAnchorOffset('eye'+side+'Close',offset);
+  });
+  el.addEventListener('change',()=>{syncBlinkEditor();commitHistory();});
+}
+$('blinkStyle').addEventListener('change',()=>{
+  const snapshot=settingsSnapshot();snapshot.params.simpleBlink=Number($('blinkStyle').value);
+  // Alignment for one drawing is not a reliable starting point for a different lid.
+  delete snapshot.anchors.eyeLClose;delete snapshot.anchors.eyeRClose;
+  for(const key of ['eyeTiltL','eyeTiltR','eyeScaleL','eyeScaleR','eyeCY','eyeCAng'])snapshot.params[key]=DEFAULTS[key];
+  applySettings(snapshot,{anyModel:true});editBlink();commitHistory();
+  status(rigSimpleBlink?'Clean fallback blink ready to position; original painting is preserved':'Original painted blink restored');
+});
+$('btnBlinkMatch').addEventListener('click',()=>{
+  editBlink();
+  for(const side of ['L','R']){
+    const eye=baseAnchors['eye'+side];if(!eye)continue;
+    const dy=Math.round(eye.y0+(eye.y1-eye.y0)*.62-eye.closeY-T.eyeCY*14*FS);
+    setAnchorOffset('eye'+side+'Close',{...anchorOffsets['eye'+side+'Close'],dy});
+  }
+  commitHistory();status('Closed lids placed on each open eye’s natural closing line; refine with the boxes');
+});
+$('btnBlinkReset').addEventListener('click',()=>{
+  delete anchorOffsets.eyeLClose;delete anchorOffsets.eyeRClose;
+  for(const key of ['eyeTiltL','eyeTiltR','eyeScaleL','eyeScaleR','eyeCY','eyeCAng'])setSlider(key,DEFAULTS[key]);
+  applyAnchors();commitHistory();status('Blink alignment reset');
+});
+$('btnBlinkSave').addEventListener('click',saveSettings);
 
 // ---------- preferences (per browser) ----------
 const PREF_SCHEMA={
@@ -1077,51 +1291,72 @@ function renderObsStatus(st){
 }
 
 // ---------- animation ----------
-let blinkT=-1,blinkVariant=1,blinkBounceStarted=false,irisBounceT=-1,nextBlink=performance.now()+1800;
-const rnd={ax:0,ay:0,az:0,bd:0,ex:0,ey:0};let nextRnd=0;
+let blinkT=-1,blinkVariant=1,blinkBounceStarted=false,irisBounceT=-1,nextBlink=performance.now()+1800,blinkStart=0;
+const rnd={ax:0,ay:0,az:0,bd:0,ex:0,ey:0,head:null,headAt:0};let nextRnd=0;
+// Idle eye darts; speech beats (a small nod on each stressed syllable); head-turn speed.
+const gaze={x:0,y:0,next:0},beat={v:0,armed:true};let lastYaw=0;
 let talkOn=false,talkV=0,talkTgt=0,nextTalkState=0,nextSyl=0;
+// Painted vowel mouths: current weights, the target, and which vowels this character has.
+let visemes={a:1,i:0,u:0,e:0,o:0},visemeTarget={a:1,i:0,u:0,e:0,o:0},visemeSet=new Set(),visemeOrder=[];
+// Rough vowel frequency in Japanese speech, for Auto talk's made-up syllables.
+const VOWEL_MIX=[['a',.3],['i',.2],['u',.15],['e',.13],['o',.22]];
+function randomVowel(){let r=Math.random();for(const [v,p] of VOWEL_MIX){if((r-=p)<0)return v;}return 'a';}
+function oneVowel(v){return {a:0,i:0,u:0,e:0,o:0,[v]:1};}
 
 function fadeAlpha(L,e,alt){
+  if(L.companion)return (L.kind==='ear'?e.neko:e.tail)>.5?1:0;
+  if(e.replaced?.has(L.bn))return 0;   // an alternate hairstyle/outfit is on
+  const weights=Motion.mouthWeights(e.mouthOpen,e.mouthTeeth,e.mouthRound,e.mouthExpressive);
+  if(L.expression)return weights[L.expression];
   if(!L.fade)return 1;
-  if(L.fade==='eyeOpen'){const v=L.side==='L'?e.eyeOpenL:e.eyeOpenR;return smooth((v-(0.10+e.eyeEase*0.45))/0.15);}
+  if(L.bn==='toggle sparkle aura'||L.bn==='toggle floating hearts')return e.emotePulse??1;
+  const eyeOpen=L.side==='L'?e.eyeOpenL:e.eyeOpenR;
+  const openAlpha=smooth((eyeOpen-(0.10+e.eyeEase*0.45))/0.15);
+  if(L.toggleEye)return L.toggleEye==='open'?openAlpha:1;
+  const closedOverlay=e.eyeToggles?.[L.side]?.closed||0;
+  if(L.fade==='eyeOpen')return openAlpha*(1-closedOverlay)*(L.bn==='irides'?1-(e.eyeToggles?.[L.side]?.open||0):1);
   if(L.fade==='eyeClose'||L.fade==='eyeClose2'){
     const alternate=blinkVariant===2&&alt[L.side];
     if((L.fade==='eyeClose2')!==alternate)return 0;
-    const v=L.side==='L'?e.eyeOpenL:e.eyeOpenR;return 1-smooth((v-(0.10+e.eyeEase*0.45))/0.15);
+    const v=L.side==='L'?e.eyeOpenL:e.eyeOpenR;return (1-smooth((v-(0.10+e.eyeEase*0.45))/0.15))*(1-closedOverlay);
   }
-  if(L.fade==='mouthOpen')return smooth((e.mouthOpen-(0.05+e.mouthEase*0.35))/0.12);
-  if(L.fade==='mouthClose')return 1-smooth((e.mouthOpen-(0.05+e.mouthEase*0.35))/0.12);
+  if(L.fade==='viseme')return Motion.mouth(e.mouthOpen,e.mouthForm,e.mouthRound,e.mouthEase).alpha*weights.source*(e.visemeAlpha?.[L.bn.slice(6)]||0);
+  if(L.fade==='mouthOpen')return Motion.mouth(e.mouthOpen,e.mouthForm,e.mouthRound,e.mouthEase).alpha*weights.source*(1-(e.visemeCover||0));
+  if(L.fade==='mouthClose')return (1-Motion.mouth(e.mouthOpen,e.mouthForm,e.mouthRound,e.mouthEase).alpha)*weights.source;
   return 1;
 }
 const FRONTISH={'front hair':1,'side hair':1,'ahoge':1};
+// Symbols drawn beside the head bob gently with Idle instead of sitting glued to it.
+const FLOATING=/^toggle (sparkle aura|floating hearts|music notes|question mark|exclamation|zzz)$/;
 function deform(L,e){
   const b=L.base,o=L.cur,n=b.length;
-  const isHead=L.group==='head';
-  const az=e.angleZ*0.07,cz=Math.cos(az),sz=Math.sin(az);
-  const ab=e.body*0.028,cb=Math.cos(ab),sb=Math.sin(ab);
+  const isHead=L.group==='head',isBody=L.group==='body'&&!L.companion;
+  const fw=A.face.x1-A.face.x0,fh=A.face.y1-A.face.y0,shoulderDrop=Math.min(fh*1.3,(CH-NP.cy)*.85);
+  const az=e.angleZ*Motion.ROLL;
   const bn=L.bn,eyeSide=L.side,EA=eyeSide==='L'?A.eyeL:(eyeSide==='R'?A.eyeR:null);
   const vOpen=eyeSide==='L'?e.eyeOpenL:e.eyeOpenR;
-  const mo=e.mouthOpen,mHalfW=(A.mouth.x1-A.mouth.x0)/2;
+  const mo=e.mouthOpen,mHalfW=(A.mouth.x1-A.mouth.x0)/2,mouthShape=Motion.mouth(mo,e.mouthForm,e.mouthRound,e.mouthEase);
   const nS=L.strands?L.strands.length:0;
   const bcx=L.x+L.w/2,bcy=L.y+L.h/2;
-  const kind=L.phys==='sway'?'acc':FRONTISH[bn]?'fh':'bh';
   const physOn=nS&&auto.phys&&L.su;
-  const ampK=kind==='acc'?e.accAmp*1.4:kind==='fh'?e.fhAmp:e.physAmp;
-  const softK=kind==='acc'?0.8:kind==='fh'?e.fhSoft:e.soft;
-  const powA=kind==='acc'?1.2:kind==='fh'?1.8:2.1;
   for(let k=0;k<n;k+=2){
     let x=b[k],y=b[k+1];
     const vi=k>>1;
+    if(L.companion){[x,y]=companionPoint(L,x,y,e);}
+    if(bn==='cat ears'){const pivot=L.y+L.h*.94,side=L.side==='L'?-1:1;const p=Motion.earPoint((x-bcx)/L.w,(y-pivot)/L.h,L.w,L.h,side,(e['ear'+(side<0?'L':'R')]||0)*e.earMotion);x=bcx+p[0];y=pivot+p[1];}
     // --- closed-eye / mouth scale ---
     if(EA&&(bn==='eye_close'||bn==='eye_close2')){
       const sE=eyeSide==='L'?e.eyeScaleL:e.eyeScaleR;
-      if(sE!==1){const cxE=(EA.x0+EA.x1)/2,cyE=(EA.y0+EA.y1)/2;x=cxE+(x-cxE)*sE;y=cyE+(y-cyE)*sE;}
+      const point=RT.closedEyePoint(x,y,EA,L.closeY ?? baseAnchors['eye'+eyeSide].closeY,sE,e.eyeCY*14*FS,e.eyeCAng*.3*(eyeSide==='L'?1:-1)+(eyeSide==='L'?e.eyeTiltL:e.eyeTiltR)*Math.PI/180);
+      x=point[0];y=point[1];
     }
-    if(bn==='mouth_open'||bn==='mouth_close'){
+    if(!L.expression&&(bn==='mouth_open'||bn==='mouth_close')){
       const sM=e.mouthScale;
       if(sM!==1){x=A.mouth.cx+(x-A.mouth.cx)*sM;y=A.mouth.cy+(y-A.mouth.cy)*sM;}
     }
     // --- local features ---
+    if(FLOATING.test(L.bn))y+=e.emoteLift||0;
+    if(L.toggleEye==='open'&&EA)y=EA.closeY+(y-EA.closeY)*(1-.85*(1-vOpen));
     if(L.fade==='eyeOpen'&&EA){
       if(bn==='irides'){
         const isc=e.irisScale,ibx=e.irisBounceX||1,iby=e.irisBounceY||1;
@@ -1133,37 +1368,53 @@ function deform(L,e){
         y=EA.closeY+(y-EA.closeY)*(1-0.85*(1-vOpen));   // lid compression
       }
     }
-    if((L.fade==='eyeClose'||L.fade==='eyeClose2')&&EA){
-      y-=vOpen*3;y+=e.eyeCY*14*FS;
-      const thE=e.eyeCAng*0.3*(eyeSide==='L'?1:-1);
-      if(thE){const ct=Math.cos(thE),st=Math.sin(thE),rx=x-bcx,ry=y-bcy;x=bcx+rx*ct-ry*st;y=bcy+rx*st+ry*ct;}
-    }
     if(bn==='eyebrow'){
       y+=(-e.brow*9+(1-vOpen)*3.5)*FS;
       const th=(eyeSide==='L'?(e.browAngL+e.browAngSym):(e.browAngR-e.browAngSym))*0.30;
       if(th){const ct=Math.cos(th),st=Math.sin(th),rx=x-bcx,ry=y-bcy;x=bcx+rx*ct-ry*st;y=bcy+rx*st+ry*ct;}
     }
-    if(L.fade==='mouthOpen'){
-      y=A.mouth.y0+(y-A.mouth.y0)*(0.5+0.5*mo);
+    if(L.fade==='mouthOpen'&&!L.expression){
+      x=A.mouth.cx+(x-A.mouth.cx)*mouthShape.width;
+      y=A.mouth.y0+(y-A.mouth.y0)*mouthShape.height;
       const q=Math.pow(Math.abs(x-A.mouth.cx)/(mHalfW+4),1.5);
       y-=e.mouthForm*6*FS*(q-0.35);
     }
+    if(L.fade==='viseme'){
+      x=A.mouth.cx+(x-A.mouth.cx)*e.mouthScale;
+      y=A.mouth.y0+(y-A.mouth.y0)*e.mouthScale*(.55+.45*mo);
+    }
+    if(L.expression){
+      const m=L.mouthAnchor,cx=m.cx+(A.mouth.cx-baseAnchors.mouth.cx),cy=m.cy+(A.mouth.cy-baseAnchors.mouth.cy);
+      x=cx+(x-m.cx)*e.mouthScale*(L.expression==='grin'?1+.08*e.mouthForm:1);
+      y=cy+(y-m.cy)*e.mouthScale*(.25+.75*mo)*(1+.25*e.jawDrop)+e.jawDrop*3*FS;
+    }
     if(L.fade==='mouthClose'){
+      x=A.mouth.cx+(x-A.mouth.cx)*(1+.08*e.mouthForm);
+      y-=e.mouthForm*3*FS*(Math.pow(Math.abs(x-A.mouth.cx)/(mHalfW+4),1.5)-.35);
       y+=e.mouthCY*14*FS;
       const thM=e.mouthCAng*0.35;
       if(thM){const ct=Math.cos(thM),st=Math.sin(thM),rx=x-A.mouth.cx,ry=y-A.mouth.cy;x=A.mouth.cx+rx*ct-ry*st;y=A.mouth.cy+rx*st+ry*ct;}
     }
-    if(bn==='face'&&y>A.mouth.cy)y+=mo*6*FS*smooth((y-A.mouth.cy)/Math.max(1,A.face.y1-A.mouth.cy));
-    // --- head transform ---
-    let hw=isHead?1:(L.group==='body'?0.16:0);   // body subtly follows head XYZ
-    if(bn==='neck')hw=0.55*smooth((A.neckBottom-y)/Math.max(1,A.neckBottom-A.neckTop));
+    if(bn==='face'&&y>A.mouth.cy)y+=(mo*6+e.jawDrop*10)*FS*smooth((y-A.mouth.cy)/Math.max(1,A.face.y1-A.mouth.cy));
+    // --- head transform: roll about the neck pivot; the neck and collar bend from the jaw down ---
+    const nw=isBody?Motion.collarWeight(b[k],b[k+1],NP,A.face.y1,fw*.22,fh*.3,.35):0;   // the Neck pivot handle sets where the bend eases off
+    const rw=isHead?1:nw,hw=isHead?1:Math.max(nw,L.group==='body'?0.16:0);   // body subtly follows head XY
+    if(rw>0)[x,y]=Motion.rollPoint(x,y,NP,A.face.y1,az,rw,fh);
     if(hw>0){
-      const rx=x-NP.cx,ry=y-NP.cy,rx2=rx*cz-ry*sz,ry2=rx*sz+ry*cz;
-      x+=(rx2-rx)*hw;y+=(ry2-ry)*hw;
       const dd=L.depth;
-      x+=hw*FS*(e.angleX*(14+40*(dd-1))+e.angleX*(NP.cy-y)*0.028);
+      x+=hw*FS*(e.angleX*(14+40*(dd-1))+e.angleX*(NP.cy-Math.min(y,A.face.y1))*0.028);
       y+=hw*FS*(-e.angleY*(9+30*(dd-1))-e.angleY*(dd-1)*(y-FC.y)*0.05);
     }
+    // Head-led nod: a shared facial transform; neck blends down to still shoulders.
+    const nodWeight=isHead?1:nw;
+    y=Motion.nodPoint(y,NP.cy,A.face.y1-A.face.y0,e.nodPose||{head:0,body:0,squash:1},nodWeight);
+    // --- shoulders lift and the torso turns; where the collar follows the head it skips the turn ---
+    if(isBody){
+      y-=Motion.shoulderLift(b[k],b[k+1],NP,fw*.25,fw*.8,shoulderDrop,e.shoulderL||0,e.shoulderR||0,bn==='handwear');
+      x+=Motion.turnShift(b[k],b[k+1],NP.cx,fw*.9,NP.cy+fh*1.4,fh*.5,e.turn||0)*(1-nw);
+    }
+    // --- a hat or bow trails the head ---
+    if(bn==='headwear'){const w=Motion.hatWeight(b[k],b[k+1],{cx:A.face.cx,cy:A.face.y0},fh*.5);x+=(e.hatX||0)*w;y+=(e.hatY||0)*w;}
     // --- breathing ---
     y-=(L.group==='body'?e.breath*2.0:e.breathHead*1.6)*FS;
     if(bn==='topwear'&&y<CHEST.cy)y-=e.breath*2.2*FS*smooth((CHEST.cy-y)/(CHEST.ry*2));   // shoulders rise
@@ -1182,40 +1433,65 @@ function deform(L,e){
     if(L.bw){const m=Math.pow(L.su[vi],1.4)*22*FS;x+=(e.bangL*L.bw[vi*3]+e.bangC*L.bw[vi*3+1]+e.bangR*L.bw[vi*3+2])*m;}
     // --- strand physics: stiff root, fluffy tips (front hair / accessories have their own params) ---
     if(physOn){
-      const u=kind==='fh'?Math.min(1,L.su[vi]*1.6):L.su[vi];
-      const amp=Math.pow(u,powA)*ampK,softMix=Math.min(1,Math.pow(u,1.2)*softK);
-      let dx=0;
-      for(let s=0;s<nS;s++){const w=L.sw[vi*nS+s];if(w<0.001)continue;const sp=L.spr[s];dx+=w*(sp.stiff.dx*(1-softMix)+sp.soft.dx*softMix);}
-      x+=dx*amp;y+=Math.abs(dx)*amp*0.12;
+      const binding=L.bindings[vi];
+      const dx=hairShift(L,binding,e);
+      x+=dx;y+=Math.abs(dx)*0.12+hairLift(L,binding,e);
     }
     o[k]=x;o[k+1]=y;
   }
-  // --- body rotation (around bottom center) ---
-  if(Math.abs(ab)>1e-4){
-    for(let k=0;k<n;k+=2){const rx=o[k]-BP.cx,ry=o[k+1]-BP.cy;o[k]=BP.cx+rx*cb-ry*sb;o[k+1]=BP.cy+rx*sb+ry*cb;}
+  // Torso parent applied after local neck/shoulder/head motion, with planted lower points.
+  if(e.torso)for(let k=0;k<n;k+=2){
+    const p=Motion.torsoPoint(o[k],o[k+1],L.companion?o[k+1]:b[k+1],e.torsoGeometry,e.torso);
+    o[k]=p[0];o[k+1]=p[1];
+  }
+  // A common follow-through transform keeps all facial parts and attachments aligned.
+  for(let k=0;k<n;k+=2){
+    const sourceY=L.companion?o[k+1]:b[k+1],ground=1-smooth((sourceY-NP.cy)/Math.max(1,CH-NP.cy));
+    o[k]+=(e.followX||0)*ground;o[k+1]+=(e.followY||0)*ground;
   }
 }
 function updateSprings(e,t,dt,wind){
-  const headDX=(e.angleX*14+e.angleZ*0.07*(NP.cy-FC.y))*FS;
-  const bodyDX=e.body*0.028*(BP.cy-NP.cy)*0.35+e.angleX*14*0.16*FS;
+  const headDX=e.angleX*14*FS+Math.sin(e.angleZ*Motion.ROLL)*(NP.cy-FC.y)+(e.torso?Motion.torsoPoint(FC.x,FC.y,FC.y,e.torsoGeometry,e.torso)[0]-FC.x:0);
+  const headDY=(e.nodPose?.head||0)*(A.face.y1-A.face.y0)-e.angleY*9*FS;
+  const bodyDX=e.torso?Motion.torsoPoint(NP.cx,NP.cy,NP.cy,e.torsoGeometry,e.torso)[0]-NP.cx:0;
   for(const L of layers){
     if(!L.spr)continue;
     const base=L.group==='head'?headDX:bodyDX,windScale=L.phys==='sway'&&L.group!=='head'?2.5:1;
     for(const sp of L.spr){
       const w=wind?(1.8*Math.sin(t*0.8+sp.phase)+1.0*Math.sin(t*1.9+sp.phase*2.3))*windScale:0;
-      const txv=base+w*FS;
-      RT.spring(sp.stiff,txv,70,9,dt);sp.stiff.dx=-(sp.stiff.x-txv)*2.2;
-      RT.spring(sp.soft,txv,16,1.3,dt);sp.soft.dx=-(sp.soft.x-txv)*3.0;
+      const txv=base+w*FS*(1+e.motionBounce*1.8);
+      RT.spring(sp.stiff,txv,70,9-e.motionBounce*2,dt);sp.stiff.dx=-(sp.stiff.x-txv)*2.2;
+      RT.spring(sp.soft,txv,24,4-e.motionBounce*1.5,dt);sp.soft.dx=-(sp.soft.x-txv)*3.0;
+      const tyv=L.group==='head'?headDY:(e.nodPose?.body||0)*(A.face.y1-A.face.y0);
+      RT.spring(sp.liftStiff,tyv,120,14,dt);sp.liftStiff.dx=sp.liftStiff.x-tyv;
+      RT.spring(sp.liftSoft,tyv,46,7,dt);sp.liftSoft.dx=(sp.liftSoft.x-tyv)*1.3;
     }
   }
   const bustTgt=(e.breath*3.0-e.angleY*6.0+e.body*4.0)*FS;
-  RT.spring(bounce,bustTgt,140,4.2,dt);bounce.dy=-(bounce.x-bustTgt)*3.0;
+  RT.spring(bounce,bustTgt,140,4.2,dt);bounce.dy=auto.phys?-(bounce.x-bustTgt)*3.0:0;
+  const bx=(e.body*7+e.angleX*3)*FS,by=(-e.angleY*3+(wind?Math.sin(t*2.2)*1.4:0))*FS;
+  RT.spring(motion.x,bx,52,8-e.motionBounce*2,dt);RT.spring(motion.y,by,64,8-e.motionBounce*2,dt);
+  e.followX=auto.phys?(motion.x.x-bx)*e.motionBounce:0;
+  e.followY=auto.phys?((motion.y.x-by)+(wind?Math.sin(t*2.2)*2.5*FS:0))*e.motionBounce:0;
+  for(const [side,offset] of [['L',0],['R',1.6]]){
+    const twitch=wind?Math.pow(Math.max(0,Math.sin(t*.83+offset)),18)*.24+Math.sin(t*1.3+offset)*.025:0;
+    RT.spring(motion['ear'+side],twitch-e.angleZ*.18-e.angleX*.08,90,6,dt);
+    e['ear'+side]=auto.phys?motion['ear'+side].x:0;
+  }
+  // Headwear lags where the crown goes (a roll moves the crown further than the face centre).
+  const fh=A.face.y1-A.face.y0,hatX=e.angleX*14*FS+Math.sin(e.angleZ*Motion.ROLL)*(NP.cy-A.face.y0),limit=fh*.12;
+  RT.spring(motion.hatX,hatX,42,5-e.motionBounce*1.5,dt);RT.spring(motion.hatY,headDY,55,5,dt);
+  e.hatX=auto.phys?clamp((motion.hatX.x-hatX)*2.6+(wind?fh*(.025*Math.sin(t*1.3)+.01*Math.sin(t*3.1)):0),-limit,limit)*e.accAmp:0;
+  e.hatY=auto.phys?clamp((motion.hatY.x-headDY)*2,-limit,limit)*e.accAmp:0;
+  RT.spring(motion.tail,e.body*.5+e.angleX*.28,22,4,dt);
+  e.tailPhase=t*1.8;e.tailSway=auto.phys?clamp((wind?.8:0)+(motion.tail.x-e.body*.5-e.angleX*.28)*3,-1.8,1.8)*e.tailMotion:0;
 }
 // Still pose used while editing anchors: handles line up with the drawing.
 function restPose(dt){
   const e=Object.assign({},T,{angleX:0,angleY:0,angleZ:0,body:0,eyeX:0,eyeY:0,irisBounceX:1,irisBounceY:1,breath:0,breathHead:0});
-  if(anchorPreview==='L')e.eyeOpenL=0;if(anchorPreview==='R')e.eyeOpenR=0;
-  updateSprings(e,0,dt,false);
+  if(blinkEditor){e.eyeOpenL=blinkView==='both'||blinkView==='L'?0:1;e.eyeOpenR=blinkView==='both'||blinkView==='R'?0:1;}
+  else{if(anchorPreview==='L')e.eyeOpenL=0;if(anchorPreview==='R')e.eyeOpenR=0;}
+  updateSprings(e,0,dt,false);e.followX=e.followY=e.earL=e.earR=e.tailSway=e.hatX=e.hatY=0;
   return e;
 }
 function animate(now,dt){
@@ -1223,70 +1499,182 @@ function animate(now,dt){
   const t=now/1000;
   const tgt=Object.assign({},T);
   const camLive=(auto.cam||OBS_MODE)&&cam.live&&performance.now()-lastTrackingAt<1200;
+  const turnSpeed=Math.abs(cur.angleX-lastYaw)/Math.max(dt,1e-3);lastYaw=cur.angleX;
   if(camLive){
     tgt.angleX=clamp(cam.ax,-1,1);tgt.angleY=clamp(cam.ay,-1,1);tgt.angleZ=clamp(cam.az,-1,1);
     tgt.eyeOpenL=Math.min(tgt.eyeOpenL,cam.eL);tgt.eyeOpenR=Math.min(tgt.eyeOpenR,cam.eR);
     tgt.eyeX=clamp(cam.ex,-1,1);tgt.eyeY=clamp(cam.ey,-1,1);
     tgt.mouthOpen=Math.max(tgt.mouthOpen,cam.mo);
     tgt.brow=clamp(tgt.brow+(cam.br||0),-1,1);tgt.mouthForm=clamp(tgt.mouthForm+(cam.mf||0),-1,1);
-    tgt.body=clamp(tgt.body+cam.ax*0.25,-1,1);
+    // Face yaw drives torso yaw later, with its own lag rather than becoming body roll.
   }
   if(!camLive&&auto.mouse&&mouse.in){tgt.angleX=clamp(mouse.x*0.9,-1,1);tgt.angleY=clamp(-mouse.y*0.7,-1,1);tgt.eyeX=clamp(mouse.x*1.2,-1,1);tgt.eyeY=clamp(-mouse.y*0.8,-1,1);}
   if(auto.idle&&!camLive){
-    tgt.angleX+=0.13*Math.sin(t*0.42)+0.05*Math.sin(t*1.13);
-    tgt.angleY+=0.08*Math.sin(t*0.31+1.7);
-    tgt.angleZ+=0.07*Math.sin(t*0.23+0.5);
-    tgt.body+=0.10*Math.sin(t*0.19+2.1);
+    const life=(1+T.motionBounce*.75)*(1-Math.min(1,Math.max(T.nodDepth,T.swayDepth))*.55);
+    const head=Motion.idleHead(t);
+    tgt.angleX+=head.x*life;tgt.angleY+=head.y*life;tgt.angleZ+=head.z*life;
+    // Eyes rest on one point, then dart to the next (a saccade), most often back to centre.
+    if(now>gaze.next){const away=Math.random()<.55;gaze.x=away?(Math.random()*2-1)*.22:0;gaze.y=away?(Math.random()*2-1)*.1:0;gaze.next=now+900+Math.random()*2400;}
+    if(!(auto.mouse&&mouse.in)){tgt.eyeX+=gaze.x;tgt.eyeY+=gaze.y;}
+    tgt.body+=(Motion.idlePose(t).roll+.06*Math.sin(t*.71)) * life*T.bodyMotion;
   }
   if(auto.rand&&!camLive){
-    if(now>nextRnd){nextRnd=now+1400+Math.random()*2600;
-      rnd.ax=(Math.random()*2-1)*0.55;rnd.ay=(Math.random()*2-1)*0.40;rnd.az=(Math.random()*2-1)*0.35;
-      rnd.bd=(Math.random()*2-1)*0.30;rnd.ex=(Math.random()*2-1)*0.60;rnd.ey=(Math.random()*2-1)*0.35;}
+    // The eyes find the new point first; the head follows ~130 ms later (eye-head coordination).
+    if(now>nextRnd){nextRnd=now+1400+Math.random()*2600;rnd.headAt=now+130;
+      rnd.head={ax:(Math.random()*2-1)*0.55,ay:(Math.random()*2-1)*0.40,az:(Math.random()*2-1)*0.35,bd:(Math.random()*2-1)*0.30};
+      rnd.ex=(Math.random()*2-1)*0.60;rnd.ey=(Math.random()*2-1)*0.35;}
+    if(rnd.head&&now>=rnd.headAt){Object.assign(rnd,rnd.head);rnd.head=null;}
     tgt.angleX=clamp(tgt.angleX+rnd.ax,-1,1);tgt.angleY=clamp(tgt.angleY+rnd.ay,-1,1);
     tgt.angleZ=clamp(tgt.angleZ+rnd.az,-1,1);tgt.body=clamp(tgt.body+rnd.bd,-1,1);
     tgt.eyeX=clamp(tgt.eyeX+rnd.ex,-1,1);tgt.eyeY=clamp(tgt.eyeY+rnd.ey,-1,1);
   }
+  if(auto.idle&&!camLive)motion.nodTime=(motion.nodTime+dt*cur.nodSpeed)%2;   // sway runs at half speed
+  const nod=auto.idle&&!camLive?Motion.nodPose(motion.nodTime,cur.nodDepth,1,cur.swayDepth):{head:0,body:0,squash:1,pitch:0,tilt:0};
+  tgt.angleY+=nod.pitch;tgt.angleZ+=nod.tilt;
+  if(!camLive){
+    tgt.angleZ+=Motion.TURN_TILT*tgt.angleX;
+    tgt.angleY-=Math.min(.12,.05*turnSpeed);   // a head turn travels on a dipping arc, not a flat slide
+  }
   const remoteMicLive=OBS_MODE&&performance.now()-remoteMicAt<500;
-  if(auto.talk&&!camLive&&!auto.mic&&!remoteMicLive&&!activePreset){
+  if(auto.talk&&!camLive&&!auto.mic&&!remoteMicLive){
     if(now>nextTalkState){talkOn=!talkOn;nextTalkState=now+(talkOn?1200+Math.random()*2200:600+Math.random()*1800);}
-    if(talkOn&&now>nextSyl){nextSyl=now+70+Math.random()*110;talkTgt=Math.random()<0.25?0.04:0.25+Math.random()*0.75;}
+    if(talkOn&&now>nextSyl){nextSyl=now+70+Math.random()*110;talkTgt=Math.random()<0.25?0.04:0.25+Math.random()*0.75;visemeTarget=oneVowel(randomVowel());}
     if(!talkOn)talkTgt=0;
     talkV+=(talkTgt-talkV)*Math.min(1,dt*22);
-    tgt.mouthOpen=Math.max(tgt.mouthOpen,talkV);
+    tgt.mouthOpen=talkV;
+    tgt.mouthRound=Math.max(tgt.mouthRound,talkOn?.45+.4*Math.sin(t*8.2):0);
   }
   if(auto.blink&&!camLive&&!activePreset){
-    if(blinkT<0&&now>nextBlink){blinkT=0;blinkBounceStarted=false;blinkVariant=hasEyeClose2&&Math.random()<0.2?2:1;nextBlink=now+1600+Math.random()*3800;if(Math.random()<0.18)nextBlink=now+280;}
+    if(turnSpeed>5&&blinkT<0&&now-blinkStart>700)nextBlink=Math.min(nextBlink,now);   // animators blink on big turns
+    if(blinkT<0&&now>nextBlink){blinkT=0;blinkStart=now;blinkBounceStarted=false;blinkVariant=hasEyeClose2&&Math.random()<0.2?2:1;nextBlink=now+1600+Math.random()*3800;if(Math.random()<0.18)nextBlink=now+280;}
     if(blinkT>=0){blinkT+=dt;
-      const d=blinkT,hold=blinkVariant===2?3.4:0.34;let v;
-      if(d<0.08)v=1-d/0.08;else if(d<0.08+hold)v=0;else if(d<0.24+hold){
-        v=(d-0.08-hold)/0.16;
-        if(!blinkBounceStarted&&v>0.12){blinkBounceStarted=true;irisBounceT=0;}
-      }else{v=1;blinkT=-1;}
+      const d=blinkT,hold=blinkVariant===2?.65:.04;let v=Motion.blink(d,hold);
+      if(v<0){v=1;blinkT=-1;}
+      else if(d>.09+hold&&!blinkBounceStarted&&v>0.12){blinkBounceStarted=true;irisBounceT=0;}
       tgt.eyeOpenL=Math.min(tgt.eyeOpenL,v);tgt.eyeOpenR=Math.min(tgt.eyeOpenR,v);
     }
   }
   if(irisBounceT>=0){irisBounceT+=dt;if(irisBounceT>0.52)irisBounceT=-1;}
   if(auto.mic&&mic.active)tgt.mouthOpen=Math.max(tgt.mouthOpen,micLevel);
   if(remoteMicLive)tgt.mouthOpen=Math.max(tgt.mouthOpen,remoteMic);
+  if(visemeSet.size){
+    if(auto.mic&&mic.active&&micLevel>.12){const f=mic.frame();const w=f&&RigVisemes.classify(f.samples,f.rate);if(w)visemeTarget=w;}
+    else if(camLive)visemeTarget=RigVisemes.fromShape(cam.mo,cam.mf||0,0);
+    visemes=RigVisemes.blend(visemes,visemeTarget,dt,18);
+  }
+  // Speech beat: each strong syllable onset dips the head a little (Live2D motion tips: move with speech).
+  if(tgt.mouthOpen>.45&&beat.armed){beat.v=1;beat.armed=false;}else if(tgt.mouthOpen<.15)beat.armed=true;
+  beat.v*=Math.exp(-dt*7);
+  if(!camLive)tgt.angleY-=.06*beat.v*T.bodyMotion;
   const kSmooth=1-Math.exp(-dt*14);
-  for(const k in cur){tgt[k]=RT.clamp(tgt[k],...parameterRanges[k]);cur[k]+=(tgt[k]-cur[k])*kSmooth;}
+  for(const k in cur){tgt[k]=RT.clamp(tgt[k],...parameterRanges[k]);
+    if(['mouthExpressive','neko','tail','furPalette','tailSide'].includes(k)){cur[k]=tgt[k];continue;}
+    if(k==='mouthOpen'){cur[k]=Motion.response(cur[k],tgt[k],dt,tgt.mouthResponse);continue;}
+    const response=k==='eyeOpenL'||k==='eyeOpenR'?1-Math.exp(-dt*(tgt[k]<cur[k]?55:28)):k==='eyeX'||k==='eyeY'?1-Math.exp(-dt*32):kSmooth;cur[k]+=(tgt[k]-cur[k])*response;}
   const e=Object.assign({},cur);
+  e.visemes=visemes;e.visemeCover=0;for(const v of visemeSet)e.visemeCover+=visemes[v]||0;
+  e.visemeAlpha=RigVisemes.stackAlpha(visemes,visemeOrder);
+  e.nodPose=camLive?{head:-e.angleY*e.nodDepth*.08,body:0,squash:1}:nod;
   e.irisBounceX=1;e.irisBounceY=1;
   if(irisBounceT>=0){
     const p=irisBounceT/0.52,damp=Math.exp(-2.2*p);
     const scale=1+0.18*Math.sin(p*Math.PI*4.0)*damp,squash=0.10*Math.sin(p*Math.PI*4.0+Math.PI/2)*damp;
     e.irisBounceX=scale*(1+squash);e.irisBounceY=scale*(1-squash);
   }
-  camPhysScale+=((camLive?0.5:1)-camPhysScale)*Math.min(1,dt*4);   // calmer hair while tracking
-  e.physAmp*=camPhysScale;e.soft*=camPhysScale;e.fhAmp*=camPhysScale;e.fhSoft*=camPhysScale;
-  e.breath=0.5+0.5*Math.sin(t*2*Math.PI/3.4);
-  e.breathHead=0.5+0.5*Math.sin(t*2*Math.PI/3.4-0.6);   // head follows chest with a lag
+  camPhysScale+=((camLive?0.85:1)-camPhysScale)*Math.min(1,dt*4);   // calmer hair while tracking
+  e.physAmp*=camPhysScale;e.fhAmp*=camPhysScale;
+  e.emotePulse=auto.idle?.82+.18*Math.sin(t*2.2):1;
+  e.emoteLift=auto.idle?Math.sin(t*1.6)*(A.face.y1-A.face.y0)*.012:0;
+  e.breath=auto.idle?Motion.breath(t)*e.breathing:0;
+  e.breathHead=auto.idle?Motion.breath(t-.35)*e.breathing:0;   // head follows chest with a lag
+  // Shrug lifts both shoulders; breathing a little, a tilt the shoulder it leans towards, and Idle
+  // rolls them out of step. Turning the head turns the torso a little.
+  const roll=auto.idle&&!camLive?.16:0,lean=v=>.5*Math.pow(Math.max(0,v),1.5),lift=20*FS;
+  e.shoulderL=lift*(e.shrug+e.bodyMotion*(.2*e.breath+lean(-e.angleZ)+roll*Math.sin(t*.53)));
+  e.shoulderR=lift*(e.shrug+e.bodyMotion*(.2*e.breath+lean(e.angleZ)+roll*Math.sin(t*.53+2.1)));
+  e.turn=0; // Turning now belongs to the torso parent, shared with the head and arms.
+  const g=e.torsoGeometry={cx:NP.cx,shoulderY:NP.cy,hipY:Math.min(CH,NP.cy+(A.face.y1-A.face.y0)*1.65),width:A.face.x1-A.face.x0,height:A.face.y1-A.face.y0,footY:CH};
+  const speech=(auto.talk||auto.mic||camLive)?e.mouthOpen:0;
+  const target={yaw:clamp(e.bodyTurn+e.bodyMotion*e.angleX*.65,-1,1),roll:clamp(e.body+e.bodyMotion*e.angleZ*.35,-1,1),lift:e.bodyMotion*(e.angleY*.25+speech*.12),shift:auto.idle&&!camLive?Motion.idlePose(t).shift*e.weightShift:0};
+  if(auto.phys){
+    RT.spring(motion.torsoYaw,target.yaw,32,9,dt);RT.spring(motion.torsoRoll,target.roll,38,9,dt);RT.spring(motion.torsoLift,target.lift,30,9,dt);RT.spring(motion.torsoShift,target.shift,22,9,dt);
+    e.torso={yaw:motion.torsoYaw.x,roll:motion.torsoRoll.x,lift:motion.torsoLift.x,shift:motion.torsoShift.x};
+  }else e.torso=target;
   updateSprings(e,t,dt,auto.idle);
   return e;
 }
 
 // ---------- render loop ----------
+function companionPoint(L,x,y,e){
+  const fw=A.face.x1-A.face.x0,fh=A.face.y1-A.face.y0;
+  if(L.kind==='ear'){
+    const width=fw*.34*e.earSize,height=fw*.50*e.earSize;
+    const p=Motion.earPoint((x-64)/128,(y-151)/151,width,height,L.earSide,
+      .14+(e[L.earSide<0?'earL':'earR']||0)*e.earMotion);
+    return [A.face.cx+L.earSide*fw*.42*e.earSpread+p[0],L.crown+fh*.12+e.earLift*fh+p[1]];
+  }
+  const side=e.tailSide<0?-1:1;
+  const p=Motion.tailPoint((x-64)/128,clamp((380-y)/365,0,1),fh*1.25*e.tailSize,fw*.26*e.tailSize,side,e.tailPhase||0,e.tailSway||0);
+  const torso=layers.find(part=>part.bn==='topwear');
+  const rootY=torso?Math.min(NP.cy+fh*.8,torso.y+torso.h*.65):NP.cy+fh*.6;
+  return [NP.cx+side*fw*.28+e.tailX*fw+p[0],rootY+e.tailY*fh+p[1]];
+}
+function updateStageBounds(){
+  if(recorder?.active)return; // Keep recording resolution fixed until capture finishes.
+  const key=JSON.stringify([T.neko,T.tail,T.earSize,T.earSpread,T.earLift,T.earMotion,T.tailSize,T.tailX,T.tailY,T.tailSide,T.tailMotion,T.nodDepth,T.accAmp,A.face,NP]);
+  if(key===renderBox.key)return;
+  let left=0,top=0,right=CW,bottom=CH;
+  const fh=A.face.y1-A.face.y0,bodyGeometry={cx:NP.cx,shoulderY:NP.cy,hipY:Math.min(CH,NP.cy+fh*1.65),width:A.face.x1-A.face.x0,height:fh,footY:CH};
+  function includeTorso(p,sourceY,pad=0){
+    for(const roll of [-1,1])for(const yaw of [-1,1])for(const lift of [-1,1])for(const shift of [-2,2]){
+      const q=Motion.torsoPoint(p[0],p[1],sourceY,bodyGeometry,{roll,yaw,lift,shift});
+      left=Math.min(left,q[0]-pad);top=Math.min(top,q[1]-pad);right=Math.max(right,q[0]+pad);bottom=Math.max(bottom,q[1]+pad);
+    }
+  }
+  if(T.nodDepth>0){
+    const fh=A.face.y1-A.face.y0,headTop=Math.min(...layers.filter(L=>L.group==='head'&&!L.companion).map(L=>L.y));
+    top=Math.min(0,headTop-fh*.14*T.nodDepth);bottom+=fh*.025*T.nodDepth;
+  }
+  // A full head tilt either way (camera, Tilt or sway) stays on the canvas. Art already cut
+  // off at the border gains nothing from extra space (its cut would show), so it is skipped.
+  const cut=Math.max(4,Math.max(CW,CH)*.01);   // matte edges sit a few px inside the border
+  for(const L of layers)if(L.group==='head'&&L.outline&&!L.outline.some(([x,y])=>x<=cut||y<=cut||x>=CW-cut))for(const a of [-Motion.ROLL,Motion.ROLL])for(const [x,y] of L.outline){
+    if(y>=CH-cut)continue;   // bust-up crops cut hair at the bottom; it barely moves there
+    const p=Motion.rollPoint(x,y,NP,A.face.y1,a,1,A.face.y1-A.face.y0),pad=L.bn==='headwear'?(A.face.y1-A.face.y0)*.12*T.accAmp:0;   // hat lag limit
+    includeTorso(p,y,pad);
+  }
+  const pose={...T,earL:0,earR:0,tailPhase:0,tailSway:0};
+  for(const L of layers.filter(L=>L.companion&&(L.kind==='ear'?T.neko:T.tail)>.5)){
+    const pad=(L.kind==='ear'?20*FS+(A.face.y1-A.face.y0)*.14*T.nodDepth:(A.face.y1-A.face.y0)*.38*T.tailSize*T.tailMotion+16*FS);
+    for(const twitch of L.kind==='ear'?[-.8,0,.8]:[0]){
+      pose.earL=pose.earR=twitch;
+      for(let j=0;j<=16;j++)for(const x of [0,L.w]){
+        const p=companionPoint(L,x,L.h*j/16,pose);
+        includeTorso(p,p[1],pad);
+      }
+    }
+  }
+  // Respect the same device limits as the PSD loader, including added transparent space.
+  const viewport=gl.getParameter(gl.MAX_VIEWPORT_DIMS),max=gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const ew=right-left-CW,eh=bottom-top-CH,b=CW*eh+CH*ew,budget=Math.max(0,24000000-CW*CH);
+  const areaScale=b>0?Math.min(1,2*budget/(b+Math.sqrt(b*b+4*ew*eh*budget))):1;
+  const sx=Math.min(areaScale,Math.max(0,Math.min(viewport[0],max)-CW)/Math.max(1,ew));
+  const sy=Math.min(areaScale,Math.max(0,Math.min(viewport[1],max)-CH)/Math.max(1,eh));
+  renderBox={left:Math.floor(left*sx),top:Math.floor(top*sy),w:Math.ceil(CW+(right-left-CW)*sx),h:Math.ceil(CH+(bottom-top-CH)*sy),key};
+  cv.width=renderBox.w;cv.height=renderBox.h;
+  $('overlay').setAttribute('viewBox',[renderBox.left,renderBox.top,renderBox.w,renderBox.h].join(' '));fit();
+}
+function updateCompanionArt(e){
+  const palette=Math.round(e.furPalette);if(palette===motion.palette)return;
+  const rgb=Motion.palette(currentRig,palette);
+  for(const L of layers.filter(L=>L.companion)){
+    const image=Motion.art(L.kind,rgb);gl.activeTexture(gl.TEXTURE0);
+    const old=L.tex;L.tex=renderer.texture(image);gl.deleteTexture(old);
+  }
+  motion.palette=palette;
+}
 function render(e){
+  updateStageBounds();updateCompanionArt(e);
   // Observable diagnostics for browser checks; no imagery or device data is logged.
   const closed=e.eyeOpenL<0.1;
   if(closed&&!closedOnPreviousFrame)blinkCount++;
@@ -1298,8 +1686,12 @@ function render(e){
 
   const alt={L:false,R:false};
   for(const L of layers)if(L.fade==='eyeClose2'&&L.side&&L.visible&&L.opacity>0)alt[L.side]=true;
+  e.eyeToggles={L:{open:0,closed:0},R:{open:0,closed:0}};
+  for(const L of layers)if(L.visible&&L.toggleEye&&L.side)e.eyeToggles[L.side][L.toggleEye]=Math.max(e.eyeToggles[L.side][L.toggleEye],L.opacity);
+  e.replaced=new Set(layers.filter(L=>L.replaces&&L.visible).flatMap(L=>L.replaces));
   const items=[],masks=[];
   for(const L of layers){
+    moveHairShading(L,e);
     const isMask=L.bn==='eyewhite'&&!!L.side;
     const alpha=L.visible?fadeAlpha(L,e,alt)*L.opacity:0;
     if(alpha<0.004&&!isMask)continue;
@@ -1307,7 +1699,7 @@ function render(e){
     if(isMask)masks.push({L,side:L.side});
     if(alpha>=0.004)items.push({L,alpha,clip:L.bn==='irides'&&L.side?L.side:null});
   }
-  const frame={width:CW,height:CH,background:exportBackground(),masks:maskFailed?[]:masks,items};
+  const frame={width:cv.width,height:cv.height,offsetX:-renderBox.left,offsetY:-renderBox.top,background:exportBackground(),masks:maskFailed?[]:masks,items};
   try{renderer.draw(frame);}
   catch(err){
     if(maskFailed)throw err;
@@ -1327,7 +1719,7 @@ function tick(now){
   if(dirty||capturePending||(recorder&&recorder.active)){render(lastFrame);dirty=false;}
   if(capturePending){
     capturePending=false;
-    cv.toBlob(blob=>{if(blob){download(blob,baseFileName()+'.png');status('PNG exported ('+CW+' × '+CH+' px'+(prefs.exportBg==='transparent'?', transparent':'')+')');}else status('Could not export the PNG',true);},'image/png');
+    cv.toBlob(blob=>{if(blob){download(blob,baseFileName()+'.png');status('PNG exported ('+cv.width+' × '+cv.height+' px'+(prefs.exportBg==='transparent'?', transparent':'')+')');}else status('Could not export the PNG',true);},'image/png');
     invalidate();
   }
   fpsN++;if(now-fpsT>500){$('fps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps';fpsN=0;fpsT=now;}
@@ -1356,12 +1748,14 @@ function updateLiveTicker(){
 
 // Read-only diagnostics for automated tests and bug reports.
 Object.defineProperty(window,'Anime25D',{value:Object.freeze({version:APP_VERSION,state(){
-  return {modelId,modelName,layers:layers.length,paused,anchorMode,activePreset,background,unsaved,
+  return {modelId,modelName,layers:layers.filter(L=>!L.companion).length,paused,anchorMode,blinkEditor,blinkView,activePreset,background,unsaved,
     anchors:JSON.parse(JSON.stringify(anchorOffsets)),params:Object.assign({},T),auto:Object.assign({},auto),
-    pose:lastFrame?{eyeL:lastFrame.eyeOpenL,eyeR:lastFrame.eyeOpenR,mouth:lastFrame.mouthOpen,angleX:lastFrame.angleX}:null,
+    pose:lastFrame?{eyeL:lastFrame.eyeOpenL,eyeR:lastFrame.eyeOpenR,mouth:lastFrame.mouthOpen,angleX:lastFrame.angleX,tilt:lastFrame.angleZ,torso:lastFrame.torso?{...lastFrame.torso}:null,followX:lastFrame.followX,followY:lastFrame.followY,tailSway:lastFrame.tailSway,earL:lastFrame.earL,earR:lastFrame.earR,nod:lastFrame.nodPose?.head||0}:null,
+    companions:{ears:T.neko>.5,tail:T.tail>.5},
     synth:currentRig?Object.assign({},currentRig.synth):null,
+    shading:{vertices:layers.reduce((n,L)=>n+(L.shadingBindings?.length||0),0),pixels:layers.reduce((n,L)=>!L.flow?n:L.flow.reduce((m,v,i)=>Math.max(m,Math.abs(v)*(i%2?L.h:L.w)),n),0)},
     cam:Object.assign({},cam),camLive:cam.live&&performance.now()-lastTrackingAt<1200,calibrated:!!prefs.calibration,
-    view:Object.assign({},view),obs:sync.status,recording:!!(recorder&&recorder.active)};
+    canvas:{width:cv.width,height:cv.height,offsetX:-renderBox.left,offsetY:-renderBox.top},view:Object.assign({},view),obs:sync.status,recording:!!(recorder&&recorder.active)};
 }})});
 
 // ---------- start ----------

@@ -7,11 +7,11 @@
   const MAX_FILE_BYTES = 128 * 1024 * 1024;
   const SETTINGS_FORMAT = 'anime25d-settings';
   const SETTINGS_VERSION = 2;
-  const PRESETS = ['neutral','smile','usume','surprise','jito','winkL','winkR'];
+  const PRESETS = ['neutral','smile','usume','surprise','jito','winkL','winkR','grin','jawdrop'];
   const AUTO_KEYS = ['idle','blink','rand','talk','mouse','phys'];
   const BACKGROUNDS = ['checker','green','dark'];
   // Editable anchor offsets (PSD pixels) and the axes each one may move.
-  const ANCHOR_KEYS = {face:['dx','dy'],eyeL:['dx','dy'],eyeR:['dx','dy'],eyeLClose:['dy'],eyeRClose:['dy'],mouth:['dx','dy'],neck:['dx','dy'],chest:['dx','dy']};
+  const ANCHOR_KEYS = {face:['dx','dy'],eyeL:['dx','dy'],eyeR:['dx','dy'],eyeLClose:['dx','dy'],eyeRClose:['dx','dy'],mouth:['dx','dy'],neck:['dx','dy'],chest:['dx','dy']};
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const isNum = v => typeof v === 'number' && Number.isFinite(v);
 
@@ -41,6 +41,33 @@
   function spring(s,target,k,damping,dt) {
     const count=Math.max(1,Math.ceil(dt/(1/120))), h=dt/count;
     for(let i=0;i<count;i++){ s.v+=(-k*(s.x-target)-damping*s.v)*h; s.x+=s.v*h; }
+  }
+
+  // One displacement field is shared by the bangs and the shading baked into skin.
+  function strandBinding(strands,x,y) {
+    const n=strands.length;
+    let spacing=120;
+    if(n>1){const d=strands.slice(1).map((s,i)=>s.x-strands[i].x).sort((a,b)=>a-b);spacing=d[d.length>>1];}
+    const sig=Math.max(1,spacing*0.6),weights=strands.map(s=>Math.exp(-Math.pow((x-s.x)/sig,2)));
+    let total=weights.reduce((a,b)=>a+b,0),root=0,tip=0;
+    if(total<1e-6){weights.fill(0);weights[0]=1;total=1;}
+    for(let i=0;i<n;i++){weights[i]/=total;root+=weights[i]*strands[i].rootY;tip+=weights[i]*strands[i].tipY;}
+    return {weights,u:clamp((y-root)/Math.max(1,tip-root),0,1)};
+  }
+  function strandShift(binding,springs,amp,soft,front,limit,power) {
+    const u=front?Math.min(1,binding.u*1.6):binding.u;
+    const mix=Math.min(1,Math.pow(u,1.2)*soft);
+    let dx=0;
+    for(let i=0;i<springs.length;i++)dx+=binding.weights[i]*(springs[i].stiff.dx*(1-mix)+springs[i].soft.dx*mix);
+    dx*=Math.pow(u,power ?? (front?1.8:2.1))*amp;
+    // Smooth saturation prevents a fast turn or a long frame from tearing bangs off the face.
+    return limit>0?limit*Math.tanh(dx/limit):dx;
+  }
+  function closedEyePoint(x,y,eye,sourceY,scale,dy,angle) {
+    const sourceX=(eye.x0+eye.x1)/2,cx=eye.closeX ?? sourceX,cy=eye.closeY;
+    const rx=(x-sourceX)*scale,ry=(y-sourceY)*scale;
+    const c=Math.cos(angle),s=Math.sin(angle);
+    return [cx+rx*c-ry*s,cy+dy+rx*s+ry*c];
   }
 
   // ---- face tracking relay ----
@@ -182,6 +209,6 @@
   }
 
   return {MAX_FILE_BYTES,SETTINGS_FORMAT,SETTINGS_VERSION,PRESETS,AUTO_KEYS,BACKGROUNDS,ANCHOR_KEYS,
-    validateHeader,fingerprint,meshSize,spring,tracking,settings,anchors,mergeLayerOrder,prefs,createHistory,
+    validateHeader,fingerprint,meshSize,spring,strandBinding,strandShift,closedEyePoint,tracking,settings,anchors,mergeLayerOrder,prefs,createHistory,
     safeRelativePath,safeFileName,formatTime,clamp};
 });

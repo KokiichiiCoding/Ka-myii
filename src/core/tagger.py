@@ -77,6 +77,12 @@ def select(labels: List[tuple], probs: np.ndarray, general: float = GENERAL_THRE
 
 def tag_image(image: Image.Image, download: bool = True) -> Optional[Dict]:
     """Tags for ``image``, or None when onnxruntime or the model is unavailable."""
+    tags = tag_images([image], download)
+    return tags[0] if tags else None
+
+
+def tag_images(images: List[Image.Image], download: bool = True) -> Optional[List[Dict]]:
+    """Tags for each image (one model load), or None when the tagger is unavailable."""
     try:
         import onnxruntime as ort
         from huggingface_hub import hf_hub_download
@@ -89,9 +95,8 @@ def tag_image(image: Image.Image, download: bool = True) -> Optional[Dict]:
     except Exception as exc:
         logger.warning("Image tagger unavailable (%s: %s)", type(exc).__name__, exc)
         return None
-    size = session.get_inputs()[0].shape[1]
-    probs = session.run(None, {session.get_inputs()[0].name: prepare(image, size)})[0][0]
-    return select(labels, probs)
+    size, name = session.get_inputs()[0].shape[1], session.get_inputs()[0].name
+    return [select(labels, session.run(None, {name: prepare(image, size)})[0][0]) for image in images]
 
 
 def describe(tags: Dict, limit: int = 40) -> str:

@@ -65,9 +65,15 @@ class GenerationRequest:
     # ``reference_image`` through ``mask_image`` into a new sketch).
     operation: str = "generate"
     target_model: Optional[str] = None
+    pose_image: Optional[str] = None  # staged local standing guide for extension
     mask_image: Optional[str] = None
     strength: float = 0.9
     edit_prompt: Optional[str] = None  # what to paint into the selection (edit / extend)
+    extension: Optional[Dict] = None  # measured placement/proportions, retained for artwork-first copies
+    toggles: Optional[List[str]] = None  # expression toggles to paint (src/core/expressions.TOGGLES)
+    regions: Optional[List[List[int]]] = None  # refine: boxes redrawn one at a time (src/core/refine.py)
+    visemes: bool = False  # paint the A/I/U/E/O mouths (src/core/expressions.VISEMES)
+    variant: Optional[Dict] = None  # {"part": "hair", "prompt": "short bob"} (src/core/variants.py)
     # Uploads: {"frame": bool, "plain_background": bool, "enhance": 0..0.6} (src/core/importer.py)
     import_options: Optional[Dict] = None
 

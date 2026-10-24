@@ -3,7 +3,9 @@ API routes for model generation
 """
 from flask import Blueprint, request, jsonify, send_file
 from pathlib import Path
+import json
 import logging
+from functools import lru_cache
 from typing import Dict, Any
 
 from src.models.vtuber_model import GenerationRequest, VTuberModel
@@ -24,7 +26,8 @@ job_queue: JobQueue = None
 
 def _run_job(gen_request: GenerationRequest, task_id: str) -> str:
     if gen_request.operation == "expressions":
-        return assembly_line.add_expressions(gen_request.target_model, task_id=task_id)
+        return assembly_line.add_expressions(gen_request.target_model, task_id=task_id, toggles=gen_request.toggles,
+                                             visemes=gen_request.visemes, variant=gen_request.variant)
     model = assembly_line.generate_model(gen_request, task_id=task_id)
     save_json(model.to_dict(), config.OUTPUT_DIR / model.id / "metadata.json")
     return model.id
@@ -94,6 +97,9 @@ def _parse_request(data) -> GenerationRequest:
             raise ValueError('Unknown LoRA; pick one from the list (or drop it into models/loras)')
         loras = [{'id': l['id'], 'weight': _number(l, 'weight', 1.0, float, -4.0, 4.0)} for l in loras]
 
+    toggles = _toggles(data)
+    visemes = bool(toggles and VISEMES_ID in toggles)
+    toggles = [t for t in toggles or [] if t != VISEMES_ID] or None
     # Generous bounds; the point is to refuse sizes that would only exhaust the GPU.
     w = _number(data, 'width', defaults.get('default_width', 832), int, 256, 2048)
     h = _number(data, 'height', defaults.get('default_height', 1216), int, 256, 2048)
@@ -112,7 +118,22 @@ def _parse_request(data) -> GenerationRequest:
         loras=loras,
         framing=framing,
         sketch=bool(data.get('sketch')),
+        toggles=toggles, visemes=visemes,
     )
+
+
+# The Studio offers the vowel mouths as one more toggle chip; jobs carry them as ``visemes``.
+VISEMES_ID = 'visemes'
+
+
+def _toggles(data):
+    """The "toggles" list (names from expressions.TOGGLES, or VISEMES_ID), or None. Raises ValueError."""
+    from src.core.expressions import TOGGLES
+
+    toggles = data.get('toggles') or None
+    if toggles is not None and (not isinstance(toggles, list) or any(t not in TOGGLES and t != VISEMES_ID for t in toggles)):
+        raise ValueError(f"Unknown expression toggle; choose from {', '.join(TOGGLES)}")
+    return list(dict.fromkeys(toggles)) if toggles else None
 
 
 @generation_bp.route('/generate', methods=['POST'])
@@ -237,7 +258,7 @@ def _queue_artwork(image, brief: dict, import_options=None, sketch: bool = False
     image.save(path)
     job = job_queue.submit(GenerationRequest(**{**brief, 'width': image.width, 'height': image.height,
                                                 'reference_image': str(path), 'sketch': sketch,
-                                                'operation': 'generate', 'mask_image': None, 'edit_prompt': None,
+                                                'operation': 'generate', 'mask_image': None, 'pose_image': None, 'edit_prompt': None,
                                                 'import_options': import_options}))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
@@ -425,7 +446,7 @@ def _saved_brief(model_dir: Path) -> dict:
     metadata_path = model_dir / 'metadata.json'
     saved = (load_json(metadata_path).get('request') or {}) if metadata_path.exists() else {}
     known = {f.name for f in fields(GenerationRequest)}
-    return {k: v for k, v in saved.items() if k in known}
+    return {k: v for k, v in saved.items() if k in known and k not in ('reference_image','mask_image','pose_image')}
 
 
 def _stage(image, name: str) -> str:
@@ -498,15 +519,59 @@ def edit_region(model_id: str):
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
+@lru_cache(maxsize=4)
+def _character_mask(path: str, _mtime: float):
+    """The segmentation is the slow part of a fit guide; dragging a guide re-plans often."""
+    from PIL import Image
+    from src.core import outpaint
+
+    with Image.open(path) as img:
+        return outpaint.character_mask(img.convert('RGB'))
+
+
+def _extension_plan(model_dir: Path, mode: str, proportions: str, keep_face: bool, guides=None):
+    from PIL import Image
+    from src.core import outpaint
+
+    base = model_dir / 'base_image.png'
+    with Image.open(base) as img:
+        image = img.convert('RGB')
+    geometry = outpaint.anatomy(model_dir)
+    return outpaint.plan(image, _character_mask(str(base), base.stat().st_mtime), mode,
+                         geometry=geometry, proportions=proportions, keep_face=keep_face,
+                         identity=outpaint.identity_mask(model_dir, geometry) if geometry and keep_face else None,
+                         guides=outpaint.check_guides(guides, image.size))
+
+
+@generation_bp.route('/extend/<model_id>/plan', methods=['GET'])
+def extension_plan(model_id: str):
+    """Read-only fit guide: measured source placement before spending a GPU generation."""
+    from src.core import outpaint
+
+    model_dir = model_dir_for(model_id)
+    if not model_dir or not (model_dir / 'base_image.png').is_file():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    proportions = request.args.get('proportions', 'balanced')
+    if proportions not in outpaint.PROPORTIONS:
+        return jsonify({'success': False, 'error': 'Choose balanced, compact or tall proportions'}), 400
+    try:
+        guides = json.loads(request.args['guides']) if request.args.get('guides') else None
+        _, _, info = _extension_plan(model_dir, 'full_body', proportions, True, guides)
+    except ValueError as e:  # includes malformed JSON
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify({'success': True, 'info': info})
+
+
 @generation_bp.route('/extend/<model_id>', methods=['POST'])
 def extend_artwork(model_id: str):
     """Paint the rest of a character cut off by the image border into a new sketch.
 
-    JSON: {"mode": "full_body" | "uncrop", "prompt": "optional extra description", "seed": null}
+    JSON: {"mode": "full_body" | "uncrop", "prompt": "optional extra description", "seed": null,
+           "separate": false} (true continues through layers and Live Preview)
     """
     from secrets import randbits
     from PIL import Image
-    from src.core import outpaint, regions
+    from src.core import outpaint
 
     model_dir = model_dir_for(model_id)
     base = model_dir / 'base_image.png' if model_dir else None
@@ -521,33 +586,97 @@ def extend_artwork(model_id: str):
         if len(extra) > MAX_PROMPT_CHARS:
             raise ValueError(f'Keep prompts under {MAX_PROMPT_CHARS} characters')
         seed = _number(data, 'seed', None, int, 0, 2**32 - 1)
+        separate = data.get('separate', False)
+        if not isinstance(separate, bool):
+            raise ValueError('separate must be true or false')
+        proportions = data.get('proportions', 'balanced')
+        if not isinstance(proportions, str) or proportions not in outpaint.PROPORTIONS:
+            raise ValueError('Choose balanced, compact or tall proportions')
+        keep_face = data.get('keep_face', True)
+        if not isinstance(keep_face, bool):
+            raise ValueError('keep_face must be true or false')
+        guided = data.get('guided', True)
+        if not isinstance(guided, bool):
+            raise ValueError('guided must be true or false')
+        canvas, mask, info = _extension_plan(model_dir, mode, proportions, keep_face,
+                                             data.get('guides') if mode == 'full_body' else None)
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-    with Image.open(base) as img:
-        image = img.convert('RGB')
-    canvas, mask, info = outpaint.plan(image, outpaint.character_mask(image), mode)
+    info['source_model'] = model_id
+    info['guided'] = guided and mode == 'full_body'
+    info['outfit'] = extra
     if mode == 'uncrop' and not info['touched']:
         return jsonify({'success': False, 'error': 'This character is not cut off by the border'}), 400
 
     brief = _saved_brief(model_dir)
     brief['prompt'] = brief.get('prompt') or f'Artwork of {model_id[:8]}'
+    if mode == 'full_body':  # the new character's brief too, for its later edits and expressions
+        brief['prompt'] = outpaint.full_body_prompt(', '.join(p for p in (brief['prompt'], extra) if p))
     tags = outpaint.FULL_BODY_TAGS if mode == 'full_body' else ''
     negative = outpaint.FULL_BODY_NEGATIVE if mode == 'full_body' else outpaint.UNCROP_NEGATIVE
+    if mode == 'full_body' and proportions != 'compact':
+        tags += ', balanced proportions, proportional head, long legs, symmetrical shoulders'
+        negative += ', chibi, oversized head, short legs, twisted torso, uneven shoulders, long neck, floating head'
     job = job_queue.submit(GenerationRequest(**{
-        **brief, 'width': canvas.width, 'height': canvas.height, 'operation': 'extend', 'sketch': True,
+        **brief, 'width': canvas.width, 'height': canvas.height, 'operation': 'extend', 'sketch': not separate,
+        'extension': info,
+        'pose_image': _stage(outpaint.pose_image(info), 'pose') if info['guided'] else None,
         'source': 'upload' if brief.get('source') == 'upload' else 'artwork',
         'framing': 'full_body' if mode == 'full_body' else brief.get('framing', 'upper_body'),
-        'reference_image': _stage(canvas, 'canvas'), 'mask_image': _stage(regions.to_image(mask), 'mask'),
-        'edit_prompt': ', '.join(p for p in (extra or brief['prompt'], tags) if p),
+        'reference_image': _stage(canvas, 'canvas'), 'mask_image': _stage(Image.fromarray(mask), 'mask'),
+        'edit_prompt': ', '.join(p for p in (brief['prompt'] if mode == 'full_body' else extra or brief['prompt'], tags) if p),
         'negative_prompt': ', '.join(p for p in (brief.get('negative_prompt'), negative) if p),
-        'strength': 1.0, 'seed': seed if seed is not None else randbits(31)}))
+        'strength': 0.9 if mode == 'full_body' else 1.0, 'seed': seed if seed is not None else randbits(31)}))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'info': info,
+                    'message': 'Queued'}), 202
+
+
+@generation_bp.route('/refine/<model_id>', methods=['POST'])
+def refine_parts(model_id: str):
+    """Redraw the hands or the face in more detail into a new sketch.
+
+    JSON: {"target": "hands" | "face", "strength": 0.3–0.7 (optional), "seed": null}
+    """
+    from secrets import randbits
+    from PIL import Image
+    from src.core import refine
+
+    model_dir = model_dir_for(model_id)
+    base = model_dir / 'base_image.png' if model_dir else None
+    if not base or not base.is_file():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    data = request.get_json(silent=True) or {}
+    target = data.get('target')
+    if target not in refine.PROMPTS:
+        return jsonify({'success': False, 'error': 'Choose hands or face'}), 400
+    try:
+        strength = _number(data, 'strength', refine.STRENGTH[target], float, 0.3, 0.7)
+        seed = _number(data, 'seed', None, int, 0, 2**32 - 1)
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    boxes = refine.boxes(model_dir, target)
+    if not boxes:
+        return jsonify({'success': False, 'error': f'Could not find the {target}: separate the layers first, '
+                                                   'or paint over them in Edit a region'}), 400
+    with Image.open(base) as img:
+        image = img.convert('RGB')
+    brief = _saved_brief(model_dir)
+    prompt, negative = refine.PROMPTS[target]
+    job = job_queue.submit(GenerationRequest(**{
+        **brief, 'prompt': brief.get('prompt') or f'Artwork of {model_id[:8]}',
+        'width': image.width, 'height': image.height, 'operation': 'refine', 'sketch': True,
+        'source': 'upload' if brief.get('source') == 'upload' else 'artwork',
+        'reference_image': _stage(image, 'source'), 'regions': boxes, 'edit_prompt': prompt,
+        'negative_prompt': negative, 'strength': strength,
+        'seed': seed if seed is not None else randbits(31)}))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'boxes': boxes,
                     'message': 'Queued'}), 202
 
 
 @generation_bp.route('/expressions/<model_id>', methods=['POST'])
 def paint_expressions(model_id: str):
-    """Queue painting closed eyes and the other mouth state onto a separated character."""
+    """Queue painting closed eyes and the other mouth state onto a separated character, or with
+    JSON {"toggles": ["blush", ...]} only those expression toggles."""
     model_dir = model_dir_for(model_id)
     metadata_path = model_dir / 'metadata.json' if model_dir else None
     if not metadata_path or not metadata_path.exists():
@@ -555,9 +684,42 @@ def paint_expressions(model_id: str):
     saved = load_json(metadata_path)
     if not any(a.get('metadata', {}).get('backend') == 'see-through' for a in saved.get('assets', [])):
         return jsonify({'success': False, 'error': 'Expressions need a character separated by See-through'}), 400
+    try:
+        toggles = _toggles(request.get_json(silent=True) or {}) or []
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    visemes = VISEMES_ID in toggles
+    toggles = [t for t in toggles if t != VISEMES_ID] or None
     prompt = (saved.get('request') or {}).get('prompt') or 'character'
     job = job_queue.submit(GenerationRequest(prompt=prompt, operation='expressions', target_model=model_dir.name,
-                                             source='artwork'))
+                                             source='artwork', toggles=toggles, visemes=visemes))
+    return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
+
+
+@generation_bp.route('/variant/<model_id>', methods=['POST'])
+def paint_variant(model_id: str):
+    """Queue an alternate hairstyle or outfit for a separated character, switchable in Live Preview.
+
+    JSON: {"part": "hair" | "top" | "bottom" | "headwear", "prompt": "short black bob"}
+    """
+    from src.core import variants
+
+    model_dir = model_dir_for(model_id)
+    metadata_path = model_dir / 'metadata.json' if model_dir else None
+    if not metadata_path or not metadata_path.exists():
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    saved = load_json(metadata_path)
+    if not any(a.get('metadata', {}).get('backend') == 'see-through' for a in saved.get('assets', [])):
+        return jsonify({'success': False, 'error': 'Alternate looks need a character separated by See-through'}), 400
+    data = request.get_json(silent=True) or {}
+    part, text = data.get('part'), ' '.join(str(data.get('prompt') or '').split())
+    if part not in variants.PARTS:
+        return jsonify({'success': False, 'error': 'Choose hair, top, bottom or headwear'}), 400
+    if not text or len(text) > 200:
+        return jsonify({'success': False, 'error': 'Describe the new design in up to 200 characters'}), 400
+    prompt = (saved.get('request') or {}).get('prompt') or 'character'
+    job = job_queue.submit(GenerationRequest(prompt=prompt, operation='expressions', target_model=model_dir.name,
+                                             source='artwork', variant={'part': part, 'prompt': text}))
     return jsonify({'success': True, 'task_id': job.id, 'job': job_queue.describe(job), 'message': 'Queued'}), 202
 
 
@@ -726,6 +888,7 @@ def get_options():
     """Return everything needed to populate the generation UI controls:
     checkpoints, LoRAs, VAEs, samplers, styles and defaults."""
     try:
+        from src.core import expressions
         from src.utils import model_scanner
 
         igen = config.IMAGE_GENERATION
@@ -739,6 +902,8 @@ def get_options():
             'vaes': model_scanner.list_vaes(),
             'samplers': model_scanner.list_samplers(),
             'styles': list(config.STYLE_PRESETS.keys()),
+            'toggles': [{'id': k, 'label': t.label} for k, t in expressions.TOGGLES.items()]
+                       + [{'id': VISEMES_ID, 'label': 'A I U E O mouths'}],
             'defaults': {
                 'width': igen['default_width'],
                 'height': igen['default_height'],

@@ -96,7 +96,15 @@ def create_app(use_dummy_generators: bool = False):
         if name.startswith('model_'):
             name = 'Study ' + name[6:].upper()
         studio_path = model_dir / 'studio.json'  # the Studio's saved adjustments (PUT /api/generation/studio)
+        from src.core import expressions
+        made = expressions.read(model_dir)
+        painted = {**made.get('toggles', {}), **({'visemes': True} if made.get('visemes') else {})}
+        paintable = any(a.get('metadata', {}).get('backend') == 'see-through' for a in metadata.get('assets', []))
         return render_template('preview.html', model_id=model_id, character_name=name,
+                               toggle_options=[{'id': k, 'label': t.label, 'painted': k in painted}
+                                               for k, t in expressions.TOGGLES.items()]
+                               + [{'id': 'visemes', 'label': 'A I U E O mouths', 'painted': 'visemes' in painted}]
+                               if paintable else [],
                                studio_settings=load_json(studio_path) if studio_path.exists() else None,
                                preview_psd=url_for('generation.get_artifact', model_id=model_id, kind='preview_psd'))
 

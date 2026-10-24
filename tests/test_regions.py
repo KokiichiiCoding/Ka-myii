@@ -131,7 +131,7 @@ def test_outpaint_plan_full_body_and_uncrop():
     canvas, mask, info = outpaint.plan(image, fg, "full_body")
     assert canvas.size == (200, 300) and info["touched"] == ["bottom"]
     left, top, w, h = info["placed"]
-    assert w == 110 and h == 165 and mask[top + h // 2, left + w // 2] == False  # the artwork kept...
+    assert w == int(200 * .55 * 5.5 / outpaint.HEADS) and h == int(300 * .55 * 5.5 / outpaint.HEADS) and mask[top + h // 2, left + w // 2] == False  # the artwork kept...
     assert mask[top + h + 5, 100] and mask[top + h - 2, 100]                     # ...below it and the cut edge painted
     assert mask[5, 5] and not mask[top + 10, left + 10]
 
@@ -139,16 +139,187 @@ def test_outpaint_plan_full_body_and_uncrop():
     left, top, w, h = info["placed"]
     assert canvas.size == (200, 300) and top == 0 and h < 300 and mask[-1, 100] and not mask[10, 100]
 
+    # A known head size leaves room for a ~5.5-head figure: a big bust-up head shrinks further.
+    _, _, info = outpaint.plan(image, fg, "full_body", head=150)
+    assert info["placed"][3] == int(300 * 0.9 * 300 / (150 * outpaint.HEADS))
+    assert outpaint.full_body_prompt("1girl, Upper Body, centered, cowboy shot, red hoodie") == "1girl, centered, red hoodie"
+    # A graded mask: the cut edges are redrawn fully at the edge, less further in, and not deep inside;
+    # a brim cut at the left side reaches further in than the bottom join.
+    fg[:, :3] = True
+    _, mask, info = outpaint.plan(image, fg, "full_body")
+    left, top, w, h = info["placed"]
+    row, col = mask[top + h // 2], mask[:, 100]
+    assert row[left + 4] == 255 and 0 < row[left + 12] < 255 and row[left + 25] == 0
+    assert col[top + h - 3] == 255 and 0 < col[top + h - 15] < 255 and col[top + h - 35] == 0
+    assert 0 < row[left + w - 2] < 255 and row[left + w - 5] == 0   # an uncut edge only blends a few px
+
 
 def test_extend_api_queues_an_outpaint(client):
     r = client.post("/api/generation/extend/abc-123", json={"mode": "full_body", "prompt": "red sneakers"})
     assert r.status_code == 202
     req = client.submitted[-1]
-    assert req.operation == "extend" and req.sketch and req.strength == 1.0 and req.framing == "full_body"
-    assert req.edit_prompt.startswith("red sneakers") and "full body" in req.edit_prompt
+    assert req.operation == "extend" and req.sketch and req.strength == 0.9 and req.framing == "full_body"
+    assert "brown hair" in req.edit_prompt and "red sneakers" in req.edit_prompt and "full body" in req.edit_prompt
     assert "cropped" in req.negative_prompt
     with Image.open(req.reference_image) as canvas:
         assert canvas.size == (100, 140)
+    # A separated character's face sets the scale, and its brief loses "upper body".
+    model = config.OUTPUT_DIR / "abc-123"
+    face = Image.new("RGBA", (100, 140)); ImageDraw.Draw(face).rectangle((30, 20, 70, 59), fill="tan")
+    face.save(model / "assets" / "07_face.png")
+    (model / "metadata.json").write_text(json.dumps({"request": {"prompt": "1girl, upper body, red hoodie"}}))
+    r = client.post("/api/generation/extend/abc-123", json={"mode": "full_body"})
+    req, info = client.submitted[-1], r.get_json()["info"]
+    # Crown (hair from 10 px) to chin (60 px) as drawn, then 5.75 typical heads for this 41 px wide face.
+    assert info["placed"][3] == int(140 * (140 * 0.9) / (50 + 5.75 * 1.33 * 41))
+    assert req.prompt == "1girl, red hoodie" and "upper body" not in req.edit_prompt and "arms at sides" in req.edit_prompt
     # The test character (a white canvas) touches no border, so there is nothing to uncrop.
     assert client.post("/api/generation/extend/abc-123", json={"mode": "uncrop"}).status_code == 400
     assert client.post("/api/generation/extend/abc-123", json={"mode": "sideways"}).status_code == 400
+
+
+def test_extend_can_continue_to_layers_and_rejects_ambiguous_flags(client):
+    r = client.post("/api/generation/extend/abc-123", json={"mode": "full_body", "separate": True, "prompt": "black boots"})
+    assert r.status_code == 202
+    req = client.submitted[-1]
+    assert req.operation == "extend" and not req.sketch
+    assert "brown hair" in req.prompt and "black boots" in req.prompt
+    count = len(client.submitted)
+    assert client.post("/api/generation/extend/abc-123", json={"separate": "false"}).status_code == 400
+    assert len(client.submitted) == count
+
+
+def test_extension_crown_axis_and_face_protection(tmp_path):
+    from src.core import outpaint
+
+    assets = tmp_path / "assets"; assets.mkdir()
+    face = Image.new("RGBA", (400, 600)); ImageDraw.Draw(face).rectangle((145, 70, 264, 209), fill="tan")
+    face.save(assets / "03_face.png")
+    hair = Image.new("RGBA", face.size)
+    draw = ImageDraw.Draw(hair); draw.rectangle((125, 30, 280, 90), fill="silver")
+    draw.line((200,0,200,30),fill="silver",width=2)  # sparse ahoge is not the skull crown
+    hair.save(assets / "02_front hair.png")
+    neck=Image.new("RGBA",face.size);ImageDraw.Draw(neck).rectangle((195,190,229,270),fill="tan")
+    neck.save(assets / "04_neck.png")
+    geometry=outpaint.anatomy(tmp_path)
+    assert geometry["crown_y"] == 30 and geometry["head_height"] == 180
+    assert geometry["axis_x"] == 212
+    image=Image.new("RGB",face.size,"white");fg=np.zeros((600,400),bool);fg[25:,110:290]=True
+    _, mask, info=outpaint.plan(image,fg,geometry=geometry)
+    x,y,w,h=info["placed"]; result=info["result_geometry"]
+    assert abs(result["axis_x"]-200)<1 and result["head_height"] < 90
+    assert mask[round(y+140*h/600),round(x+205*w/400)] == 0, "Keep the inner face even beneath edge ramps"
+    assert mask[y+h-1,x+w//2] == 255 and mask[y+h-20,x+w//2] > 0
+    neck = lambda k: mask[round(y + (210 + k * 180) * h / 600), round(x + 212 * w / 400)]
+    assert neck(0.17) == 255 and 0 < neck(0.06) < 255, "The neck is redrawn from the jaw down (no kept collar plate)"
+    _, _, compact=outpaint.plan(image,fg,geometry=geometry,proportions="compact")
+    _, _, tall=outpaint.plan(image,fg,geometry=geometry,proportions="tall")
+    assert tall["placed"][2]<w<compact["placed"][2]
+    _,_,hat=outpaint.plan(image,fg,geometry={**geometry,"large_headwear":True})
+    assert hat["placed"][1]>y and hat["placed"][2]<w, "Leave crown room for a large hat without enlarging the head"
+    assert hat["pose_points"][10][1] < hat["foot_y"]-hat["result_geometry"]["unit"]*.4, "Room for shoes below the ankles"
+    # Precise geometry survives artwork-first output, without a second separation.
+    (tmp_path/"metadata.json").write_text(json.dumps({"request":{"extension":info}}))
+    (assets/"03_face.png").unlink()
+    assert outpaint.anatomy(tmp_path) == result
+
+
+def test_extension_plan_is_read_only_and_options_are_validated(client):
+    model=config.OUTPUT_DIR/"abc-123"
+    before=(model/"base_image.png").read_bytes()
+    response=client.get("/api/generation/extend/abc-123/plan?proportions=tall")
+    assert response.status_code==200 and response.get_json()["info"]["target_heads"]==7.5
+    assert not (config.OUTPUT_DIR/"_uploads").exists() and client.submitted==[]
+    # A project file must not smuggle an arbitrary local pose-image path into a region edit.
+    data=json.loads((model/"metadata.json").read_text());data["request"]["pose_image"]="C:/private.png"
+    (model/"metadata.json").write_text(json.dumps(data))
+    assert client.post("/api/generation/edit/abc-123",json={"parts":["hair"]}).status_code==202
+    assert client.submitted[-1].pose_image is None
+    client.submitted.clear()
+    for body in ({"proportions":"tiny"},{"proportions":[]},{"keep_face":"false"}):
+        assert client.post("/api/generation/extend/abc-123",json=body).status_code==400
+    assert client.get("/api/generation/extend/abc-123/plan?proportions=giant").status_code==400
+    assert client.get("/api/generation/extend/missing/plan").status_code==404
+    response=client.post("/api/generation/extend/abc-123",json={"proportions":"tall","keep_face":False})
+    assert response.status_code==202
+    req=client.submitted[-1]
+    assert req.extension["proportions"]=="tall" and req.extension["source_model"]=="abc-123"
+    assert not req.extension["keep_face"] and "oversized head" in req.negative_prompt
+    assert (model/"base_image.png").read_bytes()==before
+
+
+def test_dragged_pose_guides_move_mirrored_joints_and_are_validated(client):
+    from src.core import outpaint
+
+    info = {"canvas": [832, 1216], "target_heads": 6.75, "foot_y": 1143,
+            "result_geometry": {"face": [360, 80, 468, 210], "head_height": 162, "axis_x": 416, "crown_y": 48}}
+    moved = outpaint.pose_points({**info, "guides": {"shoulders": [120, 300], "hips": [70, 600], "ankles": [40, 1050]}})
+    assert moved[2] == (296, 300) and moved[5] == (536, 300), "Shoulders mirror about the standing axis"
+    assert moved[8][1] == moved[11][1] == 600 and moved[10] == (376, 1050) and moved[13] == (456, 1050)
+    assert 600 < moved[9][1] < 1050 and moved[9][0] == 416 - 55, "Knees sit between the hips and ankles"
+    assert moved[4][0] < moved[2][0], "Wrists hang outside wider shoulders"
+    for bad in ({"neck": [10, 10]}, {"hips": [10]}, {"hips": [True, 5]}, {"hips": [900, 50]}, "x",
+                {"shoulders": [80, 700], "hips": [60, 500]}):
+        with pytest.raises(ValueError):
+            outpaint.check_guides(bad, (832, 1216))
+    assert outpaint.check_guides({}, (832, 1216)) is None
+
+    r = client.get("/api/generation/extend/abc-123/plan", query_string={"guides": json.dumps({"hips": [20, 90]})})
+    assert r.status_code == 200
+    points = r.get_json()["info"]["pose_points"]
+    assert points[8][1] == points[11][1] == 90 and abs((points[11][0] - points[8][0]) / 2 - 20) < 1e-6
+    assert client.get("/api/generation/extend/abc-123/plan?guides={oops").status_code == 400
+    assert client.post("/api/generation/extend/abc-123", json={"guides": {"hips": [20, 9999]}}).status_code == 400
+    assert client.post("/api/generation/extend/abc-123", json={"guides": {"ankles": [20, 120]}}).status_code == 202
+    assert client.submitted[-1].extension["guides"] == {"ankles": [20.0, 120.0]}
+
+
+def test_full_body_extension_reviews_its_result(tmp_path, monkeypatch):
+    from src.models.vtuber_model import GenerationRequest
+    from src.pipeline.assembly_line import AssemblyLine
+
+    monkeypatch.setattr("src.core.asset_separator._anime_seg_mask", lambda image: None)
+    src = Image.new("RGB", (120, 160), "white")
+    ImageDraw.Draw(src).rectangle((40, 20, 80, 159), fill=(60, 80, 160))  # a figure cut off at the bottom
+    src.save(tmp_path / "source.png")
+    Image.new("L", (120, 160), 0).save(tmp_path / "mask.png")
+    line = AssemblyLine(output_base_dir=tmp_path / "out", use_dummy_generators=True)
+    model = line.generate_model(GenerationRequest(
+        prompt="1girl", operation="extend", sketch=True, source="artwork", seed=3, edit_prompt="full body",
+        extension={"mode": "full_body"}, reference_image=str(tmp_path / "source.png"), mask_image=str(tmp_path / "mask.png")))
+    assert [f["id"] for f in model.metadata["checks"]] == ["feet"]
+
+
+def test_refine_finds_hands_and_face_and_redraws_only_there(client, tmp_path):
+    from src.core import refine
+    from src.models.vtuber_model import GenerationRequest
+    from src.pipeline.assembly_line import AssemblyLine
+
+    model = config.OUTPUT_DIR / "abc-123"
+    assert refine.boxes(model, "hands") == [] and client.post(
+        "/api/generation/refine/abc-123", json={"target": "hands"}).status_code == 400, "No face layer: nothing to place"
+    face = Image.new("RGBA", (100, 140)); ImageDraw.Draw(face).ellipse((35, 15, 65, 50), fill=(240, 210, 190, 255))
+    face.save(model / "assets" / "06_face.png")
+    hand = Image.new("RGBA", (100, 140)); ImageDraw.Draw(hand).rectangle((10, 60, 18, 120), fill=(240, 210, 190, 255))
+    hand.save(model / "assets" / "03_handwear-l.png")
+    [box] = refine.boxes(model, "hands")
+    assert box[0] <= 14 <= box[2] and box[1] < 112 < box[3] and box[3] - box[1] <= 30, "Around the end of the arm"
+    [fbox] = refine.boxes(model, "face")
+    assert fbox[0] < 35 and fbox[2] > 65
+    for body in ({"target": "feet"}, {"target": "face", "strength": 0.95}):
+        assert client.post("/api/generation/refine/abc-123", json=body).status_code == 400
+    r = client.post("/api/generation/refine/abc-123", json={"target": "hands"})
+    assert r.status_code == 202
+    req = client.submitted[-1]
+    assert req.operation == "refine" and req.regions == [box] and req.sketch and "five fingers" in req.edit_prompt
+    assert "1girl" not in req.edit_prompt and req.strength == refine.STRENGTH["hands"]
+
+    src = Image.new("RGB", (100, 140), (200, 120, 90)); src.save(tmp_path / "src.png")
+    line = AssemblyLine(output_base_dir=tmp_path / "out", use_dummy_generators=True)
+    done = line.generate_model(GenerationRequest(prompt="1girl", operation="refine", sketch=True, source="artwork",
+                                                 seed=1, regions=[[5, 5, 25, 25], [70, 100, 90, 120]],
+                                                 reference_image=str(tmp_path / "src.png")))
+    out = np.asarray(Image.open(tmp_path / "out" / done.id / "base_image.png"), np.int16)
+    assert done.status.value == "sketch" and not (tmp_path / "src.png").exists()
+    assert (out[60:80, 40:60] == (200, 120, 90)).all(), "Between: untouched"
+    assert (out[15, 15] != (200, 120, 90)).any() and (out[110, 80] != (200, 120, 90)).any(), "Both boxes redrawn"
