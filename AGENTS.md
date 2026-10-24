@@ -23,8 +23,10 @@ Read this whole file before changing anything. Keep it up to date when you finis
 ## 2. Repository state — READ FIRST
 
 - Path: `C:\Users\Kokii\Ka-myii` — git clone of `github.com/KokiichiiCoding/Ka-myii`.
-- Branch: `claude/automated-vtuber-model-011CUg6gEfYhoWvMuuXdF2hJ` (the real development branch;
-  the default branch `Ka-myii` is stale; there is no `main`).
+- Branches: **`main`** (created 2026-10-24 by the owner's choice from the development branch at
+  `7bdb230`; the owner switches GitHub's default to it in Settings) and
+  `claude/automated-vtuber-model-011CUg6gEfYhoWvMuuXdF2hJ` (the development branch, kept in step
+  with main). The old default `Ka-myii` is a stale ancestor; leave it alone.
 - **M1–M5 are committed** (2026-10-17); the 2026-10-18 preview motion polish and
   manual blink editor, and the 2026-10-23 motion/companion, nod, neck/tilt, shoulders/collar/hat/extend, torso/mouth/full-body UI, seamless-extend/toggles, guided-extension/fidelity and stance/checks/visemes/variants passes below are uncommitted. The owner asked to make Ka-myii a good initial
   product to push to GitHub; M1–M3 were committed as one baseline (`c113da1`), M4 work
@@ -1010,7 +1012,7 @@ Stance guides, automatic checks, kept head features, refinement, visemes, altern
   `logs/server-5055.*.log`. The witch's toggles/visemes/variant and the refined sketch
   `8b761f2f` are real test outputs; owner's preview settings were not saved. No commit or push.
 
-Neck seam and head/body size (2026-10-24, uncommitted until the push below):
+Neck seam and head/body size (2026-10-24, committed as `7bdb230` with all earlier passes and pushed to main):
 
 - Owner, looking at Sol's alignment models: "the weird seam in the neck feels off … ensure heads
   and bodies correspond in size". Superseded trials 8f290a89/eab60823/24371d1a/2d168bcc and
