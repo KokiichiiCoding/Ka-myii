@@ -543,11 +543,13 @@ def test_preview_full_body_action_supports_finished_models_and_artwork_review(ba
     expect(page.locator("#fullBodyFitNote")).to_contain_text("Drag the shoulder, hip and ankle dots", timeout=JOB)
     # Drag the left hip dot outwards and down: both hips move, and the stance goes with the request.
     plan = page.request.get(f"{base_url}/api/generation/extend/{original}/plan?proportions=tall").json()["info"]
-    guide = page.locator("#fullBodyGuide").bounding_box()
-    k = 608 / plan["canvas"][1] * guide["width"] / 416
+    canvas = page.locator("#fullBodyGuide")
+    canvas.scroll_into_view_if_needed()  # Linux fonts lay the panel out taller: off-screen drags miss
+    k = 608 / plan["canvas"][1] * canvas.bounding_box()["width"] / 416
     hip = plan["pose_points"][8]
-    page.mouse.move(guide["x"] + hip[0] * k, guide["y"] + hip[1] * k)
+    canvas.hover(position={"x": hip[0] * k, "y": hip[1] * k})
     page.mouse.down()
+    guide = canvas.bounding_box()
     page.mouse.move(guide["x"] + hip[0] * k - 12, guide["y"] + hip[1] * k + 6, steps=4)
     page.mouse.up()
     expect(page.locator("#fitReset")).to_be_visible(timeout=JOB)
