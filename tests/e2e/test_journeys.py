@@ -111,7 +111,9 @@ def test_import_artwork_edit_a_region_then_separate(base_url, page, tmp_path):
 
     page.click("#editPanel summary")
     page.click("#paintToggle")
-    mask = page.locator("#maskCanvas").bounding_box()
+    canvas = page.locator("#maskCanvas")
+    canvas.hover(position={"x": 4, "y": 4})   # waits out the smooth scroll Paint starts (Bootstrap)
+    mask = canvas.bounding_box()
     page.mouse.move(mask["x"] + mask["width"] * 0.4, mask["y"] + mask["height"] * 0.3)
     page.mouse.down()
     page.mouse.move(mask["x"] + mask["width"] * 0.6, mask["y"] + mask["height"] * 0.35, steps=5)
