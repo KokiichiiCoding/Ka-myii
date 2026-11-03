@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Ka-myii — Studio{% endblock %}
 {% block tab_studio %}active{% endblock %}
+{% block shortcuts %}
+<tr><td><kbd>Ctrl</kbd> <kbd>Enter</kbd></td><td>Create the character</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>V</kbd></td><td>Paste a picture to import it (or drop one on the page)</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Back to the brief</td></tr>
+<tr><td><kbd>Tab</kbd> / <kbd>Enter</kbd></td><td>Accept a tag suggestion in the prompt</td></tr>
+<tr><td><kbd>Enter</kbd> / <kbd>Esc</kbd></td><td>Save or undo a new name (click the result's name)</td></tr>
+{% endblock %}
 
 {% block content %}
 <div class="km-wrap">
@@ -28,7 +35,7 @@
         <div class="hint hidden" id="cropHint">Several characters or views? Drag a box around the one to import.
           <button type="button" class="link-btn" id="cropClear" hidden>Use the whole picture</button></div>
         <div class="hint">Designs from Perchance, ChatGPT or an artist work. PNG, JPG or WebP up to 16 MB; one character
-          facing forward works best. You get a prepared sketch first to check, edit or extend, then separate its layers.</div>
+          facing forward works best. You can also drop an image anywhere on this page or paste one with Ctrl+V. You get a prepared sketch first to check, edit or extend, then separate its layers.</div>
         <label class="option-row"><input type="checkbox" id="importFrame" checked> Find, center and frame the character</label>
         <label class="option-row"><input type="checkbox" id="importWhite" checked> Replace the background with white</label>
         <label for="importEnhance" class="option-label">Clean up with AI</label>
@@ -42,9 +49,10 @@
 
       <div id="promptFields">
       <div class="field">
-        <label for="prompt">Prompt</label>
+        <div class="label-row"><label for="prompt">Prompt</label><span class="label-tools"><button type="button" class="link-btn surprise-btn" id="clearBrief" title="Start over with an empty brief and the default settings">Clear</button><button type="button" class="link-btn surprise-btn" id="recentBtn" aria-expanded="false" aria-controls="recentList" title="Reuse one of your recent briefs">↺ Recent</button><button type="button" class="link-btn surprise-btn" id="surpriseBtn" title="Fill the brief with a random character idea">✦ Surprise me</button></span></div>
+        <ul class="recent-list hidden" id="recentList" role="listbox" aria-label="Recent briefs"></ul>
         <textarea id="prompt" placeholder="1girl, silver hair, long twin tails, blue eyes, sailor uniform, gentle smile"></textarea>
-        <div class="hint">Describe hair, eyes, outfit, and silhouette. Comma-separated tags work well.</div>
+        <div class="hint">Describe hair, eyes, outfit, and silhouette. Comma-separated tags work well. Your draft is kept if you leave the page; Ctrl+Enter creates.</div>
       </div>
 
       <div class="field">
@@ -61,6 +69,11 @@
         <label for="framing">Framing</label>
         <select id="framing"><option value="upper_body">Upper body · more facial detail</option><option value="full_body">Full body · complete outfit</option></select>
         <div class="hint">Upper body gives the eyes and mouth more pixels for live motion.</div>
+      </div>
+      <div class="field">
+        <label for="avatarKind">Avatar</label>
+        <select id="avatarKind"><option value="2d">2D · Live2D layers and Live Preview</option><option value="3d">2D + 3D · also a rigged VRM avatar</option></select>
+        <div class="hint" id="avatarHint">3D draws a full-body, front-facing character, then builds a rigged VRM (about 4 more minutes) that blinks and talks with its own painted face. Open it in the 3D stage or any VRM app.</div>
       </div>
       <div class="field">
         <label id="togglesLabel">Expression toggles</label>
@@ -136,6 +149,9 @@
       </div>
 
       <div class="divider"></div>
+      <div class="batch-row" id="batchRow"><label for="batchCount">How many</label>
+        <select id="batchCount" title="Queue several at once, each with its own seed (a set seed counts up)"><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select>
+        <span class="hint" id="batchHint">Pick the best, then separate it.</span></div>
       <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
         <i class="fas fa-wand-magic-sparkles"></i> Create character
       </button>
@@ -146,7 +162,7 @@
         <i class="fas fa-stop"></i> Cancel
       </button>
       <div class="queue-panel hidden" id="queuePanel">
-        <div class="queue-head">Queue <span class="hint" id="queueNote"></span></div>
+        <div class="queue-head">Queue <span class="hint" id="queueNote"></span><button type="button" class="link-btn queue-clear hidden" id="cancelQueued">Cancel all queued</button></div>
         <ol class="queue-list" id="queueList" aria-live="polite"></ol>
       </div>
     </form>
@@ -189,14 +205,17 @@
             <canvas id="maskCanvas" class="mask-canvas hidden" aria-label="Paint over the area to change"></canvas>
           </div>
           <div class="progress-overlay hidden" id="progressOverlay">
+            <img class="progress-art hidden" id="progressArt" alt="The artwork, while its layers are separated">
             <div class="spinner-ring"></div>
             <div class="progress-label" id="progressLabel">Starting…</div>
             <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
             <div class="progress-eta" id="progressEta"></div>
+            <p class="progress-tip" id="progressTip" aria-live="off"></p>
           </div>
         </div>
 
         <div id="resultMeta" class="hidden">
+          <input type="text" id="resultName" class="result-name" maxlength="60" aria-label="Character name" title="Click to rename this character" spellcheck="false">
           <div class="meta-grid">
             <div class="meta-card"><div class="k">Status</div><div class="v"><span class="badge-km badge-good" id="metaStatus">done</span></div></div>
             <div class="meta-card"><div class="k">Layers</div><div class="v" id="metaLayers">—</div></div>
@@ -204,22 +223,48 @@
             <div class="meta-card"><div class="k">Seed</div><div class="v" id="metaSeed">—</div></div>
           </div>
           <div class="result-checks hidden" id="resultChecks" role="status" aria-live="polite"></div>
+          <details class="edit-panel hidden" id="redrawComparison">
+            <summary>Compare with the reference</summary>
+            <div style="display:flex;gap:12px;align-items:start">
+              <figure style="flex:1;min-width:0;margin:0">
+                <img id="redrawSourceImage" alt="Original reference character" loading="lazy" style="display:block;width:100%;max-height:360px;object-fit:contain;background:var(--bg)">
+                <figcaption><a id="redrawSourceLink">Open original artwork ↗</a></figcaption>
+              </figure>
+              <figure style="flex:1;min-width:0;margin:0">
+                <img id="redrawResultImage" alt="Front-facing redraw" loading="lazy" style="display:block;width:100%;max-height:360px;object-fit:contain;background:var(--bg)">
+                <figcaption>Current redraw</figcaption>
+              </figure>
+            </div>
+            <p class="hint">Check the garment length, layers, trim and accessories before preparing the animated model.</p>
+          </details>
           <div class="result-actions">
             <button type="button" class="btn btn-primary hidden" id="separateBtn"><i class="fas fa-layer-group"></i> Separate layers</button>
             <a class="btn btn-primary" id="livePreview">Live Preview ↗</a>
+            <a class="btn hidden" id="open3d"><i class="fas fa-cube"></i> 3D avatar ↗</a>
+            <button type="button" class="btn hidden" id="make3d" title="Build a rigged VRM from this artwork (~4 min on the GPU). Full-body, front-facing art works best."><i class="fas fa-cube"></i> Make 3D avatar</button>
             <button type="button" class="btn" id="showFullBody"><i class="fas fa-person"></i> Complete body</button>
             <a class="btn" id="dlPackage"><i class="fas fa-cube"></i> Live2D Package</a>
             <a class="btn" id="dlPsd"><i class="fas fa-layer-group"></i> Download PSD</a>
             <a class="btn" id="dlOra"><i class="fas fa-file-image"></i> Download ORA</a>
+            <button type="button" class="btn hidden" id="addExpressions" title="Paint closed eyes and an open mouth in this character's own style (~2 min on the GPU)"><i class="fas fa-face-smile"></i> Add blink &amp; talk</button>
             <a class="btn hidden" id="dlPngtuber" title="Idle, talk and blink PNGs for veadotube mini, PNGTuber Plus or Discord overlays"><i class="fas fa-microphone"></i> PNGtuber pack</a>
+            <button type="button" class="btn" id="revealBtn" title="Show this character's files (PSD, layers, VRM) in your file manager"><i class="fas fa-folder-open"></i> Open folder</button>
             <button class="btn" id="regenBtn"><i class="fas fa-rotate"></i> New</button>
           </div>
+          <p class="hint hidden" id="avatar3dNote" role="status"></p>
 
           <details class="edit-panel" id="fullBodyPanel">
             <summary><i class="fas fa-person"></i> Complete the body</summary>
             <p class="hint">Draw the missing outfit, arms, legs and shoes from this character. Your current model stays saved; the result is a new character. A standing, front-facing pose works best for rigging.</p>
+            <label class="hint"><input type="checkbox" id="fullBodyFront"> Redraw facing forward in the VTuber pose: for side-on, action or prop-holding artwork. Use this artwork as a visual reference while drawing a front-facing stance. Fine patterns and accessories can still change.</label>
+            <div id="frontReferenceControls" hidden>
+              <label for="fullBodyReference">Reference influence <output id="fullBodyReferenceVal" for="fullBodyReference">65%</output></label>
+              <input type="range" id="fullBodyReference" min="0" max="1" step="0.05" value="0.65" aria-describedby="fullBodyReferenceHelp">
+              <p class="hint" id="fullBodyReferenceHelp">Higher values follow the reference's clothing and colours more closely, but can also carry over its pose. At 0%, only the description is used. First use downloads about 3.4 GB; processing stays on your computer.</p>
+            </div>
             <label for="fullBodyPrompt">Outfit details <span class="hint">(optional)</span></label>
-            <input type="text" id="fullBodyPrompt" class="edit-prompt" maxlength="5000" placeholder="Keep the current design, or add details such as black boots and a pleated skirt">
+            <input type="text" id="fullBodyPrompt" class="edit-prompt" maxlength="5000" placeholder="For example: calf-length gold dress, white underskirt, blue cloak with gold embroidered trim">
+            <p class="hint">Name the details that matter: garment length, sleeves, layers, embroidery and accessories. These supplement the saved character description.</p>
             <label for="fullBodyProportions">Proportions</label>
             <select id="fullBodyProportions"><option value="balanced">Balanced · smaller head, natural silhouette</option><option value="tall">Tall · longer body and legs</option><option value="compact">Compact · larger head, stylized silhouette</option></select>
             <label class="hint"><input type="checkbox" id="fullBodyGuided" checked> Align shoulders, hips and legs to a standing pose</label>

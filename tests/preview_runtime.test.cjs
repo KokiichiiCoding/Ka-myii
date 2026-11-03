@@ -139,6 +139,14 @@ for(const hz of [10,30,60,240]){
   assert.ok(M.earPoint(0,0,60,90,side,t).every(v=>Math.abs(v)<1e-12),'Ear base must stay attached');
  }
 }
+// Every ear and tail design has its menu entry, in the same order (the select's value indexes the list).
+{
+  const html=fs.readFileSync(path.resolve(__dirname,'../templates/preview.html'),'utf8');
+  const menu=id=>[...html.match(new RegExp('id="'+id+'">(.*?)</select>'))[1].matchAll(/<option value="(\d+)">(\w+)/g)].map(m=>[Number(m[1]),m[2].toLowerCase()]);
+  assert.deepEqual(menu('nekoStyle'),M.EARS.map((e,i)=>[i,e||'off']));
+  assert.deepEqual(menu('tailStyle'),M.TAILS.map((t,i)=>[i,t||'off']));
+  assert.ok(M.EARS.slice(1).every(e=>M.EAR_TILT[e]>0),'Every ear design has a lean');
+}
 // Reference-style nod: head leads quieter shoulders; every facial feature uses one transform.
 for(const hz of [10,30,60,240]){
  const head=[],body=[];const vertical={x:0,v:0};
@@ -207,6 +215,16 @@ assert.ok(Math.abs(F.toParams({...F.DEFAULT_NEUTRAL,roll:-.2},null,null).az*M.RO
 assert.equal(RT.strandShift({...binding,u:0},springs,1,.8,true,8),0,'Vertical physics keeps hair roots attached');
 assert.ok(Math.abs(RT.strandShift(binding,springs,3,2,true,8))<=8,'Vertical bangs are smoothly limited');
 const torsoGeometry={cx:100,shoulderY:100,hipY:260,width:140,height:120};
+{
+ const chest={cx:100,cy:100,rx:40,ry:30};
+ const weights=M.chestWeights(new Float32Array([100,100,140,100,100,130]),chest,0);
+ assert.equal(weights[0],1);assert.ok(Math.abs(weights[1]-Math.exp(-1))<1e-6);
+ assert.ok(Math.abs(weights[2]-Math.exp(-1))<1e-6);
+ assert.ok(M.chestWeights(new Float32Array([100,110]),chest,10)[0]===1,'Chest height moves the artwork-space influence');
+ assert.equal(M.chestOffset(100,0,200),0,'Zero strength disables chest movement');
+ assert.ok(Math.abs(M.chestOffset(100000,4,200))<=24,'Extreme movements are bounded');
+ assert.ok(Math.abs(M.chestOffset(2,1,200)-2)<.01,'Small motion stays responsive');
+}
 for(const roll of [-1,-.4,0,.4,1])for(const yaw of [-1,0,1]){
  const pose={roll,yaw,lift:.4};
  assert.deepEqual(M.torsoPoint(100,300,300,torsoGeometry,pose),[100,300],'Feet below the hip pivot stay planted');
@@ -240,3 +258,19 @@ function scope(getUserMedia){const self={FaceMesh:function(){}};const s={self,na
   assert.equal(await start,false);assert.equal(stopped,1);assert.equal(pending.active,false);
   console.log('Preview runtime: aliases, rig anchors, generated expressions, offline assets, missing devices, denied permission and late stream cleanup passed.');
 })().catch(err=>{console.error(err);process.exitCode=1;});
+
+// One-shot 2D gestures start and end at rest so they never snap the pose.
+{
+  for (const name of M.GESTURES) {
+    for (const v of Object.values(M.gesture(name, 0))) assert.ok(Math.abs(v) < .02, `${name} starts at rest`);
+    let end = 0; while (M.gesture(name, end + .01)) end += .01;
+    for (const v of Object.values(M.gesture(name, end))) assert.ok(Math.abs(v) < .02, `${name} ends at rest`);
+    assert.equal(M.gesture(name, 99), null, `${name} ends`);
+  }
+  assert.equal(M.gesture('dab', .3), null);
+  const xs = []; for (let t = .2; t < 1.1; t += .02) xs.push(M.gesture('shake', t).x);
+  assert.ok(Math.max(...xs) > .3 && Math.min(...xs) < -.3, 'shake turns the head both ways');
+  assert.ok(Math.min(...[.2, .3, .4].map(t => M.gesture('nod', t).y)) < -.4, 'nod dips the head');
+  assert.ok(M.gesture('yay', .7).mouthForm > 1, 'yay smiles');
+  console.log('2D gestures: seamless, shake, nod and yay passed');
+}

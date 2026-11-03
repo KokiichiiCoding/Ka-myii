@@ -59,3 +59,16 @@ Reference study: [Live2D body movement](https://docs.live2d.com/en/cubism-editor
 [ControlNet model card](https://huggingface.co/xinsir/controlnet-openpose-sdxl-1.0),
 [Diffusers memory techniques](https://huggingface.co/docs/diffusers/optimization/memory).
 Reference videos are not redistributed as assets.
+
+## Reference clothing (2026-10-26)
+
+Front redraws now combine the standing guide with IP-Adapter Plus image guidance. The source
+is fitted into the encoder square so the costume hem and footwear are not cropped away.
+Start at 65% Reference influence; spell out important garment lengths, layers and trims in
+Outfit details, then compare the result with the original before separating. This preserves
+more visual information than the tag brief alone, but patterns and fasteners can still change.
+Higher influence can also bring back the source pose or a held prop.
+
+Useful next steps: a dedicated outfit reference crop, independent costume/face guidance,
+regional embroidery repair, and a small multi-seed comparison with the same source. Test these
+against several distinct outfits before changing the default strength.

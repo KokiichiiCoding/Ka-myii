@@ -44,6 +44,15 @@ if command -v nvidia-smi >/dev/null && [ ! -x engines/see-through/.venv/bin/pyth
     fi
 fi
 
+if command -v nvidia-smi >/dev/null && [ ! -x engines/comfy3d/.venv/bin/python ] && [ ! -e engines/comfy3d.skip ]; then
+    read -r -p "Install the optional 3D avatar engine (8 GB+ NVIDIA GPU, CUDA 13 driver, ~10 GB download)? [y/N] " answer
+    if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+        .venv/bin/python scripts/install_3d.py || echo "3D engine install failed; 2D characters still work."
+    else
+        mkdir -p engines && echo declined > engines/comfy3d.skip
+    fi
+fi
+
 echo "  1) Studio - real generation (NVIDIA GPU)"
 echo "  2) Demo   - no GPU or downloads; a drawn character runs the full pipeline"
 default=2; command -v nvidia-smi >/dev/null && default=1

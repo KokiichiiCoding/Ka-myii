@@ -69,6 +69,31 @@ def test_cancel_running_job_stops_assembly_line_and_removes_its_folder(tmp_path)
     assert not get_progress_manager().is_cancelled(job.id)  # forgotten once finished
 
 
+def test_running_job_shows_its_artwork_while_layers_are_separated(tmp_path):
+    from src.pipeline.assembly_line import AssemblyLine
+
+    line = AssemblyLine(tmp_path, use_dummy_generators=True)
+    separating, release = threading.Event(), threading.Event()
+    real_separate = line._separate_assets
+
+    def slow_separate(*args, **kwargs):
+        separating.set()
+        release.wait(10)
+        return real_separate(*args, **kwargs)
+
+    line._separate_assets = slow_separate
+    q = JobQueue(lambda request, job_id: line.generate_model(request, task_id=job_id).id)
+    job = q.submit(GenerationRequest(prompt="1girl", width=256, height=256, steps=2))
+    assert separating.wait(10)
+    running = q.describe(job)
+    assert running["stage"] == "separate" and running["artwork"]
+    assert (tmp_path / running["artwork"] / "base_image.png").exists()
+    release.set()
+    _wait(job, timeout=60)
+    assert job.state == "completed" and job.model_id == running["artwork"]
+    assert "artwork" not in q.describe(job) and job.id not in get_progress_manager().artwork
+
+
 def test_failed_job_keeps_its_artwork_listed_and_drops_empty_folders(tmp_path):
     import json
     from src.pipeline.assembly_line import AssemblyLine

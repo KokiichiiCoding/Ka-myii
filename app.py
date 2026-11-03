@@ -56,6 +56,17 @@ def create_app(use_dummy_generators: bool = False):
             abort(403)
 
     @app.before_request
+    def reject_cross_site_writes():
+        # Without CORS other sites can't read responses, but a page can still auto-submit a
+        # "simple" form (e.g. an artwork upload that queues a GPU job). Browsers label those.
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        origin = request.headers.get('Origin')
+        if request.headers.get('Sec-Fetch-Site') in ('cross-site', 'same-site') or \
+                (origin and origin.split('://', 1)[-1] != request.host):
+            abort(403)
+
+    @app.before_request
     def limit_request_size():
         # ...every other request (artwork uploads, JSON) stays under 16 MB.
         if request.endpoint != 'generation.open_project' and (request.content_length or 0) > 16 * 1024 * 1024:
@@ -77,6 +88,11 @@ def create_app(use_dummy_generators: bool = False):
     def generator():
         """Model generator page"""
         return render_template('generator.html')
+
+    @app.route('/3d')
+    def studio_3d():
+        """Local VRM character workspace."""
+        return render_template('3d_studio.html')
 
     @app.route('/gallery')
     def gallery():
@@ -100,7 +116,8 @@ def create_app(use_dummy_generators: bool = False):
         made = expressions.read(model_dir)
         painted = {**made.get('toggles', {}), **({'visemes': True} if made.get('visemes') else {})}
         paintable = any(a.get('metadata', {}).get('backend') == 'see-through' for a in metadata.get('assets', []))
-        return render_template('preview.html', model_id=model_id, character_name=name,
+        has_avatar3d = bool(metadata.get('metadata', {}).get('avatar3d'))
+        return render_template('preview.html', model_id=model_id, character_name=name, has_avatar3d=has_avatar3d,
                                toggle_options=[{'id': k, 'label': t.label, 'painted': k in painted}
                                                for k, t in expressions.TOGGLES.items()]
                                + [{'id': 'visemes', 'label': 'A I U E O mouths', 'painted': 'visemes' in painted}]

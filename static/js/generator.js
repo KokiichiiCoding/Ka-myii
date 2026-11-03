@@ -37,13 +37,15 @@
     clearSelection: $('clearSelection'), editPrompt: $('editPrompt'), editStrength: $('editStrength'),
     editStrengthVal: $('editStrengthVal'), editBtn: $('editBtn'), editRetryBtn: $('editRetryBtn'), editNote: $('editNote'),
     fullBodyProportions: $('fullBodyProportions'), fullBodyKeepFace: $('fullBodyKeepFace'), fullBodyGuided: $('fullBodyGuided'), fullBodyPanel: $('fullBodyPanel'), fullBodyPrompt: $('fullBodyPrompt'), fullBodyOutput: $('fullBodyOutput'), fullBodyNote: $('fullBodyNote'),
-    extendFullBtn: $('extendFullBtn'), uncropBtn: $('uncropBtn'),
+    extendFullBtn: $('extendFullBtn'), uncropBtn: $('uncropBtn'), fullBodyFront: $('fullBodyFront'),
+    fullBodyReference: $('fullBodyReference'), fullBodyReferenceVal: $('fullBodyReferenceVal'),
   };
   let shownModelId = null; // the result on the canvas
 
   let selectedStyle = 'vtuber';
   let configModel = null; // the checkpoint an empty model_id resolves to on the server
   let source = 'prompt'; // or 'upload': decompose the user's own artwork instead of generating
+  let can3d = false; // the optional 3D engine is installed
 
   // ---- init ----
   document.addEventListener('DOMContentLoaded', async () => {
@@ -55,40 +57,30 @@
     setInterval(refreshQueue, 3000);
     if (await resumeActiveJob()) return;
     const savedId = new URLSearchParams(location.search).get('model');
+    // Gallery "Make a variation": the same brief and settings with a new seed, no result shown.
+    const briefId = new URLSearchParams(location.search).get('brief');
+    if (briefId && !savedId) {
+      try {
+        const {data} = await axios.get(`/api/generation/status/${encodeURIComponent(briefId)}`);
+        if (data.success && data.model.request && data.model.request.source !== 'upload') {
+          fillForm(data.model.request);
+          els.seed.value = -1; saveDraft(); els.prompt.focus();
+          return;
+        }
+      } catch (err) { /* fall back to the saved draft */ }
+    }
+    if (!savedId && !els.prompt.value) restoreDraft();   // also brings back steps, sampler, toggles...
     if (savedId) {
       try {
         const {data} = await axios.get(`/api/generation/status/${encodeURIComponent(savedId)}`);
         if (data.success) {
           const saved = data.model.request;
-          if (saved) {
-            els.prompt.value = saved.source === 'upload' ? '' : (saved.prompt || '');
-            els.negative.value = saved.negative_prompt || '';
-            $('framing').value = saved.framing || 'full_body';
-            if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
-            for (const [key, value] of [['steps',saved.steps],['cfg',saved.guidance_scale],['width',saved.width],['height',saved.height],['clipSkip',saved.clip_skip]]) {
-              if (value != null) { els[key].value=value; els[key+'Val'].textContent=value; }
-            }
-            const usedModel = saved.model_id || configModel;
-            if ([...els.model.options].some(o=>o.value===usedModel)) els.model.value=usedModel;
-            if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
-            const lora = saved.loras?.[0];
-            if (lora && [...els.lora.options].some(o=>o.value===(lora.id || lora.path))) {
-              els.lora.value = lora.id || lora.path;
-              els.loraWeight.value = lora.weight ?? 1; els.loraWeightVal.textContent = els.loraWeight.value;
-            }
-            const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
-            if (resolution) els.resolution.value=resolution.value;
-            if (saved.style) selectedStyle=saved.style;
-            for (const chip of els.styleChips.children) {
-              const active=chip.textContent===selectedStyle;
-              chip.classList.toggle('active',active); chip.setAttribute('aria-pressed',String(active));
-            }
-            updateModelHint();
-          }
+          if (saved) fillForm(saved);
           els.canvasEmpty.classList.add('hidden');
           await showResult({model_id:savedId, model:data.model});
           // Live Preview's "Extend to full body" link opens the extension controls.
-          if (['#extend','#fullbody'].includes(location.hash)) { els.fullBodyPanel.open = true; els.extendFullBtn.scrollIntoView({block: 'center'}); els.extendFullBtn.focus(); }
+          if (location.hash === '#front') { els.fullBodyFront.checked = true; els.fullBodyFront.dispatchEvent(new Event('change')); }
+          if (['#extend','#fullbody','#front'].includes(location.hash)) { els.fullBodyPanel.open = true; els.extendFullBtn.scrollIntoView({block: 'center'}); els.extendFullBtn.focus(); }
         }
       } catch (err) { showError('This character could not be opened. Return to the collection and try again.'); }
     }
@@ -108,7 +100,9 @@
       els.advToggle.setAttribute('aria-expanded', String(!els.advBody.classList.contains('hidden')));
       els.advChevron.classList.toggle('fa-chevron-down');
       els.advChevron.classList.toggle('fa-chevron-up');
+      try { localStorage.setItem('kamyii.studio.advanced', els.advBody.classList.contains('hidden') ? '' : '1'); } catch { /* private mode */ }
     };
+    try { if (localStorage.getItem('kamyii.studio.advanced')) els.advToggle.onclick(); } catch { /* private mode */ }
     els.resolution.onchange = () => {
       const opt = els.resolution.selectedOptions[0];
       if (opt && opt.dataset.w) {
@@ -124,6 +118,7 @@
           c.classList.toggle('active', c === chip); c.setAttribute('aria-pressed', String(c === chip));
         }
         els.uploadFields.classList.toggle('hidden', source !== 'upload');
+        $('batchRow').classList.toggle('hidden', source === 'upload');
         els.promptFields.classList.toggle('hidden', source === 'upload');
         els.sketchBtn.classList.toggle('hidden', source === 'upload');
         setGenerateLabel(busy);
@@ -137,6 +132,28 @@
       setCrop(null);
       if (file) els.artworkThumb.src = URL.createObjectURL(file);
     };
+    // Drop or paste an image anywhere on the page to import it (designs copied from a chat or site).
+    const useArtwork = (file) => {
+      if (!file || !/^image\/(png|jpeg|webp)$/.test(file.type)) return false;
+      const list = new DataTransfer(); list.items.add(file);
+      els.sourceChips.querySelector('[data-source="upload"]').click();
+      els.artwork.files = list.files; els.artwork.onchange();
+      els.uploadFields.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      return true;
+    };
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    document.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); els.form.classList.add('drop-target'); } });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) els.form.classList.remove('drop-target'); });
+    document.addEventListener('drop', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); els.form.classList.remove('drop-target');
+      if (!useArtwork(e.dataTransfer.files[0])) alert('Drop a PNG, JPG or WebP image.');
+    });
+    document.addEventListener('paste', (e) => {
+      if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;  // normal text paste
+      const item = [...(e.clipboardData?.items || [])].find((i) => i.kind === 'file');
+      if (item && useArtwork(item.getAsFile())) e.preventDefault();
+    });
     els.form.onsubmit = onGenerate;
     els.regenBtn.onclick = resetToForm;
     bindEditor();
@@ -150,6 +167,31 @@
       } catch (err) { showError(err.response?.data?.error || 'Could not queue the separation'); }
       finally { els.separateBtn.disabled = false; }
     };
+    $('revealBtn').onclick = async () => {
+      if (!shownModelId) return;
+      try { await axios.post(`/api/generation/reveal/${encodeURIComponent(shownModelId)}`); }
+      catch (err) { els.editNote.textContent = `Could not open the folder: ${err.response?.data?.error || err.message}`; }
+    };
+    $('addExpressions').onclick = async () => {
+      if (!shownModelId) return;
+      $('addExpressions').disabled = true;
+      try {
+        const { data } = await axios.post(`/api/generation/expressions/${encodeURIComponent(shownModelId)}`);
+        if (!data.success) throw new Error(data.error);
+        if (busy) refreshQueue(); else track(data.job);
+      } catch (err) { showError(err.response?.data?.error || 'Could not queue blink & talk'); }
+      finally { $('addExpressions').disabled = false; }
+    };
+    $('make3d').onclick = async () => {
+      if (!shownModelId) return;
+      $('make3d').disabled = true;
+      try {
+        const { data } = await axios.post(`/api/generation/avatar3d/${encodeURIComponent(shownModelId)}`, {});
+        if (!data.success) throw new Error(data.error);
+        if (busy) refreshQueue(); else track(data.job);
+      } catch (err) { showError(err.response?.data?.error || 'Could not queue the 3D avatar'); }
+      finally { $('make3d').disabled = false; }
+    };
     els.cancelBtn.onclick = async () => {
       if (!currentTaskId) return;
       els.cancelBtn.disabled = true;
@@ -159,11 +201,20 @@
     };
   }
 
+  $('avatarKind').addEventListener('change', () => {
+    const three = $('avatarKind').value === '3d';
+    if (three) $('framing').value = 'full_body';
+    $('framing').disabled = three;
+  });
+
   async function loadOptions() {
     try {
       const { data } = await axios.get('/api/generation/options');
       if (!data.success) return;
 
+      can3d = !!data.avatar3d?.available;
+      $('avatarKind').options[1].disabled = !can3d;
+      if (!can3d) $('avatarHint').textContent = `3D avatars need the optional 3D engine (about 10 GB): run ${data.avatar3d?.install || 'python scripts/install_3d.py'}.`;
       // styles
       els.styleChips.innerHTML = '';
       data.styles.forEach((s) => {
@@ -256,6 +307,89 @@
   // ---- background job tracking ----
   // Generation runs as a server-side job; polling (not the socket) is the single source of truth,
   // so a reloaded or reopened tab re-attaches to the running job.
+  // Each painted toggle adds about 15 s after the layers.
+  function toggleCount() {
+    const n = document.querySelectorAll('#toggleChips .active').length;
+    $('togglesLabel').textContent = n ? `Expression toggles · ${n} selected, about ${n * 15} s` : 'Expression toggles';
+  }
+
+  // Put a saved character's brief and settings back into the form.
+  function fillForm(saved) {
+    if (saved.extension?.mode === 'front') {
+      els.fullBodyReference.value = saved.extension.reference_strength ?? 0.65;
+      els.fullBodyReference.oninput();
+      els.fullBodyPrompt.value = saved.extension.outfit || '';
+      els.fullBodyProportions.value = saved.extension.proportions || 'balanced';
+    }
+    els.prompt.value = saved.source === 'upload' ? '' : (saved.prompt || '');
+    els.negative.value = saved.negative_prompt || '';
+    $('framing').value = saved.framing || 'full_body';
+    if (saved.seed != null) { lastSeed = saved.seed; els.seed.value = saved.seed; }
+    for (const [key, value] of [['steps',saved.steps],['cfg',saved.guidance_scale],['width',saved.width],['height',saved.height],['clipSkip',saved.clip_skip]]) {
+      if (value != null) { els[key].value=value; els[key+'Val'].textContent=value; }
+    }
+    const usedModel = saved.model_id || configModel;
+    if ([...els.model.options].some(o=>o.value===usedModel)) els.model.value=usedModel;
+    if ([...els.sampler.options].some(o=>o.value===saved.sampler)) els.sampler.value=saved.sampler;
+    const lora = saved.loras?.[0];
+    if (lora && [...els.lora.options].some(o=>o.value===(lora.id || lora.path))) {
+      els.lora.value = lora.id || lora.path;
+      els.loraWeight.value = lora.weight ?? 1; els.loraWeightVal.textContent = els.loraWeight.value;
+    }
+    const resolution=[...els.resolution.options].find(o=>Number(o.dataset.w)===saved.width&&Number(o.dataset.h)===saved.height);
+    if (resolution) els.resolution.value=resolution.value;
+    if (saved.style) selectedStyle=saved.style;
+    for (const chip of els.styleChips.children) {
+      const active=chip.textContent===selectedStyle;
+      chip.classList.toggle('active',active); chip.setAttribute('aria-pressed',String(active));
+    }
+    for (const chip of document.querySelectorAll('#toggleChips [data-toggle]')) {
+      const on = (saved.toggles || []).includes(chip.dataset.toggle);
+      chip.classList.toggle('active', on); chip.setAttribute('aria-pressed', String(on));
+    }
+    if (saved.avatar3d && !$('avatarKind').options[1].disabled) { $('avatarKind').value = '3d'; $('avatarKind').dispatchEvent(new Event('change')); }
+    toggleCount();
+    updateModelHint();
+  }
+
+  // The unsent brief survives a reload or a trip to the Gallery (this browser only).
+  const DRAFT_KEY = 'kamyii.studio.draft';
+  // The whole brief (never the seed), shaped like a saved request so fillForm can restore it.
+  function restoreDraft() {
+    try {
+      const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+      if (!draft) return;
+      if (draft.negative !== undefined && draft.negative_prompt === undefined) draft.negative_prompt = draft.negative;   // older drafts
+      fillForm({...draft, seed: null});
+    } catch { /* storage unavailable: start empty */ }
+  }
+  function saveDraft() {
+    const draft = {
+      prompt: els.prompt.value, negative_prompt: els.negative.value, style: selectedStyle, framing: $('framing').value,
+      model_id: els.model.value, sampler: els.sampler.value, steps: Number(els.steps.value), guidance_scale: Number(els.cfg.value),
+      width: Number(els.width.value), height: Number(els.height.value), clip_skip: Number(els.clipSkip.value),
+      loras: els.lora.value ? [{id: els.lora.value, weight: Number(els.loraWeight.value)}] : null,
+      toggles: [...document.querySelectorAll('#toggleChips .active')].map((c) => c.dataset.toggle),
+      avatar3d: $('avatarKind').value === '3d',
+    };
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* private mode */ }
+  }
+
+  // A random, VTuber-friendly starting brief in the tag style the checkpoints expect.
+  const IDEAS = {
+    who: ['1girl', '1girl', '1girl', '1boy'],
+    hair: ['silver hair', 'pink hair', 'black hair', 'blonde hair', 'light blue hair', 'red hair', 'white hair', 'purple hair', 'brown hair', 'green hair', 'two-tone hair', 'gradient hair'],
+    style: ['long hair, twintails', 'short hair, bob cut', 'long hair, ponytail', 'medium hair, side braid', 'very long hair, hime cut', 'short hair, messy hair', 'long hair, twin braids', 'wavy hair, side ponytail'],
+    eyes: ['blue eyes', 'red eyes', 'golden eyes', 'green eyes', 'purple eyes', 'heterochromia', 'pink eyes', 'aqua eyes'],
+    outfit: ['sailor uniform', 'oversized hoodie', 'maid outfit', 'witch hat, black robe', 'idol costume, frills', 'school blazer, ribbon', 'kimono, obi', 'gothic lolita dress', 'track jacket', 'sweater, turtleneck', 'cyberpunk jacket, neon trim', 'shrine maiden outfit', 'knight armor, cape', 'chef uniform', 'pajamas, sleep mask on head'],
+    extra: ['cat ears', 'fox ears', 'star hair ornament', 'headphones', 'hair ribbon', 'glasses', 'halo', 'small horns', 'flower hair ornament', 'choker', 'hairclip', 'beret', '', ''],
+    mood: ['gentle smile', 'confident smile', 'shy, blush', 'smug', 'cheerful, open mouth', 'sleepy', 'serious', 'playful wink'],
+  };
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  function surpriseBrief() {
+    return [pick(IDEAS.who), pick(IDEAS.hair), pick(IDEAS.style), pick(IDEAS.eyes), pick(IDEAS.outfit), pick(IDEAS.extra), pick(IDEAS.mood)].filter(Boolean).join(', ');
+  }
+
   async function resumeActiveJob() {
     try {
       const { data } = await axios.get('/api/generation/jobs');
@@ -281,12 +415,12 @@
         const j = data.job;
         renderJob(j);
         if (j.state === 'completed') {
-          endJob();
+          endJob(); flagTab('✓ Ready');
           const status = await axios.get(`/api/generation/status/${encodeURIComponent(j.model_id)}`);
           await showResult({ model_id: j.model_id, model: status.data.model });
           return;
         }
-        if (j.state === 'failed') { endJob(); showError(j.error || 'Generation failed'); return; }
+        if (j.state === 'failed') { endJob(); flagTab('✕ Failed'); showError(j.error || 'Generation failed'); return; }
         if (j.state === 'cancelled') { endJob(); els.overlay.classList.add('hidden'); resetToForm(); return; }
       } catch (err) {
         if (err.response?.status === 404) {
@@ -303,6 +437,10 @@
 
   function renderJob(j) {
     els.pFill.style.width = (j.progress || 0) + '%';
+    // The artwork is ready long before its layers: show it, so a miss can be cancelled early.
+    const art = $('progressArt'), src = j.artwork ? `/api/generation/preview/${encodeURIComponent(j.artwork)}?size=thumb` : '';
+    if (src && art.dataset.src !== src) { art.dataset.src = src; art.src = src; art.onload = () => art.classList.remove('hidden'); }
+    if (!src) { art.classList.add('hidden'); art.dataset.src = ''; }
     // A real run takes ~15 min; show progress on the tab while the user is elsewhere.
     document.title = (j.state === 'queued' ? 'Queued' : Math.floor(j.progress || 0) + '%') + ' · ' + pageTitle;
     if (j.state === 'queued') {
@@ -318,8 +456,16 @@
     els.cancelBtn.disabled = !!j.cancel_requested;
   }
 
+  // A finished job in a background tab keeps saying so until the user looks.
+  function flagTab(text) {
+    if (!document.hidden) return;
+    document.title = `${text} · ${pageTitle}`;
+    document.addEventListener('visibilitychange', () => { document.title = pageTitle; }, {once: true});
+  }
+
   function endJob() {
     clearTimeout(pollTimer);
+    $('progressArt').classList.add('hidden'); $('progressArt').dataset.src = '';
     document.title = pageTitle;
     busy = false;
     setGenerateLabel(false);
@@ -355,6 +501,15 @@
       els.queueList.appendChild(li);
     }
     els.queuePanel.classList.toggle('hidden', !others.length && !els.queueNote.textContent);
+    // A batch queued by mistake: cancel every waiting job at once (the running one keeps going).
+    const waiting = jobs.filter((j) => j.state === 'queued' && j.id !== currentTaskId);
+    $('cancelQueued').classList.toggle('hidden', waiting.length < 2);
+    $('cancelQueued').onclick = async () => {
+      $('cancelQueued').disabled = true;
+      for (const j of waiting) await axios.post(`/api/generation/jobs/${j.id}/cancel`).catch(() => {});
+      $('cancelQueued').disabled = false;
+      refreshQueue();
+    };
   }
 
   function setGenerateLabel(queueing) {
@@ -399,7 +554,7 @@
   async function onGenerate(e) {
     e.preventDefault();
     if (submitting) return;
-    let send;
+    let send, extra = [];
     if (source === 'upload') {
       const file = els.artwork.files[0];
       if (!file) { els.artwork.focus(); return; }
@@ -413,8 +568,15 @@
       send = () => axios.post('/api/generation/upload', form);
     } else {
       const prompt = els.prompt.value.trim();
-      if (!prompt) { els.prompt.focus(); return; }
-      send = briefSender(prompt, e.submitter === els.sketchBtn);
+      if (!prompt) {   // say what is missing instead of silently doing nothing
+        els.prompt.placeholder = 'Describe your character first, or press ✦ Surprise me (↺ Recent reuses an earlier brief).';
+        els.prompt.classList.remove('flash'); void els.prompt.offsetWidth; els.prompt.classList.add('flash');
+        els.prompt.focus(); return;
+      }
+      const sketch = e.submitter === els.sketchBtn, count = Number($('batchCount').value) || 1;
+      send = briefSender(prompt, sketch);
+      // "How many": the rest of the batch joins the queue behind the first, one seed each.
+      if (count > 1) extra = Array.from({length: count - 1}, (_, i) => briefSender(prompt, sketch, i + 1));
     }
 
     // While a job is on the canvas, new briefs join the queue instead of replacing it.
@@ -428,6 +590,10 @@
       const { data } = await send();
       if (!data.success) throw new Error(data.error || 'Generation failed');
       if (queueing) refreshQueue(); else track(data.job);
+      for (const next of extra) {   // a failure here must not end the first job's progress view
+        try { await next(); } catch (err) { els.queueNote.textContent = err.response?.data?.error || err.message; break; }
+      }
+      if (extra.length) refreshQueue();
     } catch (err) {
       const msg = err.response?.data?.error || err.message || String(err);
       if (queueing) { els.queueNote.textContent = msg; refreshQueue(); }
@@ -438,7 +604,7 @@
     }
   }
 
-  function briefSender(prompt, sketch) {
+  function briefSender(prompt, sketch, offset = 0) {
     const seedRaw = parseInt(els.seed.value, 10);
     const payload = {
       prompt,
@@ -452,16 +618,40 @@
       width: parseInt(els.width.value, 10),
       height: parseInt(els.height.value, 10),
       clip_skip: parseInt(els.clipSkip.value, 10),
-      seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw,
+      seed: (isNaN(seedRaw) || seedRaw < 0) ? null : seedRaw + offset,
       loras: els.lora.value ? [{ id: els.lora.value, weight: parseFloat(els.loraWeight.value) }] : null,
       sketch,
       toggles: [...document.querySelectorAll('#toggleChips .active')].map((c) => c.dataset.toggle),
+      avatar3d: $('avatarKind').value === '3d' && !sketch ? { quality: 'standard' } : false,
     };
-    if (!busy) lastSeed = payload.seed;
+    if (!busy && !offset) lastSeed = payload.seed;
     return () => axios.post('/api/generation/generate', payload);
   }
 
+  // Something to read during a ten-minute wait: what to try once the character is ready.
+  const TIPS = [
+    'In Live Preview, press N to nod, H to shake the head, T for a puzzled tilt, Y for a happy bounce.',
+    'Live Preview keys 1–7 switch expressions; Shift+1–9 switch painted toggles like blush or tears.',
+    'Turn on the camera in Live Preview and the character follows your head, blinks and talks. Nothing leaves your machine.',
+    "Add blink & talk paints closed eyes and an open mouth in this character's own style (about 2 minutes).",
+    'Make 3D avatar turns a full-body, front-facing character into a rigged VRM for VSeeFace or VRChat-style apps.',
+    'The 3D stage has a green screen background and a Bust framing preset for OBS.',
+    'Gallery → More options → Make a variation reuses this brief with a new seed.',
+    'Export saves the layered PSD and the Cubism scaffold; Open exported character brings a project back.',
+    'Drop or paste a picture anywhere in the Studio to start from your own artwork.',
+  ];
+  let tipTimer = null;
+  function rotateTips() {
+    clearInterval(tipTimer);
+    let i = Math.floor(Math.random() * TIPS.length);
+    const show = () => { $('progressTip').textContent = TIPS[i++ % TIPS.length]; };
+    show(); tipTimer = setInterval(() => { if (els.overlay.classList.contains('hidden')) clearInterval(tipTimer); else show(); }, 9000);
+  }
+
   function showProgress() {
+    rotateTips();
+    // The Create button sits below a long form; bring the progress into view.
+    els.overlay.parentElement.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     els.errorPanel.classList.add('hidden');
     els.resultMeta.classList.add('hidden');
     els.layerPanel.classList.add('hidden');
@@ -488,6 +678,8 @@
     };
     els.resultImg.onerror = () => { els.overlay.classList.add('hidden'); };
 
+    const name = model.display_name || (model.name?.startsWith('model_') ? `Study ${model.name.slice(6).toUpperCase()}` : (model.name || ''));
+    $('resultName').value = $('resultName').dataset.saved = name;
     els.metaStatus.textContent = model.status || 'completed';
     els.metaLayers.textContent = (meta.layers || []).length || '—';
     els.metaTime.textContent = model.generation_time ? model.generation_time.toFixed(1) + 's' : '—';
@@ -502,16 +694,34 @@
     history.replaceState(null, '', resultUrl.pathname + resultUrl.search + resultUrl.hash);
     prepareEditor(mid);
     renderChecks(model, mid);
+    const referenceId = model.request?.extension?.source_model;
+    const hasReference = model.request?.extension?.mode === 'front' && typeof referenceId === 'string' && /^[\w-]+$/.test(referenceId);
+    $('redrawComparison').classList.toggle('hidden', !hasReference);
+    if (hasReference) {
+      $('redrawSourceImage').src = `/api/generation/preview/${encodeURIComponent(referenceId)}`;
+      $('redrawResultImage').src = els.resultImg.src;
+      $('redrawSourceLink').href = `/generator?model=${encodeURIComponent(referenceId)}`;
+    } else {
+      for (const id of ['redrawSourceImage', 'redrawResultImage']) $(id).removeAttribute('src');
+      $('redrawSourceLink').removeAttribute('href');
+    }
     const sketch = model.status === 'sketch';
     els.separateBtn.classList.toggle('hidden', !sketch);
     for (const el of [$('livePreview'), els.dlPackage, els.dlPsd, els.dlOra]) el.classList.toggle('hidden', sketch);
     els.resultMeta.classList.remove('hidden');
 
     $('livePreview').href = `/preview/${encodeURIComponent(mid)}`;
+    $('open3d').classList.toggle('hidden', !meta.avatar3d);
+    $('open3d').href = `/3d?model=${encodeURIComponent(mid)}`;
+    $('avatar3dNote').classList.toggle('hidden', !(meta.avatar3d_error && !meta.avatar3d));
+    $('avatar3dNote').textContent = `The 3D avatar could not be built: ${meta.avatar3d_error || ''}. The 2D character is complete; Make 3D avatar tries again.`;
+    $('make3d').classList.toggle('hidden', !can3d || !!meta.avatar3d || !['completed', 'sketch'].includes(model.status));
     els.dlPackage.href = `/api/generation/artifact/${mid}/package`;
     els.dlPsd.href = `/api/generation/artifact/${mid}/psd`;
     els.dlOra.href = `/api/generation/artifact/${mid}/ora`;
-    // Needs the painted closed eyes / second mouth shape (Gallery: Add blink & talk).
+    const separated = model.status === 'completed' && (model.assets || []).some((a) => a.metadata?.backend === 'see-through');
+    $('addExpressions').classList.toggle('hidden', !separated || !!model.metadata?.expressions);
+    // Needs the painted closed eyes / second mouth shape (Add blink & talk).
     $('dlPngtuber').classList.toggle('hidden', sketch || !model.metadata?.expressions);
     $('dlPngtuber').href = `/api/generation/artifact/${mid}/pngtuber`;
 
@@ -554,6 +764,7 @@
 
   function bindEditor() {
     els.editStrength.oninput = () => (els.editStrengthVal.textContent = els.editStrength.value);
+    els.fullBodyReference.oninput = () => (els.fullBodyReferenceVal.textContent = `${Math.round(Number(els.fullBodyReference.value) * 100)}%`);
     els.paintToggle.onclick = () => setPaint(!paintMode, false);
     els.eraseToggle.onclick = () => setPaint(true, !eraseMode);
     els.clearSelection.onclick = () => {
@@ -562,7 +773,15 @@
       clearMask(); drawParts();
     };
     els.editBtn.onclick = () => submitEdit(false);
-    els.extendFullBtn.onclick = () => submitExtend('full_body');
+    els.extendFullBtn.onclick = () => submitExtend(els.fullBodyFront.checked ? 'front' : 'full_body');
+    // A front redraw keeps nothing of the old picture: face preservation and the fit guide don't apply.
+    els.fullBodyFront.addEventListener('change', () => {
+      const front = els.fullBodyFront.checked;
+      els.fullBodyGuided.disabled = els.fullBodyKeepFace.disabled = front;
+      $('fullBodyFit').hidden = front;
+      $('frontReferenceControls').hidden = !front;
+      els.extendFullBtn.textContent = front ? 'Redraw facing forward' : 'Generate full body';
+    });
     $('fullBodyFit').addEventListener('toggle', () => { if ($('fullBodyFit').open) drawExtensionGuide(); });
     els.fullBodyProportions.addEventListener('change', () => { fitGuides = null; if ($('fullBodyFit').open) drawExtensionGuide(); });
     $('fitReset').onclick = () => { fitGuides = null; drawExtensionGuide(); };
@@ -628,6 +847,8 @@
     els.maskCanvas.classList.toggle('painting', on);
     els.paintToggle.classList.toggle('active', on && !eraseMode); els.paintToggle.setAttribute('aria-pressed', String(on && !eraseMode));
     els.eraseToggle.classList.toggle('active', eraseMode); els.eraseToggle.setAttribute('aria-pressed', String(eraseMode));
+    // The edit panel sits below a tall canvas; bring the picture back into view to paint on it.
+    if (on) els.maskCanvas.scrollIntoView({block: 'nearest'});
   }
 
   function clearMask() {
@@ -782,8 +1003,9 @@
     try {
       let res;
       if (f.fix === 'reseed') res = await axios.post(`/api/generation/extend/${encodeURIComponent(ext.source_model)}`, {
-        mode: 'full_body', prompt: ext.outfit || '', proportions: ext.proportions || 'balanced',
-        keep_face: ext.keep_face !== false, guided: !!ext.guided, guides: ext.guides || null, separate: false });
+        mode: ext.mode === 'front' ? 'front' : 'full_body', prompt: ext.outfit || '', proportions: ext.proportions || 'balanced',
+        keep_face: ext.keep_face !== false, guided: !!ext.guided, guides: ext.guides || null,
+        reference_strength: ext.reference_strength ?? 0.65, separate: false });
       else if (f.fix === 'uncrop') res = await axios.post(`/api/generation/extend/${id}`, { mode: 'uncrop' });
       else if (f.fix === 'repaint') res = await axios.post(`/api/generation/edit/${id}`, { parts: [], mask: boxMask(f.box), prompt: f.prompt || '', strength: 0.65 });
       else res = await axios.post(`/api/generation/refine/${id}`, { target: 'hands' });
@@ -802,15 +1024,17 @@
 
   async function submitExtend(mode) {
     if (!shownModelId) return;
-    const note = mode==='full_body'?els.fullBodyNote:els.editNote;
+    const body = mode !== 'uncrop';
+    const note = body?els.fullBodyNote:els.editNote;
     note.textContent = '';
     for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = true;
     try {
       const { data } = await axios.post(`/api/generation/extend/${encodeURIComponent(shownModelId)}`,
-        { mode, prompt: (mode==='full_body'?els.fullBodyPrompt:els.editPrompt).value.trim(),
+        { mode, prompt: (body?els.fullBodyPrompt:els.editPrompt).value.trim(),
           proportions: els.fullBodyProportions.value, keep_face: els.fullBodyKeepFace.checked, guided: els.fullBodyGuided.checked,
           guides: mode === 'full_body' ? fitGuides : null,
-          separate: mode==='full_body' && els.fullBodyOutput.value==='preview' });
+          reference_strength: mode === 'front' ? Number(els.fullBodyReference.value) : undefined,
+          separate: body && els.fullBodyOutput.value==='preview' });
       if (busy) { note.textContent = 'Added to the queue.'; refreshQueue(); } else track(data.job);
     } catch (err) { note.textContent = err.response?.data?.error || 'Could not queue the extension'; }
     finally { for (const b of [els.extendFullBtn, els.uncropBtn]) b.disabled = false; }
@@ -836,6 +1060,11 @@
   }
 
   function showError(msg) {
+    // The raw CUDA message means nothing to most people.
+    if (/out of memory|CUDA_ERROR_OUT_OF_MEMORY|CUBLAS_STATUS_ALLOC_FAILED/i.test(msg)) {
+      msg = 'The graphics card ran out of memory. Close games, video apps or other AI tools using the GPU, '
+        + 'then try again. If the artwork was already drawn, it is in the Gallery with a Retry layers button.';
+    }
     els.overlay.classList.add('hidden');
     els.canvasEmpty.classList.remove('hidden');
     els.errorMsg.textContent = msg;
@@ -863,6 +1092,70 @@
       slider.style.background = `linear-gradient(to right, var(--accent) 0%, var(--accent) ${val * 100}%, var(--border) ${val * 100}%, var(--border) 100%)`;
     });
 
+    // Rename the character on the canvas in place (same endpoint as the Gallery).
+    $('resultName').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') e.target.blur();
+      if (e.key === 'Escape') { e.target.value = e.target.dataset.saved; e.target.blur(); }
+    });
+    $('resultName').addEventListener('change', async (e) => {
+      const input = e.target, wanted = input.value.trim();
+      if (!shownModelId || !wanted || wanted === input.dataset.saved) { input.value = input.dataset.saved; return; }
+      try {
+        const { data } = await axios.post(`/api/generation/rename/${encodeURIComponent(shownModelId)}`, { name: wanted });
+        if (!data.success) throw new Error(data.error);
+        input.value = input.dataset.saved = data.display_name;
+        input.classList.remove('saved'); void input.offsetWidth; input.classList.add('saved');
+      } catch (err) { input.value = input.dataset.saved; }
+    });
+    els.prompt.addEventListener('input', saveDraft);
+    els.negative.addEventListener('input', saveDraft);
+    // Rough totals from measured runs on the 8 GB laptop: a sketch ~1 min, layers ~11 min, 3D +4 min.
+    const batchHint = () => {
+      const n = Number($('batchCount').value) || 1, full = $('avatarKind').value === '3d' ? 15 : 11;
+      $('batchHint').textContent = n === 1 ? 'Pick the best, then separate it.' : `About ${n} min as sketches, or ${n * full} min as finished characters.`;
+    };
+    $('batchCount').addEventListener('change', batchHint);
+    $('avatarKind').addEventListener('change', batchHint);
+    // Settings and chips too, so the next visit starts from the same checkpoint, steps and look.
+    els.form.addEventListener('change', (e) => { if (e.target.id !== 'seed' && e.target.id !== 'artwork') saveDraft(); });
+    els.form.addEventListener('click', (e) => {
+      if (e.target.closest('#toggleChips .chip')) toggleCount();
+      if (e.target.closest('#styleChips .chip, #toggleChips .chip')) saveDraft();
+    });
+    // The whole brief is remembered, so offer a way back to an empty one with default settings.
+    $('clearBrief').addEventListener('click', () => {
+      if (els.prompt.value.trim() && !confirm('Clear the brief and go back to the default settings?')) return;
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* private mode */ }
+      location.href = '/generator';
+    });
+    // Recent briefs: the last distinct prompts from the collection, newest first.
+    const closeRecent = () => { $('recentList').classList.add('hidden'); $('recentBtn').setAttribute('aria-expanded', 'false'); };
+    $('recentBtn').addEventListener('click', async () => {
+      if (!$('recentList').classList.contains('hidden')) { closeRecent(); return; }
+      let models = [];
+      try { models = (await axios.get('/api/generation/list')).data.models || []; } catch (e) { /* offline: empty list */ }
+      const seen = new Set(), recent = [];
+      for (const m of models) {
+        const p = m.request?.source === 'upload' ? '' : (m.request?.prompt || '').trim();
+        if (p && !seen.has(p) && recent.length < 8) { seen.add(p); recent.push(m.request); }
+      }
+      $('recentList').replaceChildren(...(recent.length ? recent.map((r) => {
+        const item = document.createElement('li'); item.setAttribute('role', 'option'); item.tabIndex = 0; item.textContent = item.title = r.prompt;
+        const pick = () => { els.prompt.value = r.prompt; els.negative.value = r.negative_prompt || ''; saveDraft(); closeRecent(); els.prompt.focus(); };
+        item.addEventListener('click', pick);
+        item.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); if (e.key === 'Escape') closeRecent(); });
+        return item;
+      }) : [Object.assign(document.createElement('li'), {textContent: 'No briefs yet: your characters\' briefs appear here.', className: 'muted'})]));
+      $('recentList').classList.remove('hidden'); $('recentBtn').setAttribute('aria-expanded', 'true');
+      $('recentList').querySelector('li')?.focus();
+    });
+    document.addEventListener('click', (e) => { if (!e.target.closest('#recentList, #recentBtn')) closeRecent(); });
+    $('surpriseBtn').addEventListener('click', () => {
+      els.prompt.value = surpriseBrief(); saveDraft();
+      els.prompt.classList.remove('flash'); void els.prompt.offsetWidth; els.prompt.classList.add('flash');
+      els.prompt.focus();
+    });
+
     // Add keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       // Ctrl/Cmd + Enter to generate
@@ -870,8 +1163,8 @@
         e.preventDefault();
         els.generateBtn.click();
       }
-      // Escape to reset
-      if (e.key === 'Escape' && !busy) {
+      // Escape to reset (not while typing, nor when it is closing a dialog such as the shortcuts list)
+      if (e.key === 'Escape' && !busy && !document.querySelector('dialog[open]') && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) {
         resetToForm();
       }
     });

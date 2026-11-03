@@ -279,6 +279,30 @@ def test_preview_cloth_under_hair_loses_painted_strand_copies():
     assert shirt.getpixel((42, 50)) == (60, 60, 70, 255), "Only the preview cache is repaired"
 
 
+def test_preview_repairs_hair_cut_out_by_a_moving_ribbon():
+    from src.core.live_preview import _repair_accessory_hair
+    hair = Image.new('RGBA', (120, 120))
+    hair.paste((180, 190, 220, 255), (20, 10, 90, 110))
+    hair.paste((0, 0, 0, 0), (55, 30, 65, 90))
+    hair.paste((0, 0, 0, 0), (30, 40, 32, 50))  # a gap not covered by the accessory
+    ribbon = Image.new('RGBA', hair.size)
+    ribbon.paste((20, 30, 90, 254), (53, 28, 67, 92))
+    ribbon.paste((20, 30, 90, 180), (55, 30, 57, 90))  # translucent edges stay untouched
+    ribbon.paste((20, 30, 90, 255), (100, 30, 110, 90))  # outside the hair silhouette
+    items = [('back hair', hair), ('headwear', ribbon)]
+    repaired = _repair_accessory_hair(items)
+    result = repaired[0][1]
+    assert result.getpixel((60, 50)) == (180, 190, 220, 255)
+    assert result.getpixel((56, 50))[3] == 0
+    assert result.getpixel((31, 45))[3] == 0
+    assert result.getpixel((105, 50))[3] == 0
+    assert hair.getpixel((60, 50))[3] == 0, 'Artist layers stay unchanged'
+    before = np.asarray(Image.alpha_composite(hair, ribbon)).astype(int)
+    after = np.asarray(Image.alpha_composite(result, ribbon)).astype(int)
+    assert np.abs(before - after).max() <= 5, 'The resting composite remains visually unchanged'
+    assert _repair_accessory_hair([('headwear', ribbon), ('back hair', hair)])[1][1] is hair
+
+
 def test_preview_heals_mouth_holes_and_fringe_for_narrow_expression_shapes():
     from src.core.live_preview import _clean_hidden_skin
     face = Image.new("RGBA", (100, 120))

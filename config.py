@@ -268,6 +268,14 @@ MODEL_ASSEMBLY = {
 # so Live Preview blinks and talks with the character's own art instead of generic shapes.
 EXPRESSIONS = _env_bool("KAMYII_EXPRESSIONS", True)
 
+# Optional 3D avatar (VRM) from a finished character: Pixal3D in a private ComfyUI engine
+# installed by scripts/install_3d.py, started only for the length of a 3D job.
+AVATAR3D = {
+    "engine_dir": os.getenv("KAMYII_3D_ENGINE_DIR", str(BASE_DIR / "engines" / "comfy3d")),
+    "port": _env_int("KAMYII_3D_PORT", 8198),
+    "engine_args": os.getenv("KAMYII_3D_ENGINE_ARGS", ""),   # e.g. "--novram" if a run spills
+}
+
 PIPELINE = {
     "save_intermediate_steps": True,
     "cleanup_temp_files": False,

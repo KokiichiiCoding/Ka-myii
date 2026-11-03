@@ -19,10 +19,31 @@ from src.core.image_generator import ImageGenerator, DummyImageGenerator
 from src.core.asset_separator import AssetSeparator, DummyAssetSeparator
 from src.core.model_assembler import ModelAssembler, DummyModelAssembler
 from src.utils.helpers import save_json
+from src.utils.progress_tracker import get_progress_manager
 from src.core import expressions
 import config
 
 logger = logging.getLogger(__name__)
+
+
+def _replace_avatar(work: Path, final: Path) -> None:
+    """Install a finished avatar without deleting the previous one if a rename fails."""
+    backup = final.with_name(f"{final.name}.backup-{uuid.uuid4().hex}")
+    had_previous = final.exists()
+    if had_previous:
+        final.rename(backup)
+    try:
+        work.rename(final)
+    except BaseException:
+        if had_previous:
+            try:
+                backup.rename(final)
+            except OSError as restore_error:
+                logger.exception("Could not restore previous 3D avatar; it remains at %s", backup)
+                raise RuntimeError(f"The previous 3D avatar was preserved at {backup}, but could not be restored automatically.") from restore_error
+        raise
+    if had_previous:
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 class AssemblyLine:
@@ -144,7 +165,7 @@ class AssemblyLine:
                 base_image_path = self._repaint(request, model_output_dir, task_id)
                 model.request = request = replace(request, reference_image=None, mask_image=None, pose_image=None)
                 model.metadata["source"] = request.operation
-                if request.operation == "extend" and (request.extension or {}).get("mode") == "full_body":
+                if request.operation == "extend" and (request.extension or {}).get("mode") in ("full_body", "front"):
                     model.metadata["checks"] = self._review(base_image_path, request.extension)
             elif request.reference_image:  # artwork the upload/separate routes validated and staged
                 base_image_path = model_output_dir / "base_image.png"
@@ -157,6 +178,8 @@ class AssemblyLine:
                 self._ensure_generator(request)
                 base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
+            from src.utils.progress_tracker import get_progress_manager
+            get_progress_manager().artwork[task_id] = model.id
             if request.sketch:
                 # No preview.png: the Gallery and Studio fall back to the artwork itself.
                 model.status = GenerationStatus.SKETCH
@@ -279,10 +302,12 @@ class AssemblyLine:
                 pose = source.convert("RGB")
         painted = self.image_generator.inpaint(
             image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
-            strength=request.strength, seed=request.seed, task_id=task_id,
+            strength=request.strength, steps=request.steps, guidance=request.guidance_scale, seed=request.seed, task_id=task_id,
             # The extend mask is a change map: the model redraws the art's cut edges gradually into
             # the new body. A hard mask plus a separate seam pass left straight joins and ghosts.
             graded=request.operation == "extend", pose=pose,
+            appearance=image if (request.extension or {}).get("mode") == "front" else None,
+            reference_strength=(request.extension or {}).get("reference_strength", .65),
             label="Extending the canvas" if request.operation == "extend" else "Repainting the selection")
         path = output_dir / "base_image.png"
         painted.save(path)
@@ -421,6 +446,79 @@ class AssemblyLine:
                           for a in assets]
         data.setdefault("metadata", {})["expressions"] = made
         data["final_model_path"] = str(final_model_path)
+        save_json(data, metadata_path)
+        return model_id
+
+    def make_avatar3d(self, model_id: str, task_id: Optional[str] = None, options: Optional[Dict] = None) -> str:
+        """Build ``<model>/avatar3d/avatar.vrm``: Pixal3D mesh from the artwork, then the rig.
+        Built in a fresh folder that replaces the old avatar only on success."""
+        from PIL import Image
+
+        from src.core import mesh3d, rig3d
+        from src.utils.helpers import load_json
+
+        options = options or {}
+        model_dir = self.output_base_dir / model_id
+        metadata_path = model_dir / "metadata.json"
+        data = load_json(metadata_path)
+        name = data.get("metadata", {}).get("display_name") or data.get("name") or "Ka-myii character"
+        work = model_dir / "avatar3d.new"
+        shutil.rmtree(work, ignore_errors=True)
+        previous = data.get("metadata", {}).get("avatar3d", {})
+        reuse = bool(options.get("reuse_mesh"))
+        seed = previous.get("seed") if reuse else options.get("seed")
+        if seed is None:
+            from secrets import randbits
+            seed = randbits(31)
+        try:
+            if reuse:
+                self._enter_stage(task_id, "rig", "Refreshing the 3D rig and expressions...", 0.92)
+                source = model_dir / "avatar3d"
+                work.mkdir(parents=True)
+                for part in ("mesh.glb", "camera.json", "crop.png"):
+                    shutil.copy2(source / part, work / part)
+                for part in ("crop_mask.png", "engine.log"):
+                    if (source / part).is_file():
+                        shutil.copy2(source / part, work / part)
+                report = rig3d.build(model_dir, work, name)
+            elif self.use_dummy_generators:
+                self._enter_stage(task_id, "mesh", "Building the 3D model...", 0.05)
+                report = rig3d.demo(model_dir, work, name)
+            else:
+                self._enter_stage(task_id, "mesh", "Building the 3D model...", 0.05)
+                # The 3D engine is a separate process that needs the whole GPU.
+                self.image_generator.unload_model()
+                tracker = get_progress_manager().create_tracker(task_id, 100) if task_id else None
+
+                def progress(frac, label):
+                    if tracker and tracker.is_cancelled():   # the engine is killed on the way out
+                        raise InterruptedError("Generation cancelled by user")
+                    if tracker:
+                        tracker.update(int(frac * 100), label)
+
+                from src.core.outpaint import character_mask
+
+                art = Image.open(model_dir / "base_image.png").convert("RGB")
+                mesh3d.generate(art, character_mask(art), work, seed, options.get("quality", "standard"),
+                                progress=progress)
+                self._enter_stage(task_id, "rig", "Rigging the avatar...", 0.92)
+                report = rig3d.build(model_dir, work, name)
+            # The CPU rig can take time too: honour cancellation before replacing an
+            # existing avatar, and keep the old result if Windows refuses a rename.
+            if task_id and get_progress_manager().is_cancelled(task_id):
+                raise InterruptedError("Generation cancelled by user")
+            _replace_avatar(work, model_dir / "avatar3d")
+        except BaseException:
+            if (work / "engine.log").exists():   # keep the engine's account of what went wrong
+                (config.BASE_DIR / "logs").mkdir(exist_ok=True)
+                shutil.copyfile(work / "engine.log", config.BASE_DIR / "logs" / "comfy3d-last-failure.log")
+            shutil.rmtree(work, ignore_errors=True)
+            raise
+        data = load_json(metadata_path)   # a rename can land meanwhile
+        data.setdefault("metadata", {})["avatar3d"] = {
+            "vrm": "avatar3d/avatar.vrm", "quality": previous.get("quality", "standard") if reuse else options.get("quality", "standard"), "seed": seed,
+            "created": time.time(), **{k: v for k, v in report.items() if k != "path"}}
+        data["metadata"].pop("avatar3d_error", None)
         save_json(data, metadata_path)
         return model_id
 

@@ -133,26 +133,115 @@
     }
     return samples.map((v,c)=>v.length?v.sort((a,b)=>a-b)[v.length>>1]:[190,177,199][c]);
   }
-  function art(kind,rgb){
-    const canvas=document.createElement('canvas');canvas.width=128;canvas.height=kind==='tail'?384:160;
+  // Ear and tail designs, by the value of the Animal ears / Tail selects (0 is off).
+  const EARS=[null,'cat','fox','wolf','bunny','bear'],TAILS=[null,'cat','fox','wolf','devil'];
+  // How far each ear leans out from the head (radians): bunny ears stand up, bear ears sit round.
+  const EAR_TILT={cat:.14,fox:.16,wolf:.12,bunny:.05,bear:.32};
+  // Ears are 128x320 with the root at y 311; tails 128x384 with the root at y 380. ``top`` is
+  // where the drawing starts, so the stage only makes room for what is drawn.
+  function art(kind,rgb,style){
+    const canvas=document.createElement('canvas');canvas.width=128;canvas.height=kind==='tail'?384:320;
     const c=canvas.getContext('2d'),colour=(amount)=>'rgb('+rgb.map(v=>Math.round(clamp(v+amount,0,255))).join(',')+')';
     c.lineJoin='round';c.lineCap='round';
-    if(kind==='tail'){
+    const ink=colour(-75),path=draw=>{const p=new Path2D();draw(p);p.closePath();return p;};
+    const strokes=(colour,width,lines)=>{c.strokeStyle=colour;c.lineWidth=width;for(const l of lines){c.beginPath();c.moveTo(l[0],l[1]);c.quadraticCurveTo(l[2],l[3],l[4],l[5]);c.stroke();}};
+    const gradient=(stops,x0,y0,x1,y1)=>{const g=c.createLinearGradient(x0,y0,x1,y1);stops.forEach(([at,amount])=>g.addColorStop(at,colour(amount)));return g;};
+    let top=0;
+    if(kind==='tail'&&(style==='fox'||style==='wolf')){
+      const fox=style==='fox',outline=path(p=>{
+        if(fox){p.moveTo(50,382);p.bezierCurveTo(30,330,4,250,8,170);p.bezierCurveTo(10,90,40,30,64,8);p.bezierCurveTo(88,30,118,90,120,170);p.bezierCurveTo(124,250,98,330,78,382);}
+        else{p.moveTo(52,382);p.bezierCurveTo(36,320,16,240,18,160);p.bezierCurveTo(20,84,44,26,64,10);p.bezierCurveTo(84,26,108,84,110,160);p.bezierCurveTo(112,240,92,320,76,382);}});
+      c.fillStyle=gradient([[0,-38],[.45,10],[1,-26]],0,0,128,0);c.fill(outline);
+      c.save();c.clip(outline);
+      c.fillStyle=fox?'#f8f1e8':colour(-70);   // a fox's white tip, a wolf's dark one
+      c.beginPath();c.moveTo(0,0);c.lineTo(128,0);c.lineTo(128,92);c.bezierCurveTo(104,118,84,82,64,108);c.bezierCurveTo(44,82,24,118,0,92);c.fill();
+      strokes(colour(26),3,[[40,350,22,240,34,130],[64,360,58,230,64,120],[88,350,106,240,94,130]]);
+      c.restore();c.strokeStyle=ink;c.lineWidth=3;c.stroke(outline);top=6;
+    }else if(kind==='tail'&&style==='devil'){
+      // A thin dark tail with a spade tip; it keeps its own colours rather than the fur's.
+      const shaft=path(p=>{p.moveTo(57,382);p.bezierCurveTo(58,300,59,170,60,92);p.lineTo(68,92);p.bezierCurveTo(69,170,70,300,71,382);});
+      const spade=path(p=>{p.moveTo(64,8);p.bezierCurveTo(92,30,118,62,100,92);p.quadraticCurveTo(84,104,64,88);p.quadraticCurveTo(44,104,28,92);p.bezierCurveTo(10,62,36,30,64,8);});
+      for(const p of [shaft,spade]){c.fillStyle='#3d2639';c.fill(p);c.strokeStyle='#1b1018';c.lineWidth=3;c.stroke(p);}
+      strokes('#7a4166',3,[[50,30,36,58,38,82],[61,370,61,240,62,110]]);top=6;
+    }else if(kind==='tail'){
       const g=c.createLinearGradient(32,0,96,0);g.addColorStop(0,colour(-38));g.addColorStop(.45,colour(8));g.addColorStop(1,colour(-20));
       c.beginPath();c.moveTo(38,380);c.bezierCurveTo(32,280,32,100,43,34);c.quadraticCurveTo(64,-13,85,34);c.bezierCurveTo(96,100,96,280,90,380);c.closePath();
-      c.fillStyle=g;c.fill();c.strokeStyle=colour(-75);c.lineWidth=3;c.stroke();
+      c.fillStyle=g;c.fill();c.strokeStyle=ink;c.lineWidth=3;c.stroke();
       c.save();c.clip();c.fillStyle=colour(30);c.beginPath();c.ellipse(64,38,35,36,0,0,Math.PI*2);c.fill();c.restore();
       c.beginPath();c.moveTo(48,320);c.quadraticCurveTo(41,190,53,85);c.strokeStyle=colour(24);c.lineWidth=3;c.stroke();
+    }else if(style==='fox'||style==='wolf'){
+      const fox=style==='fox',tip=fox?96:118;
+      const outline=path(p=>{
+        if(fox){p.moveTo(6,309);p.bezierCurveTo(10,240,34,150,60,104);p.quadraticCurveTo(66,94,72,105);p.bezierCurveTo(98,152,120,240,122,309);}
+        else{p.moveTo(14,309);p.bezierCurveTo(16,250,36,172,58,128);p.quadraticCurveTo(64,116,70,128);p.bezierCurveTo(92,172,112,250,114,309);}
+        for(const [x,y] of [[108,300],[98,311],[86,301],[74,312],[62,302],[50,312],[38,301],[26,311],[16,300]])p.lineTo(x,y);});   // fur at the base
+      c.fillStyle=gradient([[0,fox?6:-30],[.55,8],[1,-32]],0,tip,0,311);c.fill(outline);
+      c.save();c.clip(outline);
+      if(fox){c.fillStyle='rgb(52,38,42)';c.beginPath();c.moveTo(0,158);c.quadraticCurveTo(64,186,128,158);c.lineTo(128,0);c.lineTo(0,0);c.fill();}
+      const inner=path(p=>{p.moveTo(28,292);p.quadraticCurveTo(40,206,64,fox?146:168);p.quadraticCurveTo(88,206,100,292);
+        for(const [x,y] of [[90,280],[82,292],[73,279],[64,293],[55,279],[46,292],[38,280]])p.lineTo(x,y);});
+      c.fillStyle=fox?'#f5ede3':colour(58);c.fill(inner);c.strokeStyle=fox?'#cdbdaa':colour(-12);c.lineWidth=2;c.stroke(inner);
+      strokes(fox?'#fffaf3':colour(84),4,[[40,286,46,250,56,222],[88,286,82,250,72,222],[64,292,63,262,64,236]]);
+      c.restore();c.strokeStyle=ink;c.lineWidth=3;c.stroke(outline);top=tip-4;
+    }else if(style==='bunny'){
+      const outline=path(p=>{p.moveTo(36,311);p.bezierCurveTo(16,220,20,40,64,12);p.bezierCurveTo(108,40,112,220,92,311);p.quadraticCurveTo(64,300,36,311);});
+      c.fillStyle=gradient([[0,20],[1,-30]],0,12,0,311);c.fill(outline);c.strokeStyle=ink;c.lineWidth=3;c.stroke(outline);
+      const inner=path(p=>{p.moveTo(49,296);p.bezierCurveTo(36,212,40,74,64,42);p.bezierCurveTo(88,74,92,212,79,296);p.quadraticCurveTo(64,288,49,296);});
+      c.fillStyle='#eaabb6';c.fill(inner);c.strokeStyle='#c4808f';c.lineWidth=2;c.stroke(inner);
+      strokes('#f7cdd4',4,[[56,270,48,170,58,80]]);top=8;
+    }else if(style==='bear'){
+      const outline=path(p=>{p.moveTo(14,311);p.bezierCurveTo(-4,250,20,188,64,188);p.bezierCurveTo(108,188,132,250,114,311);p.quadraticCurveTo(64,300,14,311);});
+      c.fillStyle=gradient([[0,18],[1,-30]],0,188,0,311);c.fill(outline);c.strokeStyle=ink;c.lineWidth=3;c.stroke(outline);
+      c.beginPath();c.ellipse(64,266,31,34,0,0,Math.PI*2);c.fillStyle=colour(46);c.fill();c.strokeStyle=colour(-24);c.lineWidth=2;c.stroke();
+      top=184;
     }else{
+      c.translate(0,160);top=160;   // the original cat ear, drawn in the bottom half
       const g=c.createLinearGradient(20,30,108,155);g.addColorStop(0,colour(22));g.addColorStop(1,colour(-35));
       c.beginPath();c.moveTo(9,151);c.bezierCurveTo(11,109,24,42,52,9);c.quadraticCurveTo(61,-2,69,11);c.bezierCurveTo(100,49,116,106,119,151);c.quadraticCurveTo(101,140,93,151);c.lineTo(83,142);c.lineTo(74,153);c.lineTo(63,145);c.lineTo(51,155);c.lineTo(39,145);c.quadraticCurveTo(21,143,9,151);c.closePath();
-      c.fillStyle=g;c.fill();c.strokeStyle=colour(-75);c.lineWidth=3;c.stroke();
+      c.fillStyle=g;c.fill();c.strokeStyle=ink;c.lineWidth=3;c.stroke();
       c.beginPath();c.moveTo(30,128);c.quadraticCurveTo(39,62,62,31);c.quadraticCurveTo(85,65,99,128);c.quadraticCurveTo(62,105,30,128);
       c.fillStyle='#ce939e';c.fill();c.strokeStyle='#a66f83';c.lineWidth=2;c.stroke();
       c.beginPath();c.moveTo(40,118);c.quadraticCurveTo(48,77,61,51);c.strokeStyle='#e8b3bd';c.lineWidth=4;c.stroke();
       c.beginPath();c.moveTo(22,131);c.lineTo(37,119);c.moveTo(101,131);c.lineTo(89,118);c.strokeStyle=colour(28);c.lineWidth=4;c.stroke();
     }
-    return c.getImageData(0,0,canvas.width,canvas.height);
+    const image=c.getImageData(0,0,canvas.width,canvas.height);image.top=top;return image;
+  }
+  // Face marks drawn in the browser, so every character has them without painting (painted
+  // toggles match the art style better). app.js markBox() places them on the face anchors.
+  const MARKS={blush:[128,72],gloom:[256,192],anger:[96,96],sweat:[64,96]};
+  function markArt(mark){
+    const [w,h]=MARKS[mark],canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+    const c=canvas.getContext('2d');c.lineCap='round';c.lineJoin='round';
+    if(mark==='blush'){
+      c.save();c.scale(1,h/w);
+      const g=c.createRadialGradient(w/2,w/2,0,w/2,w/2,w/2);g.addColorStop(0,'rgba(255,96,124,.6)');g.addColorStop(.55,'rgba(255,112,140,.34)');g.addColorStop(1,'rgba(255,130,155,0)');
+      c.fillStyle=g;c.fillRect(0,0,w,w);c.restore();
+      c.strokeStyle='rgba(214,58,92,.75)';c.lineWidth=3;
+      for(let i=0;i<4;i++){c.beginPath();c.moveTo(w*(.27+i*.13),h*.64);c.lineTo(w*(.35+i*.13),h*.36);c.stroke();}
+    }else if(mark==='gloom'){
+      const g=c.createLinearGradient(0,0,0,h);g.addColorStop(0,'rgba(34,28,92,0)');g.addColorStop(.2,'rgba(34,28,92,.66)');g.addColorStop(.62,'rgba(48,42,110,.4)');g.addColorStop(1,'rgba(60,60,124,0)');
+      c.fillStyle=g;c.fillRect(0,0,w,h);
+      c.globalCompositeOperation='destination-in';   // soft sides: a shadow on the face, not a box
+      const side=c.createLinearGradient(0,0,w,0);side.addColorStop(0,'rgba(0,0,0,0)');side.addColorStop(.2,'#000');side.addColorStop(.8,'#000');side.addColorStop(1,'rgba(0,0,0,0)');
+      c.fillStyle=side;c.fillRect(0,0,w,h);c.globalCompositeOperation='source-over';
+      c.lineWidth=4;
+      for(const x of [.24,.33,.42,.51,.6,.69,.78]){   // lines fading in from the top
+        const y0=h*(.08+.05*Math.abs(Math.cos(x*23))),y1=h*(.4+.14*Math.abs(Math.sin(x*17))),line=c.createLinearGradient(0,y0,0,y1);
+        line.addColorStop(0,'rgba(28,22,78,0)');line.addColorStop(.3,'rgba(28,22,78,.7)');line.addColorStop(1,'rgba(28,22,78,.45)');
+        c.strokeStyle=line;c.beginPath();c.moveTo(x*w,y0);c.lineTo(x*w,y1);c.stroke();
+      }
+    }else if(mark==='anger'){
+      // Four arcs around a gap, bulging to the middle, like the drawn Anger vein toggle.
+      const d=w*.2,r=w*.19;
+      for(const [colour,width] of [['#5f1423',w*.14],['#e43048',w*.085]]){c.strokeStyle=colour;c.lineWidth=width;
+        for(const [sx,sy,start] of [[-1,-1,0],[1,-1,.5],[1,1,1],[-1,1,1.5]]){c.beginPath();c.arc(w/2+sx*d,h/2+sy*d,r,(start+.08)*Math.PI,(start+.42)*Math.PI);c.stroke();}}
+    }else{
+      const r=w*.32,cx=w/2,cy=h-r-6,tip=6,b=Math.acos(Math.min(1,r/(cy-tip)));
+      c.beginPath();c.moveTo(cx,tip);c.arc(cx,cy,r,b-Math.PI/2,1.5*Math.PI-b);c.closePath();
+      c.fillStyle='#c3e4ff';c.fill();c.strokeStyle='#3c69aa';c.lineWidth=3;c.stroke();
+      c.beginPath();c.ellipse(cx-r*.38,cy-r*.2,r*.17,r*.28,0,0,Math.PI*2);c.fillStyle='#fff';c.fill();
+    }
+    return c.getImageData(0,0,w,h);
   }
   function mouthWeights(open,teeth,round,enabled){
     const gate=smooth((open-.025)/.18)*clamp(enabled,0,1);
@@ -201,12 +290,48 @@
   function parts(rig){
     const hair=rig.layers.filter(L=>/^(front hair|back hair|side hair)(_|$)/.test(L.name));
     const crown=Math.min(rig.anchors.face.y0,...hair.map(L=>L.y));
-    const rgb=palette(rig,0),ear=art('ear',rgb),tail=art('tail',rgb);
+    const rgb=palette(rig,0),ear=art('ear',rgb,'cat'),tail=art('tail',rgb,'cat');
     const companions=[{name:'companion tail',kind:'tail',img:tail,z:-3,group:'body'},
       {name:'companion ear L',kind:'ear',earSide:-1,img:ear,z:-2,group:'head'},
       {name:'companion ear R',kind:'ear',earSide:1,img:ear,z:-1,group:'head'}].map(L=>({...L,
-        source:'Optional '+L.name,crown,x:0,y:0,w:L.img.width,h:L.img.height,depth:1,phys:null,fade:null,companion:true}));
-    return companions.concat(mouthParts(rig));
+        source:'Optional '+L.name,crown,top:L.img.top,x:0,y:0,w:L.img.width,h:L.img.height,depth:1,phys:null,fade:null,companion:true}));
+    // Blush sits on the cheeks under bangs, nose and mouth; the rest float over the hair.
+    const face=rig.layers.find(L=>L.name==='face'),high=Math.max(0,...rig.layers.filter(L=>L.group==='head').map(L=>L.z));
+    const marks=[['blush',-1,'L',(face?face.z:high)+.05],['blush',1,'R',(face?face.z:high)+.06],['gloom',0,'',high+.2],
+      ['anger',0,'',high+.3],['sweat',0,'',high+.31]].map(([mark,side,suffix,z])=>{const img=markArt(mark);
+      return {name:('mark '+mark+' '+suffix).trim(),source:'Instant '+mark,kind:'mark',mark,markSide:side,param:'mark'+mark[0].toUpperCase()+mark.slice(1),
+        img,z,x:0,y:0,w:img.width,h:img.height,depth:1,group:'head',phys:null,fade:null,companion:true};});
+    return companions.concat(marks,mouthParts(rig));
   }
-  return {idlePose,idleHead,TURN_TILT,blink,breath,mouth,response,nodPose,nodPoint,ROLL,rollPoint,collarWeight,shoulderLift,turnShift,torsoPoint,hatWeight,rowExtents,tailPoint,earPoint,palette,art,parts,mouthWeights,mouthBox};
+  // One-shot gestures added to the pose targets (angles in rig units, -1..1). They start and
+  // end at zero, so they layer over idle, pointer or camera motion without a snap.
+  const GESTURES={
+    nod:{duration:1.2,pose:(t,w)=>({y:-.55*w*(1-Math.cos(Math.min(t,1.1)*Math.PI*2/.55))/2,body:0})},
+    shake:{duration:1.4,pose:(t,w)=>({x:.6*w*Math.sin(t*Math.PI*2*2.1)*(1-t/1.8),y:-.08*w})},
+    tilt:{duration:1.8,pose:(t,w)=>({z:.6*w,x:.12*w,brow:.7*w,eyeY:.2*w})},
+    yay:{duration:1.4,pose:(t,w)=>({y:.35*w*Math.abs(Math.sin(t*Math.PI*2.6)),mouthForm:1.2*w,brow:.4*w,body:.12*w*Math.sin(t*Math.PI*2.6)})},
+    shy:{duration:2.2,pose:(t,w)=>({x:-.55*w,y:-.3*w,z:-.2*w,eyeX:-.5*w,eyeY:-.45*w,mouthForm:.4*w})},
+  };
+  function gesture(name,seconds){
+    const g=GESTURES[name];
+    if(!g||!(seconds>=0)||seconds>=g.duration)return null;
+    const w=smooth(seconds/.18)*(1-smooth((seconds-(g.duration-.35))/.35));
+    return Object.assign({x:0,y:0,z:0,body:0,brow:0,mouthForm:0,eyeX:0,eyeY:0},g.pose(seconds,w));
+  }
+  // Keep the deformation attached to the original artwork, not to coordinates already
+  // displaced by head/shoulder motion. Cache the returned weights until the anchor moves.
+  function chestWeights(base, chest, heightOffset){
+    const result=new Float32Array(base.length/2),cy=chest.cy+heightOffset;
+    for(let i=0;i<result.length;i++){
+      const x=(base[i*2]-chest.cx)/chest.rx,y=(base[i*2+1]-cy)/chest.ry;
+      result[i]=Math.exp(-x*x-y*y);
+    }
+    return result;
+  }
+  function chestOffset(offset,strength,faceHeight){
+    if(!Number.isFinite(offset)||!Number.isFinite(strength)||strength<=0)return 0;
+    const limit=Math.max(1,faceHeight*.12);
+    return limit*Math.tanh(offset*strength/limit);
+  }
+  return {gesture,GESTURES:Object.keys(GESTURES),idlePose,idleHead,TURN_TILT,blink,breath,mouth,response,nodPose,nodPoint,ROLL,rollPoint,collarWeight,shoulderLift,turnShift,torsoPoint,hatWeight,rowExtents,tailPoint,earPoint,palette,art,markArt,EARS,TAILS,EAR_TILT,parts,mouthWeights,mouthBox,chestWeights,chestOffset};
 });

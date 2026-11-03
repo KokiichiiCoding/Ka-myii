@@ -10,6 +10,8 @@ import json
 import math
 import os
 import threading
+import time
+import urllib.request
 import zipfile
 
 import pytest
@@ -30,7 +32,16 @@ def base_url():
     server = make_server("127.0.0.1", 0, app_module.create_app(use_dummy_generators=True), threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{server.server_port}"
+    url = f"http://127.0.0.1:{server.server_port}"
+    yield url
+    # Let a job the test left running finish while outputs/ still points at the test's folder:
+    # a retry clicked at the end of a test once wrote a half-made character into the real one.
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        jobs = json.load(urllib.request.urlopen(f"{url}/api/generation/jobs"))["jobs"]
+        if not any(j["state"] in ("queued", "running") for j in jobs):
+            break
+        time.sleep(.25)
     server.shutdown()
 
 
@@ -576,4 +587,62 @@ def test_preview_full_body_action_supports_finished_models_and_artwork_review(ba
     page.reload()
     expect(page.locator("#separateBtn")).to_be_visible(timeout=JOB)
     assert page.url == result_url
+    assert not page.errors
+
+
+def test_gallery_redraws_a_dynamic_pose_facing_forward(base_url, page, tmp_path):
+    page.goto(f"{base_url}/generator")
+    page.fill("#prompt", "1girl, blonde hair, holding instrument, from side")
+    page.click("#generateBtn")
+    expect(page.locator("#livePreview")).to_be_visible(timeout=JOB)
+    original = page.get_attribute("#livePreview", "href").rsplit("/", 1)[-1]
+    page.goto(f"{base_url}/gallery")
+    page.locator(".model-card").first.locator("summary").click()
+    page.locator(".model-card").first.locator("text=Redraw facing forward").click()
+    expect(page.locator("#fullBodyFront")).to_be_checked(timeout=JOB)
+    expect(page.locator("#extendFullBtn")).to_have_text("Redraw facing forward")
+    expect(page.locator("#fullBodyKeepFace")).to_be_disabled()
+    expect(page.locator("#fullBodyFit")).to_be_hidden()
+    expect(page.locator("#frontReferenceControls")).to_be_visible()
+    expect(page.locator("#fullBodyReferenceVal")).to_have_text("65%")
+    page.locator("#fullBodyReference").fill("0.85")
+    expect(page.locator("#fullBodyReferenceVal")).to_have_text("85%")
+    page.locator("#fullBodyPrompt").fill("calf-length gold dress, embroidered blue cloak")
+    page.locator("#fullBodyOutput").select_option("artwork")
+    page.locator("#extendFullBtn").click()
+    expect(page.locator("#separateBtn")).to_be_visible(timeout=JOB)
+    new_id = page.url.split("model=")[1].split("&")[0].split("#")[0]
+    assert new_id != original
+    request = json.loads((config.OUTPUT_DIR / new_id / "metadata.json").read_text())["request"]
+    assert request["extension"]["mode"] == "front" and request["strength"] == 1.0
+    assert request["extension"]["reference_strength"] == 0.85
+    expect(page.locator("#redrawComparison")).to_be_visible()
+    page.locator("#redrawComparison > summary").click()
+    expect(page.locator("#redrawSourceImage")).to_have_attribute("src", f"/api/generation/preview/{original}")
+    expect(page.locator("#redrawSourceLink")).to_have_attribute("href", f"/generator?model={original}")
+    assert "calf-length gold dress" in request["prompt"]
+    page.reload()
+    expect(page.locator("#fullBodyPanel")).to_have_attribute("open", "", timeout=JOB)
+    page.locator("#fullBodyFront").check()
+    expect(page.locator("#fullBodyReferenceVal")).to_have_text("85%")
+    expect(page.locator("#fullBodyPrompt")).to_have_value("calf-length gold dress, embroidered blue cloak")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#frontReferenceControls").scroll_into_view_if_needed()
+    expect(page.locator("#redrawComparison")).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Redraw controls fit a phone screen"
+    expect(page.locator("#fullBodyReference")).to_be_visible()
+    page.screenshot(path=str(tmp_path / "front-redraw-mobile.png"))
+    # Simulate a quality finding so the real one-click retry can be tested with saved settings.
+    metadata_path = config.OUTPUT_DIR / new_id / "metadata.json"
+    model = json.loads(metadata_path.read_text())
+    model.setdefault("metadata", {})["checks"] = [{"id": "shoulders", "message": "Uneven shoulders", "fix": "reseed"}]
+    metadata_path.write_text(json.dumps(model))
+    page.reload()
+    with page.expect_request(lambda req: f"/extend/{original}" in req.url and req.method == "POST") as retry:
+        page.get_by_role("button", name="Try another seed").click()
+    assert retry.value.post_data_json["reference_strength"] == 0.85
+    assert retry.value.post_data_json["prompt"] == "calf-length gold dress, embroidered blue cloak"
+    assert retry.value.post_data_json["mode"] == "front"
+    expect(page.locator("#separateBtn")).to_be_visible(timeout=JOB)
+    assert "holding instrument" not in request["prompt"] and "from side" not in request["prompt"]
     assert not page.errors

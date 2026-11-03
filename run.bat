@@ -77,6 +77,27 @@ if "%HAS_GPU%"=="1" if not exist "engines\see-through\.venv\Scripts\python.exe" 
     )
 )
 
+REM --- Optional 3D avatar engine (rigged VRM avatars) -------------------------
+if "%HAS_GPU%"=="1" if not exist "engines\comfy3d\.venv\Scripts\python.exe" if not exist "engines\comfy3d.skip" (
+    echo.
+    echo ================================================
+    echo    Optional: 3D avatars ^(VRM^)
+    echo ================================================
+    echo Turns characters into rigged 3D VRM avatars with Pixal3D.
+    echo Needs an 8 GB+ NVIDIA GPU, a CUDA 13 driver and about 10 GB of downloads.
+    echo.
+    set "install_3d=n"
+    set /p install_3d="Install the 3D engine now? [y/N]: "
+    if /i "!install_3d!"=="y" (
+        "%VPY%" scripts\install_3d.py
+        if errorlevel 1 echo [WARNING] 3D engine install failed - 2D characters still work.
+    ) else (
+        if not exist engines mkdir engines
+        echo declined> "engines\comfy3d.skip"
+        echo [INFO] Skipped. Install later with:  %VPY% scripts\install_3d.py
+    )
+)
+
 REM --- Launch ----------------------------------------------------------------
 echo.
 echo   1^) Studio - real generation ^(NVIDIA GPU^)

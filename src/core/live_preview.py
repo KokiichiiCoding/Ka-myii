@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter, ImageDraw, ImageOps
 
-EXPORT_VERSION = 16  # 16: alternate hair/outfit toggles; 15: A/I/U/E/O mouths; 14: expression toggle layers; 13: heal mouth sockets for narrow O / toothy smile; 12: clean cloth (no strand copies or cracks) under hair; 10: neck shows under a moving choker; 8: opaque healed eye sockets
+EXPORT_VERSION = 17  # 17: repair hair cutouts beneath moving accessories
 _export_lock = threading.Lock()
 _ALIASES = {
     'hair_back': 'back hair', 'hair_front': 'front hair', 'head': 'face',
@@ -48,7 +48,52 @@ def preview_layers(assets_dir: Path):
             image = Image.alpha_composite(merged.pop(name), image)
         merged[name] = image
     items = [(name, image) for name, image in merged.items() if image.getbbox()]
-    return _with_expressions(_clean_hidden_skin(items), Path(assets_dir).parent, size)
+    return _with_expressions(_clean_hidden_skin(_repair_accessory_hair(items)), Path(assets_dir).parent, size)
+
+
+def _box_morph(mask, radius, dilate):
+    """Square binary dilation or erosion using a summed-area table."""
+    width = 2 * radius + 1
+    padded = np.pad(mask.astype(np.int32), radius)
+    summed = np.pad(padded, ((1, 0), (1, 0))).cumsum(0, dtype=np.int32).cumsum(1, dtype=np.int32)
+    count = summed[width:, width:] - summed[:-width, width:] - summed[width:, :-width] + summed[:-width, :-width]
+    return count > 0 if dilate else count == width * width
+
+
+def _repair_accessory_hair(items):
+    """Fill small hair cutouts concealed by nearly opaque moving headwear.
+
+    Close narrow gaps in each hair silhouette, but only add pixels under the accessory;
+    neither visible hair nor translucent accessory edges are repainted. The source layers
+    remain untouched and the preview's resting composite changes by at most a few levels.
+    """
+    out = list(items)
+    for index, (name, image) in enumerate(items):
+        if name not in ('back hair', 'front hair', 'side hair'):
+            continue
+        accessories = [part for role, part in items[index + 1:] if role == 'headwear']
+        if not accessories:
+            continue
+        cover = np.maximum.reduce([np.asarray(part)[..., 3] for part in accessories])
+        ys, xs = np.nonzero(cover >= 250)
+        if not len(xs):
+            continue
+        radius = max(6, min(48, round(image.width * .043)))
+        blur = max(4.0, image.width * .02)
+        margin = 2 * radius + round(3 * blur) + 1
+        x0, x1 = max(0, xs.min() - margin), min(image.width, xs.max() + margin + 1)
+        y0, y1 = max(0, ys.min() - margin), min(image.height, ys.max() + margin + 1)
+        rgba = np.array(image)
+        region = rgba[y0:y1, x0:x1]
+        over = cover[y0:y1, x0:x1]
+        present = region[..., 3] > 8
+        silhouette = _box_morph(_box_morph(present, radius, True), radius, False)
+        hidden = (over >= 250) & silhouette & ~present
+        known = (over < 8) & (region[..., 3] > 240)
+        if _fill_hidden(region, hidden, known, blur):
+            region[hidden, 3] = 255
+            out[index] = (name, Image.fromarray(rgba))
+    return out
 
 
 def _blur_skin(values, radius):

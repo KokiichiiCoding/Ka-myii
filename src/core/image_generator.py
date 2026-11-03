@@ -338,7 +338,7 @@ class ImageGenerator:
     def inpaint(self, image, mask, prompt: str, negative: str = "", strength: float = 0.9,
                 steps: Optional[int] = None, guidance: Optional[float] = None, seed: Optional[int] = None,
                 task_id: Optional[str] = None, label: str = "Repainting the selection", detail: int = 1024,
-                feather: int = 6, graded: bool = False, pose=None, context: float = 0.4):
+                feather: int = 6, graded: bool = False, pose=None, context: float = 0.4, appearance=None, reference_strength: float = .65):
         """Repaint the white part of ``mask`` (PIL L) in ``image`` and return the full image.
 
         Works on a crop around the mask at SDXL's native ~``detail`` px (a face gets far more
@@ -384,6 +384,7 @@ class ImageGenerator:
         positive, negative = self._build_prompts(GenerationRequest(prompt=prompt, negative_prompt=negative,
                                                                    style="anime", framing="none"))
         conditioned = None
+        appearance_embeds = None
         previous_memory_fraction = None
         if pose is not None:
             from diffusers import ControlNetModel
@@ -402,6 +403,18 @@ class ImageGenerator:
                 if torch.cuda.is_available():
                     previous_memory_fraction=torch.cuda.get_per_process_memory_fraction()
                     torch.cuda.set_per_process_memory_fraction(min(.86,previous_memory_fraction))
+                if appearance is not None and reference_strength > 0:
+                    from src.core import reference
+                    if tracker:
+                        tracker.update(0, "Reading reference clothing (first use downloads ~3.4 GB)...")
+                    appearance_embeds = reference.encode(appearance, self.device,
+                        cancelled=lambda: bool(tracker and tracker.is_cancelled()))
+                    # Install attention weights before casting; never keep the image encoder
+                    # alongside the denoiser and ControlNet. No source image leaves this device.
+                    self.pipeline.load_ip_adapter(reference.MODEL, subfolder="sdxl_models",
+                        weight_name=reference.WEIGHT, revision=reference.REVISION,
+                        image_encoder_folder=None, low_cpu_mem_usage=True)
+                    self.pipeline.set_ip_adapter_scale(float(reference_strength))
                 if tracker:
                     tracker.update(0, "Loading standing pose guide (first use downloads ~2.5 GB)…")
                 self.pipeline.unet.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=torch.float16)
@@ -424,49 +437,52 @@ class ImageGenerator:
                 raise
         else:
             pipe = AutoPipelineForInpainting.from_pipe(self.pipeline)
-        # Differential masks must protect retained art from the very first denoising step.
-        # Treating every nonzero grey as white here destroys the source's initial layout:
-        # restoring a small face in later steps can leave a second generated head underneath.
-        initial_mask = hard
-        if graded:
-            n = max(1, int(int(steps or config.IMAGE_GENERATION.get("default_steps", 28)) * strength))
-            initial_mask = Image.fromarray(free_during(np.asarray(change, np.float32) / 255, 0, n).astype(np.uint8) * 255)
-        call = dict(
-            image=image.crop(crop_box).resize((tw, th), Image.Resampling.LANCZOS),
-            mask_image=initial_mask.crop(crop_box).resize((tw, th), Image.Resampling.NEAREST),
-            width=tw, height=th, strength=float(strength),
-            num_inference_steps=int(steps or config.IMAGE_GENERATION.get("default_steps", 28)),
-            guidance_scale=float(guidance if guidance is not None else config.IMAGE_GENERATION.get("default_guidance_scale", 5)),
-            generator=torch.Generator(device=self.device).manual_seed(int(seed)) if seed is not None else None,
-        )
-        if pose is not None:
-            call.update(control_image=pose.crop(crop_box).resize((tw,th),Image.Resampling.LANCZOS),
-                        controlnet_conditioning_scale=.85, control_guidance_end=.9)
-        call.update(conditioned if conditioned is not None else
-                    self._sdxl_prompt_embeds(positive, negative) if getattr(pipe, "tokenizer_2", None) is not None
-                    else dict(prompt=positive, negative_prompt=negative))
-        latent_change = torch.from_numpy(np.asarray(change.crop(crop_box).resize(
-            (tw // 8, th // 8), Image.Resampling.BOX), np.float32) / 255)[None, None] if graded else None
-        if tracker or graded:
-            def _step(_pipe, step, _t, kwargs):
-                if tracker:
-                    tracker.update(step + 1, f"{label} — step {step + 1}")
-                    if tracker.is_cancelled():
-                        raise InterruptedError("Generation cancelled by user")
-                if graded:  # the pipeline applies this mask after the next step, for the one after it
-                    # In-place also works on ControlNet's 0.37 callback, which exposes
-                    # the mask but only reads back latents/embeddings/control_image.
-                    kwargs["mask"].copy_(free_during(latent_change, step + 1, _pipe.num_timesteps).to(
-                        kwargs["mask"]).expand_as(kwargs["mask"]))
-                if pose is not None and torch.cuda.is_available():
-                    # Casting weights up/down each step can fragment the CUDA cache. Return
-                    # unused blocks so reserved memory does not spill into shared laptop RAM.
-                    torch.cuda.empty_cache()
-                return kwargs
-            call["callback_on_step_end"] = _step
-            if graded:
-                call["callback_on_step_end_tensor_inputs"] = ["latents", "mask"]
         try:
+            # Differential masks must protect retained art from the very first denoising step.
+            # Treating every nonzero grey as white here destroys the source's initial layout:
+            # restoring a small face in later steps can leave a second generated head underneath.
+            initial_mask = hard
+            if graded:
+                n = max(1, int(int(steps or config.IMAGE_GENERATION.get("default_steps", 28)) * strength))
+                initial_mask = Image.fromarray(free_during(np.asarray(change, np.float32) / 255, 0, n).astype(np.uint8) * 255)
+            call = dict(
+                image=image.crop(crop_box).resize((tw, th), Image.Resampling.LANCZOS),
+                mask_image=initial_mask.crop(crop_box).resize((tw, th), Image.Resampling.NEAREST),
+                width=tw, height=th, strength=float(strength),
+                num_inference_steps=int(steps or config.IMAGE_GENERATION.get("default_steps", 28)),
+                guidance_scale=float(guidance if guidance is not None else config.IMAGE_GENERATION.get("default_guidance_scale", 5)),
+                generator=torch.Generator(device=self.device).manual_seed(int(seed)) if seed is not None else None,
+            )
+            if pose is not None:
+                call.update(control_image=pose.crop(crop_box).resize((tw,th),Image.Resampling.LANCZOS),
+                            controlnet_conditioning_scale=.85, control_guidance_end=.9)
+            if appearance_embeds is not None:
+                embeds = appearance_embeds if call["guidance_scale"] > 1 else appearance_embeds.chunk(2)[1]
+                call["ip_adapter_image_embeds"] = [embeds]
+            call.update(conditioned if conditioned is not None else
+                        self._sdxl_prompt_embeds(positive, negative) if getattr(pipe, "tokenizer_2", None) is not None
+                        else dict(prompt=positive, negative_prompt=negative))
+            latent_change = torch.from_numpy(np.asarray(change.crop(crop_box).resize(
+                (tw // 8, th // 8), Image.Resampling.BOX), np.float32) / 255)[None, None] if graded else None
+            if tracker or graded:
+                def _step(_pipe, step, _t, kwargs):
+                    if tracker:
+                        tracker.update(step + 1, f"{label} — step {step + 1}")
+                        if tracker.is_cancelled():
+                            raise InterruptedError("Generation cancelled by user")
+                    if graded:  # the pipeline applies this mask after the next step, for the one after it
+                        # In-place also works on ControlNet's 0.37 callback, which exposes
+                        # the mask but only reads back latents/embeddings/control_image.
+                        kwargs["mask"].copy_(free_during(latent_change, step + 1, _pipe.num_timesteps).to(
+                            kwargs["mask"]).expand_as(kwargs["mask"]))
+                    if pose is not None and torch.cuda.is_available():
+                        # Casting weights up/down each step can fragment the CUDA cache. Return
+                        # unused blocks so reserved memory does not spill into shared laptop RAM.
+                        torch.cuda.empty_cache()
+                    return kwargs
+                call["callback_on_step_end"] = _step
+                if graded:
+                    call["callback_on_step_end_tensor_inputs"] = ["latents", "mask"]
             out = pipe(**call).images[0].resize((cw, ch), Image.Resampling.LANCZOS)
         finally:
             if pose is not None:
@@ -578,11 +594,15 @@ class ImageGenerator:
             style_prompt += ", upper body, waist up, detailed face, both eyes visible, centered composition"
         model_tags = {} if getattr(self, "custom_model_path", None) else next(
             (m for m in config.MODEL_PRESETS if m["id"] == getattr(self, "model_name", None)), {})
+        avatar3d = bool(getattr(request, "avatar3d", None))
+        if avatar3d:  # one whole figure, front on, limbs clear of the body: what Pixal3D and the rig read
+            style_prompt += ", full body, standing, arms at sides, facing viewer, looking at viewer"
         positive_parts = [request.prompt.strip(), style_prompt, model_tags.get("positive", "")]
         positive = ", ".join(p for p in positive_parts if p)
 
         negative_parts = [request.negative_prompt.strip(), preset.get("negative", ""), config.DEFAULT_NEGATIVE_PROMPT,
-                          model_tags.get("negative", "")]
+                          model_tags.get("negative", ""),
+                          "multiple views, from side, from behind, sitting, crossed arms, cropped" if avatar3d else ""]
         negative = ", ".join(p for p in negative_parts if p)
         return positive, negative
 
@@ -643,7 +663,7 @@ class DummyImageGenerator(ImageGenerator):
 
     def inpaint(self, image, mask, prompt: str, negative: str = "", strength: float = 0.9, steps=None,
                 guidance=None, seed=None, task_id=None, label="Repainting the selection", detail=1024, feather=6,
-                graded=False, pose=None, context=0.4):
+                graded=False, pose=None, context=0.4, appearance=None, reference_strength=.65):
         """Demo: fill the selection with a blurred, colour-shifted version so the flows are testable."""
         from PIL import Image, ImageFilter, ImageOps
 

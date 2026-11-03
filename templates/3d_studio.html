@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}3D stage — Ka-myii{% endblock %}
+{% block tab_3d %}active{% endblock %}
+{% block shortcuts %}
+<tr><td><kbd>1</kbd> – <kbd>6</kbd></td><td>Wave, nod, shake head, hop, bow, cheer</td></tr>
+<tr><td><kbd>Shift</kbd> <kbd>1</kbd> – <kbd>9</kbd></td><td>Switch expressions</td></tr>
+<tr><td><kbd>M</kbd></td><td>Microphone on or off</td></tr>
+<tr><td>Drag / Scroll</td><td>Orbit / zoom the view</td></tr>
+{% endblock %}
+{% block extra_css %}
+<style>
+  .d3-wrap {max-width:1440px;margin:auto;padding:28px 28px 70px;color:#f1e9df}
+  .d3-header {display:flex;gap:28px;align-items:end;justify-content:space-between;margin-bottom:18px}
+  .d3-kicker {color:#d5a78e;text-transform:uppercase;letter-spacing:.23em;font-size:12px}
+  .d3-header h1 {font-family:Georgia,serif;font-size:clamp(2rem,3vw,2.8rem);margin:.25em 0 .15em;font-weight:400}
+  .d3-header p,.d3-hint {color:#b9bbb7;line-height:1.55;margin:0;max-width:640px}
+  .d3-layout {display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
+  .d3-stage {position:relative;min-width:0;height:min(70vh,790px);min-height:460px;border:1px solid #404541;border-radius:4px;overflow:hidden;background:radial-gradient(ellipse at 50% 58%,#35423d,#1c2422 70%)}
+  .d3-stage[data-bg=green] {background:#00b140}
+  .d3-stage[data-bg=blue] {background:#0047bb}
+  .d3-stage[data-bg=dark] {background:#101211}
+  .d3-stage[data-bg=light] {background:#ebe7de}
+  .d3-stage[data-bg=light] .d3-stage-tag {color:#555}
+  .d3-stage[data-bg=checker] {background:repeating-conic-gradient(#3a403c 0 25%,#2b302d 0 50%) 0/22px 22px}
+  .d3-stage:fullscreen {height:100vh;border:0;border-radius:0}
+  .d3-stage:fullscreen .d3-stage-tag {display:none}
+  .d3-stage canvas {width:100%;height:100%;display:block;touch-action:none}
+  .d3-stage-tag {position:absolute;top:18px;left:20px;text-transform:uppercase;letter-spacing:.2em;font-size:11px;color:#c6c9c3;pointer-events:none}
+  .d3-placeholder {position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;color:#e9e2da;text-align:center;padding:30px}
+  .d3-placeholder[hidden] {display:none}
+  .d3-mark {font-family:Georgia,serif;font-size:70px;line-height:1;color:#d5a78e}
+  .d3-placeholder strong {font-family:Georgia,serif;font-size:1.65rem;font-weight:400}
+  .d3-placeholder span {font-size:.9rem;color:#b9bbb7;max-width:340px}
+  .d3-panel {background:#202523;border:1px solid #404541;border-radius:4px;padding:20px;display:grid;gap:18px}
+  .d3-panel section+section {border-top:1px solid #414642;padding-top:17px}
+  .d3-panel h2 {font:1.3rem Georgia,serif;margin:0 0 8px}
+  .d3-panel label {display:block;color:#dedad4;font-size:.9rem;margin-top:12px}
+  .d3-panel input[type=range] {width:100%;accent-color:#cd967d}
+  .d3-panel output {float:right;color:#d5a78e;font-variant-numeric:tabular-nums}
+  .d3-row {display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .d3-btn {background:#a97860;border:1px solid #bc8b73;color:white;padding:9px 13px;border-radius:3px;cursor:pointer}
+  .d3-btn.secondary {background:#1c201f;border:1px solid #555a56;color:#eee9e3}
+  .d3-btn:disabled {opacity:.45;cursor:not-allowed}
+  a.d3-btn {text-decoration:none;display:inline-block}
+  .d3-btn.on {background:#a97860;border-color:#bc8b73}
+  .d3-btn kbd {margin-left:7px;font-size:10px;opacity:.75;padding:0 4px}
+  a.d3-btn[hidden] {display:none}
+  .d3-make-link {display:inline-block;margin-top:8px;color:#d5a78e;font-size:.9rem}
+  .d3-make-link[hidden] {display:none}
+  .d3-select {width:100%;margin-top:6px;background:#1c201f;border:1px solid #555a56;color:#eee9e3;padding:8px;border-radius:3px}
+  .d3-status {font-size:.88rem;line-height:1.5;color:#d2d4cf;overflow-wrap:anywhere}
+  .d3-error {color:#f5a99e}
+  .d3-caption {display:flex;gap:16px;justify-content:space-between;color:#acb2ad;font-size:.86rem;margin-top:12px}
+  .d3-caption strong {font-weight:400;color:#e8e3dc}
+  @media(max-width:850px){.d3-layout{grid-template-columns:1fr}.d3-stage{height:60vh;min-height:380px}.d3-header{display:block}.d3-wrap{padding:30px 16px 55px}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="d3-wrap">
+  <header class="d3-header"><div><div class="d3-kicker">The character workshop / 03</div><h1>A little more dimension.</h1><p>Turn a character into a rigged 3D VRM avatar, or bring your own, then explore its motion and try face tracking with your camera.</p></div></header>
+  <div class="d3-layout">
+    <div><div class="d3-stage" id="d3-stage"><div class="d3-stage-tag">3D stage / local preview</div><div class="d3-placeholder" id="d3-placeholder"><div class="d3-mark">✳</div><strong>Your next character has room to move.</strong><span>Pick a Ka-myii 3D avatar or open a VRM file. GLB models can be viewed as still objects.</span></div></div><div class="d3-caption"><span id="d3-model-name">No character open</span><span><strong>Drag</strong> to orbit &nbsp;·&nbsp; <strong>Scroll</strong> to zoom &nbsp;·&nbsp; <strong>1–6</strong> gestures</span></div></div>
+    <aside class="d3-panel" aria-label="3D stage controls">
+      <section><h2>Your character</h2><label for="d3-characters">Ka-myii 3D avatars</label><select id="d3-characters" class="d3-select"><option value="">Choose a character…</option></select><a class="d3-make-link" id="d3-make" href="/gallery" hidden>Make one from a Gallery character ↗</a><p class="d3-hint" style="margin-top:10px">Make one from any character with <strong>Make 3D avatar</strong> in the Gallery, or open a .vrm or .glb file from your computer (it stays on this device).</p><div class="d3-row"><button class="d3-btn" type="button" id="d3-open">Open 3D file</button><button class="d3-btn secondary" type="button" id="d3-fit" disabled>Fit view</button><a class="d3-btn secondary" id="d3-download" href="#" download hidden>Download VRM</a></div><input id="d3-file" type="file" accept=".vrm,.glb,model/gltf-binary" hidden><p class="d3-status" id="d3-status" role="status" aria-live="polite">Choose a character or a file to begin.</p></section>
+      <section><h2>Face tracking</h2><p class="d3-hint">Camera follows your head, blinking and mouth on a compatible VRM avatar. Camera starts only when you turn it on.</p><div class="d3-row"><button class="d3-btn secondary" type="button" id="d3-camera" disabled>Turn camera on</button><button class="d3-btn secondary" type="button" id="d3-calibrate" disabled>Calibrate</button><button class="d3-btn secondary" type="button" id="d3-mic" aria-pressed="false" disabled>Use microphone</button></div><p class="d3-status" id="d3-camera-status" role="status" aria-live="polite">Camera off</p><p class="d3-hint">The microphone alone also works: the mouth follows your voice, and avatars with painted A I U E O mouths pick the vowel you say.</p></section>
+      <section><h2>Motion & expression</h2><label for="d3-turn">Head turn <output id="d3-turn-value">0</output></label><input id="d3-turn" type="range" min="-1" max="1" value="0" step="0.01" disabled><label for="d3-tilt">Head tilt <output id="d3-tilt-value">0</output></label><input id="d3-tilt" type="range" min="-1" max="1" value="0" step="0.01" disabled><label for="d3-mouth">Mouth <output id="d3-mouth-value">0%</output></label><input id="d3-mouth" type="range" min="0" max="1" value="0" step="0.01" disabled><div id="d3-mouth-shapes-wrap" hidden><label>Mouth shape</label><div class="d3-row" id="d3-mouth-shapes" role="group" aria-label="Mouth shape"></div><p class="d3-hint">Choose the mouth shape for movement and face tracking.</p></div><div id="d3-expressions-wrap" hidden><label>Expressions</label><div class="d3-row" id="d3-expressions"></div></div><label>Gestures</label><div class="d3-row" id="d3-gestures" role="group" aria-label="Gestures"><button class="d3-btn secondary" type="button" data-gesture="wave" title="Wave (key 1)" disabled>Wave</button><button class="d3-btn secondary" type="button" data-gesture="nod" title="Nod (key 2)" disabled>Nod</button><button class="d3-btn secondary" type="button" data-gesture="shake" title="Shake head (key 3)" disabled>Shake head</button><button class="d3-btn secondary" type="button" data-gesture="hop" title="Hop (key 4)" disabled>Hop</button><button class="d3-btn secondary" type="button" data-gesture="bow" title="Bow (key 5)" disabled>Bow</button><button class="d3-btn secondary" type="button" data-gesture="cheer" title="Cheer (key 6)" disabled>Cheer</button></div><p class="d3-hint">Keys 1–6 play them too, Shift+1–9 switch expressions and M the microphone. They work with the camera on.</p><div class="d3-row"><button class="d3-btn secondary" type="button" id="d3-idle" aria-pressed="true" disabled>Idle on</button><button class="d3-btn secondary" type="button" id="d3-lively" aria-pressed="true" title="While idle with the camera off, now and then nod, wave or hop on their own" disabled>Little gestures on</button><button class="d3-btn secondary" type="button" id="d3-reset" disabled>Reset pose</button></div><div id="d3-bounce-wrap" hidden><label for="d3-bounce">Chest bounce <output id="d3-bounce-value">50%</output></label><input id="d3-bounce" type="range" min="0" max="1" value="0.5" step="0.05"><p class="d3-hint">Spring physics on the chest; Hop shows it best. VSeeFace and other VRM apps play the 50% setting.</p></div><div id="d3-companions-wrap" hidden><label for="d3-ears">Animal ears</label><select id="d3-ears" class="d3-select"><option value="off">Off</option><option value="cat">Cat</option><option value="fox">Fox</option><option value="wolf">Wolf</option><option value="bunny">Bunny</option><option value="bear">Bear</option></select><label for="d3-tail">Tail</label><select id="d3-tail" class="d3-select"><option value="off">Off</option><option value="cat">Cat</option><option value="fox">Fox</option><option value="wolf">Wolf</option><option value="devil">Devil</option></select><p class="d3-hint" id="d3-tail-hint" hidden>A tail needs a full-body avatar.</p><label for="d3-fur">Fur colour</label><select id="d3-fur" class="d3-select"><option value="hair">Match hair</option><option value="ivory">Ivory</option><option value="charcoal">Charcoal</option><option value="copper">Copper</option></select><label for="d3-ear-size">Ear size</label><input id="d3-ear-size" type="range" min="0.5" max="1.8" value="1" step="0.05"><label for="d3-ear-lift">Ear height</label><input id="d3-ear-lift" type="range" min="-0.6" max="0.6" value="0" step="0.05"><label for="d3-tail-size">Tail size</label><input id="d3-tail-size" type="range" min="0.4" max="1.8" value="1" step="0.05"><p class="d3-hint">Ears twitch and lag head turns; the tail sways and swings with the hips. They show on the stage, in pictures and clips, not in the downloaded VRM.</p></div><p class="d3-hint" style="margin-top:12px">Expressions and motion depend on the avatar’s rig. Ka-myii avatars blink and talk with the character’s own painted eyes and mouth when it was separated into layers. The upper body gently follows the head; it is not full-body tracking.</p></section>
+      <section><h2>Stage & picture</h2><label>Framing</label><div class="d3-row" id="d3-framing" role="group" aria-label="Camera framing"><button class="d3-btn secondary" type="button" data-frame="full" disabled>Full body</button><button class="d3-btn secondary" type="button" data-frame="bust" disabled>Bust</button><button class="d3-btn secondary" type="button" data-frame="face" disabled>Face</button></div><label>Background</label><div class="d3-row" id="d3-backgrounds" role="group" aria-label="Stage background"><button class="d3-btn secondary" type="button" data-bg="studio">Studio</button><button class="d3-btn secondary" type="button" data-bg="green">Green screen</button><button class="d3-btn secondary" type="button" data-bg="blue">Blue screen</button><button class="d3-btn secondary" type="button" data-bg="dark">Dark</button><button class="d3-btn secondary" type="button" data-bg="light">Light</button><button class="d3-btn secondary" type="button" data-bg="checker">Checkerboard</button></div><p class="d3-hint">Green or blue screen lets OBS key out the stage (Chroma Key filter). Saved pictures are always transparent.</p><div class="d3-row"><button class="d3-btn secondary" type="button" id="d3-turntable" aria-pressed="false" disabled>Turntable</button><button class="d3-btn secondary" type="button" id="d3-fullscreen" disabled>Fullscreen</button><button class="d3-btn secondary" type="button" id="d3-save" disabled>Save transparent PNG</button><button class="d3-btn secondary" type="button" id="d3-record" disabled title="Record up to 15 seconds as a WebM video on the background chosen above">Record clip</button></div></section>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script type="importmap">{"imports":{"three":"/static/vendor/vrm3d/three/three.module.js","three/addons/":"/static/vendor/vrm3d/three/addons/","@pixiv/three-vrm":"/static/vendor/vrm3d/three-vrm.module.min.js"}}</script>
+<script src="/static/vendor/anime25d/lib/face-features.js"></script>
+<script src="/static/vendor/anime25d/lib/devices.js"></script>
+<script src="/static/vendor/anime25d/lib/visemes.js"></script>
+<script src="/static/js/3d_tracking.js"></script>
+<script src="/static/js/3d_motion.js"></script>
+<script type="module" src="/static/js/3d_studio.js?v=ears3"></script>
+{% endblock %}

@@ -176,3 +176,150 @@ def test_sketch_stops_after_the_artwork(tmp_path):
     folder = tmp_path / "out" / model.id
     assert model.status.value == "sketch" and isinstance(model.request.seed, int)
     assert (folder / "base_image.png").exists() and not (folder / "preview.png").exists() and not (folder / "assets").exists()
+
+
+def test_preview_thumbnail_is_small_cached_and_follows_the_art(tmp_path, monkeypatch):
+    import os
+    import config
+    from PIL import Image
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    d = tmp_path / "outputs" / "thumb-1"; d.mkdir(parents=True)
+    Image.new("RGBA", (832, 1216), (200, 120, 90, 255)).save(d / "base_image.png")
+    (d / "metadata.json").write_text('{"id": "thumb-1"}')
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    r = client.get("/api/generation/preview/thumb-1?size=thumb")
+    assert r.status_code == 200 and r.mimetype == "image/webp"
+    from io import BytesIO
+    assert max(Image.open(BytesIO(r.data)).size) == 640
+    first = (d / "thumb.webp").stat().st_mtime
+    assert client.get("/api/generation/preview/thumb-1?size=thumb").status_code == 200
+    assert (d / "thumb.webp").stat().st_mtime == first      # cached
+    Image.new("RGBA", (832, 1216), (10, 200, 90, 255)).save(d / "base_image.png")
+    os.utime(d / "base_image.png", (first + 5, first + 5))
+    r = client.get("/api/generation/preview/thumb-1?size=thumb")
+    assert Image.open(BytesIO(r.data)).convert("RGB").getpixel((10, 10))[1] > 150   # remade from the new art
+    assert client.get("/api/generation/preview/thumb-1").mimetype == "image/png"   # full size unchanged
+    assert not list(d.glob(".thumb-*"))
+
+
+def test_other_websites_cannot_post_to_the_local_server(tmp_path, monkeypatch):
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    form = {"prompt": "1girl"}
+    for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},   # another localhost port
+                    {"Origin": "https://evil.example"}, {"Origin": "null"}):
+        assert client.post("/api/generation/generate", json=form, headers=headers).status_code == 403, headers
+    # Same-origin passes the guard (404: no such character; nothing queued that could outlive the test).
+    ok = client.post("/api/generation/rename/no-such-id", json={"name": "x"},
+                     headers={"Sec-Fetch-Site": "same-origin", "Origin": "http://localhost"})
+    assert ok.status_code == 404
+    assert client.get("/api/generation/list", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+
+
+def test_reveal_opens_only_a_real_character_folder_for_a_local_browser(tmp_path, monkeypatch):
+    import os
+    import sys
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    d = tmp_path / "outputs" / "abc"; d.mkdir(parents=True)
+    (d / "metadata.json").write_text('{"id": "abc"}')
+    opened = []
+    monkeypatch.setattr(os, "startfile", lambda p: opened.append(p), raising=False)
+    monkeypatch.setattr("subprocess.Popen", lambda args: opened.append(args[-1]))
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    assert client.post("/api/generation/reveal/abc").status_code == 200
+    assert str(opened[-1]) == str(d)
+    assert client.post("/api/generation/reveal/..").status_code == 404
+    assert client.post("/api/generation/reveal/abc", environ_base={"REMOTE_ADDR": "192.168.1.9"}).status_code == 403
+    assert len(opened) == 1
+
+
+def test_favorite_stars_and_unstars_a_character(tmp_path, monkeypatch):
+    import json
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    d = tmp_path / "outputs" / "fav"; d.mkdir(parents=True)
+    (d / "metadata.json").write_text('{"id": "fav", "status": "completed"}')
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    assert client.post("/api/generation/favorite/fav", json={"favorite": True}).get_json()["favorite"] is True
+    assert json.loads((d / "metadata.json").read_text())["favorite"] is True
+    assert client.get("/api/generation/list").get_json()["models"][0]["favorite"] is True
+    client.post("/api/generation/favorite/fav", json={"favorite": False})
+    assert "favorite" not in json.loads((d / "metadata.json").read_text())
+    assert client.post("/api/generation/favorite/fav", json={"favorite": "yes"}).status_code == 400
+    assert client.post("/api/generation/favorite/nope", json={"favorite": True}).status_code == 404
+
+
+def test_delete_moves_to_the_trash_and_can_be_undone(tmp_path, monkeypatch):
+    import os
+    import time
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    out = tmp_path / "outputs"
+    for name in ("mika", "old-one"):
+        (out / name).mkdir(parents=True)
+        (out / name / "metadata.json").write_text('{"id": "%s"}' % name)
+    (out / "_uploads").mkdir()   # staging for uploads: an app folder
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    assert client.delete("/api/generation/delete/mika").get_json()["restorable"] is True
+    assert not (out / "mika").exists() and (out / "_trash" / "mika" / "metadata.json").exists()
+    assert [m["id"] for m in client.get("/api/generation/list").get_json()["models"]] == ["old-one"]
+    assert client.post("/api/generation/restore/mika").status_code == 200
+    assert (out / "mika" / "metadata.json").exists() and not (out / "mika" / ".deleted").exists()
+    assert client.post("/api/generation/restore/mika").status_code == 404      # nothing left to restore
+    # Characters deleted more than a week ago are emptied from the trash by the next delete.
+    client.delete("/api/generation/delete/old-one")
+    week_ago = time.time() - 8 * 86400
+    os.utime(out / "_trash" / "old-one" / ".deleted", (week_ago, week_ago))
+    client.delete("/api/generation/delete/mika")
+    assert not (out / "_trash" / "old-one").exists() and (out / "_trash" / "mika").exists()
+    # App folders are not characters.
+    assert client.delete("/api/generation/delete/_uploads").status_code == 404
+    assert client.delete("/api/generation/delete/_trash").status_code == 404
+    assert client.post("/api/generation/restore/..").status_code == 404
+    assert (out / "_uploads").exists()
+
+
+def test_system_status_and_empty_trash(tmp_path, monkeypatch):
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    out = tmp_path / "outputs"
+    (out / "mika").mkdir(parents=True)
+    (out / "mika" / "metadata.json").write_text('{"id": "mika"}')
+    (out / "mika" / "base_image.png").write_bytes(b"x" * 1000)
+    (out / "_uploads").mkdir()
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    s = client.get("/api/generation/system").get_json()
+    assert s["demo"] is True and s["characters"] == 1 and s["characters_bytes"] >= 1000
+    assert s["trash_items"] == 0 and s["free_bytes"] > 0 and s["layers_engine"] is False
+    client.delete("/api/generation/delete/mika")
+    s = client.get("/api/generation/system").get_json()
+    assert s["characters"] == 0 and s["trash_items"] == 1 and s["trash_bytes"] >= 1000
+    assert client.post("/api/generation/trash/empty").get_json()["removed"] == 1
+    assert client.get("/api/generation/system").get_json()["trash_items"] == 0
+    assert (out / "_uploads").exists()
+
+
+def test_notes_are_kept_with_the_character(tmp_path, monkeypatch):
+    import json
+    import config
+    import app as app_module
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path / "outputs")
+    d = tmp_path / "outputs" / "n1"; d.mkdir(parents=True)
+    (d / "metadata.json").write_text('{"id": "n1"}')
+    client = app_module.create_app(use_dummy_generators=True).test_client()
+    r = client.post("/api/generation/notes/n1", json={"notes": "  stream intro\noutfit\x07  " + "x" * 600})
+    notes = r.get_json()["notes"]
+    assert notes.startswith("stream intro\noutfit") and "\x07" not in notes and len(notes) == 500
+    assert client.get("/api/generation/list").get_json()["models"][0]["notes"] == notes
+    client.post("/api/generation/notes/n1", json={"notes": ""})
+    assert "notes" not in json.loads((d / "metadata.json").read_text())
+    assert client.post("/api/generation/notes/n1", json={"notes": 5}).status_code == 400
+    assert client.post("/api/generation/notes/..", json={"notes": "x"}).status_code == 404

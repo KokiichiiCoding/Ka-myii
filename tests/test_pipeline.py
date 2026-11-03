@@ -300,7 +300,7 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     from src.models.vtuber_model import Asset
 
     assets = []
-    for i, name in enumerate(["back hair", "face", "ears-l", "front hair", "headwear"]):
+    for i, name in enumerate(["back hair", "face", "ears-l", "front hair", "headwear", "topwear"]):
         path = workdir / f"{i:02d}_{name}.png"
         Image.new("RGBA", (64, 64), (200, 100, 50, 255)).save(path)
         assets.append(Asset(layer_type=name, file_path=path, metadata={"order": i}))
@@ -312,7 +312,7 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     for key in ("PhysicsSettingCount", "TotalInputCount", "TotalOutputCount", "VertexCount",
                 "EffectiveForces", "PhysicsDictionary"):
         assert key in meta
-    assert meta["PhysicsSettingCount"] == len(settings) == len(meta["PhysicsDictionary"]) == 3
+    assert meta["PhysicsSettingCount"] == len(settings) == len(meta["PhysicsDictionary"]) == 4
     assert meta["TotalInputCount"] == sum(len(s["Input"]) for s in settings)
     assert meta["VertexCount"] == sum(len(s["Vertices"]) for s in settings)
 
@@ -321,7 +321,7 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
            {o["Destination"]["Id"] for s in settings for o in s["Output"]}
     assert used <= declared and all(re.fullmatch(r"[A-Za-z0-9_]+", p) for p in declared)
     assert {o["Destination"]["Id"] for s in settings for o in s["Output"]} == \
-        {"ParamHairBack", "ParamHairFront", "ParamAccessorySway"}  # no physics for the real ears
+        {"ParamHairBack", "ParamHairFront", "ParamAccessorySway", "ParamBustX"}  # none for the real ears
 
 
 

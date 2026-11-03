@@ -76,6 +76,9 @@ class GenerationRequest:
     variant: Optional[Dict] = None  # {"part": "hair", "prompt": "short bob"} (src/core/variants.py)
     # Uploads: {"frame": bool, "plain_background": bool, "enhance": 0..0.6} (src/core/importer.py)
     import_options: Optional[Dict] = None
+    # {"quality": "draft" | "standard" | "high"}: also build a rigged 3D VRM avatar
+    # (src/core/mesh3d.py + rig3d.py); operation "avatar3d" builds one for ``target_model``.
+    avatar3d: Optional[Dict] = None
 
 
 @dataclass

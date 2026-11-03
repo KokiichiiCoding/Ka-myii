@@ -69,6 +69,17 @@ def test_export_reopens_as_a_new_character_with_moved_paths(client):
     assert not any((config.OUTPUT_DIR / "_uploads").glob("import-*"))  # staging cleaned up
 
 
+def test_export_leaves_out_caches_and_half_made_avatars(client):
+    model = config.OUTPUT_DIR / "abc-123"
+    for rel in ("live_preview/preview-1.psd", "thumb.webp", "avatar3d.new/avatar.vrm",
+                "avatar3d.backup-1/avatar.vrm", "avatar3d/avatar.vrm"):
+        (model / rel).parent.mkdir(parents=True, exist_ok=True)
+        (model / rel).write_bytes(b"x")
+    names = zipfile.ZipFile(io.BytesIO(client.get("/api/generation/download/abc-123").data)).namelist()
+    assert "avatar3d/avatar.vrm" in names and "metadata.json" in names and "assets/00_hair.png" in names
+    assert not [n for n in names if n.startswith(("live_preview", "thumb.webp", "avatar3d.new", "avatar3d.backup"))]
+
+
 def test_a_rezipped_folder_keeps_its_id_when_free(client):
     meta = {"id": "fresh-1", "status": "sketch", "created_at": "2026-10-02T10:00:00"}
     r = _open(client, _zip({"fresh-1/metadata.json": json.dumps(meta), "fresh-1/base_image.png": b"png"}))

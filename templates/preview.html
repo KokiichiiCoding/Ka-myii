@@ -20,7 +20,8 @@
   </div>
   <span id="modelName">Loading character…</span>
   <button class="obs-chip" type="button" id="obsChip" hidden title="Open OBS link settings">OBS</button>
-  <a class="collection-link" href="/generator?model={{ model_id }}">← Artwork & exports</a><div class="header-actions">
+  <a class="collection-link" href="/generator?model={{ model_id }}">← Artwork & exports</a>
+  <a class="collection-link" href="/gallery">Gallery</a>{% if has_avatar3d %}<a class="collection-link" href="/3d?model={{ model_id }}">3D avatar ↗</a>{% endif %}<div class="header-actions">
     <a class="btn" id="btnFullBody" href="/generator?model={{ model_id }}#fullbody" title="Generate the missing arms, legs and outfit from this saved character">Full body ↗</a>
     <button class="btn primary" type="button" id="btnOpen" title="Open PSD (Ctrl+O)">Open PSD</button>
     <div class="btn-group" role="group" aria-label="History">
@@ -86,6 +87,7 @@
         <button type="button" class="tg" id="tgMouse">Follow pointer</button>
         <button type="button" class="tg" id="tgMic">Use microphone</button>
         <button type="button" class="tg on" id="tgPhys">Physics</button>
+        <button type="button" class="tg on" id="tgLively" title="While idle, now and then nod, bounce or tilt on their own">Little gestures</button>
       </div>
     </section>
     <section class="sec" data-sec="preset"><h2>Expressions</h2>
@@ -99,8 +101,29 @@
         <button class="btn" type="button" data-preset="winkR">Wink right<kbd>7</kbd></button>
         <button class="btn" type="button" data-preset="grin">Toothy smile</button>
         <button class="btn" type="button" data-preset="jawdrop">Jaw dropped</button>
+        <button class="btn" type="button" data-preset="smug">Smug<kbd>8</kbd></button>
+        <button class="btn" type="button" data-preset="angry">Angry<kbd>9</kbd></button>
+        <button class="btn" type="button" data-preset="sad">Sad</button>
+        <button class="btn" type="button" data-preset="gloomy">Gloomy</button>
+        <button class="btn" type="button" data-preset="flustered">Flustered</button>
+        <button class="btn" type="button" data-preset="pouty">Pouty</button>
       </div>
       <p class="section-hint">Press the same expression again to clear.<kbd>0</kbd>  clears the expression.</p>
+      <div class="btns presets" role="group" aria-label="Face marks">
+        <button class="btn" type="button" data-mark="markBlush" aria-pressed="false">Blush<kbd>R</kbd></button>
+        <button class="btn" type="button" data-mark="markGloom" aria-pressed="false">Gloom<kbd>G</kbd></button>
+        <button class="btn" type="button" data-mark="markAnger" aria-pressed="false">Anger mark<kbd>A</kbd></button>
+        <button class="btn" type="button" data-mark="markSweat" aria-pressed="false">Sweat drop<kbd>D</kbd></button>
+      </div>
+      <p class="section-hint">Face marks work on every character straight away and stack with any expression; Angry, Gloomy, Flustered and Pouty switch on their own. Move them with the eye and face handles in Edit anchors (E).</p>
+      <div class="btns presets" role="group" aria-label="Gestures">
+        <button class="btn" type="button" data-gesture="nod">Nod<kbd>N</kbd></button>
+        <button class="btn" type="button" data-gesture="shake">Shake head<kbd>H</kbd></button>
+        <button class="btn" type="button" data-gesture="tilt">Huh?<kbd>T</kbd></button>
+        <button class="btn" type="button" data-gesture="yay">Yay<kbd>Y</kbd></button>
+        <button class="btn" type="button" data-gesture="shy">Shy<kbd>L</kbd></button>
+      </div>
+      <p class="section-hint">Gestures play once over idle motion, the pointer or your camera.</p>
       <div class="btns presets" id="toggleBtns" role="group" aria-label="Toggles" hidden></div>
       {% if toggle_options %}
       <details class="paint-toggles">
@@ -207,17 +230,18 @@
       <div class="row"><label>Arm height</label><input type="range" id="pArmY" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <div class="row"><label>Arm position</label><input type="range" id="pArmPos" min="-1" max="1" step="0.01" value="0"><span class="val"></span></div>
       <p class="section-hint">No arms or legs in the picture? <a href="/generator?model={{ model_id }}#fullbody">Complete the body ↗</a> paints them in as a new character to separate.</p>
-      <div class="row"><label>Breathing sway</label><input type="range" id="pBust" min="0" max="4" step="0.01" value="2.5"><span class="val"></span></div>
-      <div class="row"><label>Breathing origin</label><input type="range" id="pBustY" min="-3" max="3" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Chest bounce</label><input type="range" id="pBust" min="0" max="4" step="0.01" value="1"><span class="val"></span></div>
+      <div class="row"><label>Chest height</label><input type="range" id="pBustY" min="-3" max="3" step="0.01" value="1"><span class="val"></span></div>
+      <p class="section-hint">The chest lags and bounces with breathing, nods and the Yay gesture (Y). Chest height, or the Chest handle in Edit anchors (E), moves where it bounces; 0 turns it off.</p>
       <div class="row"><label>Back hair sway</label><input type="range" id="pPhysAmp" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
       <div class="row"><label>Back hair softness</label><input type="range" id="pSoft" min="0" max="3" step="0.01" value="2"><span class="val"></span></div>
       <div class="row"><label>Accessory sway</label><input type="range" id="pAccAmp" min="0" max="3" step="0.01" value="1"><span class="val"></span></div>
       <p class="section-hint">Earrings, tails, hats and bows. A hat's brim and tip trail the head; the part on the head stays put.</p>
     </section>
-    <section class="sec" data-sec="companions"><h2>Nekomimi & tail</h2>
-      <p class="section-hint">Fit animated cat ears and a tail to any character. The ears twitch and the tail swishes with Idle; both react to turns with Physics on.</p>
-      <div class="field-row"><label for="nekoStyle">Cat ears</label><select id="nekoStyle"><option value="0">Off</option><option value="1">On</option></select></div>
-      <div class="field-row"><label for="tailStyle">Cat tail</label><select id="tailStyle"><option value="0">Off</option><option value="1">On</option></select></div>
+    <section class="sec" data-sec="companions"><h2>Animal ears & tail</h2>
+      <p class="section-hint">Fit animated animal ears and a tail to any character. The ears twitch and the tail swishes with Idle; both react to turns with Physics on.</p>
+      <div class="field-row"><label for="nekoStyle">Animal ears</label><select id="nekoStyle"><option value="0">Off</option><option value="1">Cat</option><option value="2">Fox</option><option value="3">Wolf</option><option value="4">Bunny</option><option value="5">Bear</option></select></div>
+      <div class="field-row"><label for="tailStyle">Tail</label><select id="tailStyle"><option value="0">Off</option><option value="1">Cat</option><option value="2">Fox</option><option value="3">Wolf</option><option value="4">Devil</option></select></div>
       <div class="field-row"><label for="furPalette">Fur colour</label><select id="furPalette"><option value="0">Match hair</option><option value="1">Ivory</option><option value="2">Charcoal</option><option value="3">Copper</option></select></div>
       <div class="row"><label>Ear size</label><input type="range" id="pEarSize" min="0.4" max="1.8" step=".01" value="1"><span class="val"></span></div>
       <div class="row"><label>Ear spacing</label><input type="range" id="pEarSpread" min="0.4" max="1.8" step=".01" value="1"><span class="val"></span></div>
@@ -318,14 +342,14 @@
 <script src="lib/rigger.js"></script>
 <script src="lib/genericparts.js"></script>
 <script src="lib/runtime.js"></script>
-<script src="lib/motion.js"></script>
+<script src="lib/motion.js?v=m7"></script>
 <script src="lib/visemes.js"></script>
 <script src="lib/face-features.js"></script>
 <script src="lib/renderer.js"></script>
 <script src="lib/devices.js"></script>
 <script src="lib/recorder.js"></script>
 <script src="lib/obs-sync.js"></script>
-<script src="lib/app.js?v=m2"></script>
+<script src="lib/app.js?v=m7"></script>
 <script>
 // Queue a painting job, follow it, and reload when its layers are ready.
 async function paintAndReload(button, url, body) {

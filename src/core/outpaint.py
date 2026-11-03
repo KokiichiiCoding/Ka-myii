@@ -6,21 +6,32 @@ of what is new, for SDXL to paint (src/core/image_generator.py ``inpaint``).
 model paints the rest of the body. "uncrop": only the borders the character touches get room
 (a hat cut off at the top, an elbow at the side), keeping the framing. Either way the artwork's
 edges are redrawn gradually (a graded mask), deepest where it was cut, so the join is drawn.
+"front": a character submitted in a dynamic pose (side-on, mid-action, holding a prop) is redrawn
+whole in the standing, front-facing model-sheet pose; its image can guide appearance, but no pixels are kept.
 """
 from __future__ import annotations
 
 import json
+import re
 from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image
 
 # The natural stance of a VTuber model sheet: standing straight-on, arms relaxed at the sides.
-FULL_BODY_TAGS = "full body, standing, straight-on, arms at sides, legs, feet, shoes, simple background, white background"
+FULL_BODY_TAGS = "full body, standing, straight-on, arms at sides, entire outfit, simple background, white background"
 FULL_BODY_NEGATIVE = ("cropped, out of frame, close-up, portrait, upper body, cowboy shot, feet out of frame, "
                       "from above, from below, sitting, multiple views, border, frame")
 # Framing tags in a saved brief that would fight a full-body extension.
 CROP_TAGS = {"upper body", "waist up", "portrait", "close-up", "cowboy shot", "bust", "bust shot"}
+# Match pose tags at the start: "dress with crossed lacing" describes clothes, not a pose.
+# A front redraw drops the submitted pose, camera angle and props in hand from the brief.
+POSE_TAGS = re.compile(r"^(holding|instrument|weapon|playing|from (side|behind|above|below)|profile|"
+                       r"looking (away|to the side|back|down|up)|sitting|kneeling|squatting|lying|leaning|"
+                       r"running|walking|jumping|pose|stance|arms? (up|behind)|hands? (up|on|in)|outstretched|"
+                       r"pointing|crossed (arms|legs)|dutch angle|foreshortening)\b")
+FRONT_TAGS = "looking at viewer, facing viewer"
+FRONT_NEGATIVE = "from side, profile, looking away, looking to the side, dynamic pose, holding, holding instrument, holding weapon"
 # Artistic targets, not an anatomy rule: owners can retain compact designs deliberately.
 PROPORTIONS = {"balanced": 6.75, "compact": 5.5, "tall": 7.5}
 HEADS = PROPORTIONS["balanced"]
@@ -56,6 +67,13 @@ def plan(image: Image.Image, fg: np.ndarray, mode: str = "full_body",
     head = geometry.get("head_height") or head
     image = image.convert("RGB")
     W, H = image.size
+    if mode == "front":
+        # Everything is repainted at strength 1 (the old pose would fight the guide); the pose
+        # guide's default figure stands on the canvas centre at the chosen proportions.
+        info = {"touched": [], "mode": mode, "proportions": proportions, "target_heads": PROPORTIONS[proportions],
+                "keep_face": False, "canvas": [W, H], "measured": False, "standing_axis": W / 2, "foot_y": H * .94}
+        info["pose_points"] = pose_points(info)
+        return image, np.full((H, W), 255, np.uint8), info
     touched = touched_borders(fg)
     background = _background_colour(image, fg)
     if mode == "full_body":
@@ -85,7 +103,7 @@ def plan(image: Image.Image, fg: np.ndarray, mode: str = "full_body",
         top = int(pad["top"] * scale) + (H - int(grown_h * scale)) // 2
         out_w, out_h = W, H
     else:
-        raise ValueError("mode must be full_body or uncrop")
+        raise ValueError("mode must be full_body, front or uncrop")
 
     canvas = Image.new("RGB", (out_w, out_h), background)
     canvas.paste(image.resize((w, h), Image.Resampling.LANCZOS), (left, top))
@@ -248,9 +266,10 @@ def head_height(model_dir) -> Optional[int]:
     return anatomy(model_dir).get("head_height")
 
 
-def full_body_prompt(prompt: str) -> str:
-    """The brief without framing tags such as "upper body"."""
-    return ", ".join(t for t in (s.strip() for s in prompt.split(",")) if t and t.lower() not in CROP_TAGS)
+def full_body_prompt(prompt: str, front: bool = False) -> str:
+    """The brief without framing tags such as "upper body" (``front``: nor the submitted pose)."""
+    return ", ".join(t for t in (s.strip() for s in prompt.split(","))
+                     if t and t.lower() not in CROP_TAGS and not (front and POSE_TAGS.match(t.lower())))
 
 
 def _background_colour(image: Image.Image, fg: np.ndarray):

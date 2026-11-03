@@ -45,7 +45,7 @@ let modelId='',modelName='',kamyiiModel=false,currentRig=null,background='checke
 let layers=[],A=null,baseAnchors=null,anchorOffsets={},CW=768,CH=768,FS=1,NP=null,BP=null,FC=null,CHEST=null,hasEyeClose2=false;
 let renderBox={left:0,top:0,w:768,h:768,key:''};
 let lastPsd=null,lastPre=null,anchorMode=false,anchorPreview=null,highlightLayer=null,blinkEditor=false,blinkView='both',rigSimpleBlink=false;
-const bounce={x:0,v:0,dy:0};
+const bounce={x:0,v:0,dy:0},bounceX={x:0,v:0,dx:0};
 const motion={x:{x:0,v:0},y:{x:0,v:0},earL:{x:0,v:0},earR:{x:0,v:0},tail:{x:0,v:0},hatX:{x:0,v:0},hatY:{x:0,v:0},torsoYaw:{x:0,v:0},torsoRoll:{x:0,v:0},torsoLift:{x:0,v:0},torsoShift:{x:0,v:0},nodTime:0,palette:-1};
 const Motion=window.RigMotion;
 function invalidate(){dirty=true;}
@@ -208,7 +208,7 @@ function applyRig(rig){
   CW=rig.canvas.w;CH=rig.canvas.h;renderBox={left:0,top:0,w:CW,h:CH,key:''};
   baseAnchors=JSON.parse(JSON.stringify(rig.anchors));anchorOffsets={};
   applyAnchors();
-  Object.assign(bounce,{x:0,v:0,dy:0});
+  Object.assign(bounce,{x:0,v:0,dy:0});Object.assign(bounceX,{x:0,v:0,dx:0});
   for(const k of ['x','y','earL','earR','tail','hatX','hatY','torsoYaw','torsoRoll','torsoLift','torsoShift'])Object.assign(motion[k],{x:0,v:0});motion.palette=-1;motion.nodTime=0;lastFrame=null;blinkT=-1;blinkVariant=1;irisBounceT=-1;
   hasEyeClose2=layers.some(L=>L.bn==='eye_close2');maskFailed=false;
   visemeOrder=layers.filter(L=>L.fade==='viseme').sort((a,b)=>a.z-b.z).map(L=>L.bn.slice(6));visemeSet=new Set(visemeOrder);visemes=oneVowel('a');visemeTarget=oneVowel('a');
@@ -366,12 +366,12 @@ window.addEventListener('drop',e=>{
 const P={angleX:0,angleY:0,angleZ:0,eyeOpenL:1,eyeOpenR:1,eyeX:0,eyeY:0,brow:0,
   mouthOpen:0,mouthForm:0,mouthTeeth:0,jawDrop:0,mouthExpressive:1,mouthCY:0,body:0,physAmp:0.95,soft:0.85,
   browAngL:0,browAngR:0,browAngSym:0,bangL:0,bangC:0,bangR:0,
-  armY:0,armPos:0,shrug:0,bodyMotion:1,bodyTurn:0,weightShift:.4,breathing:1,bust:0.4,bustY:1,irisScale:1,mouthEase:0.72,eyeEase:0.3,mouthRound:0,mouthResponse:0.65,motionBounce:1,nodDepth:0,nodSpeed:2.6,swayDepth:0,
-  fhAmp:0.95,fhSoft:0.65,eyeCY:0,eyeCAng:0,mouthCAng:0,eyeScaleL:1,eyeScaleR:1,mouthScale:1,accAmp:1,shadowFollow:1,eyeTiltL:0,eyeTiltR:0,simpleBlink:0,neko:0,tail:0,furPalette:0,earSize:1,earSpread:1,earLift:0,earMotion:1,tailSize:1,tailX:0,tailY:0,tailSide:1,tailMotion:1};
+  armY:0,armPos:0,shrug:0,bodyMotion:1,bodyTurn:0,weightShift:.4,breathing:1,bust:1,bustY:1,irisScale:1,mouthEase:0.72,eyeEase:0.3,mouthRound:0,mouthResponse:0.65,motionBounce:1,nodDepth:0,nodSpeed:2.6,swayDepth:0,
+  fhAmp:0.95,fhSoft:0.65,eyeCY:0,eyeCAng:0,mouthCAng:0,eyeScaleL:1,eyeScaleR:1,mouthScale:1,accAmp:1,shadowFollow:1,eyeTiltL:0,eyeTiltR:0,simpleBlink:0,neko:0,tail:0,furPalette:0,earSize:1,earSpread:1,earLift:0,earMotion:1,tailSize:1,tailX:0,tailY:0,tailSide:1,tailMotion:1,markBlush:0,markGloom:0,markAnger:0,markSweat:0};
 const DEFAULTS=Object.assign({},P);
 const T=Object.assign({},P);
 const cur=Object.assign({},P);
-const auto={idle:true,blink:true,rand:false,talk:false,mouse:false,mic:false,phys:true,cam:false};
+const auto={idle:true,blink:true,rand:false,talk:false,mouse:false,mic:false,phys:true,cam:false,lively:true};
 const autoDefaults={...auto};
 if(OBS_MODE)$('tgTalk').classList.remove('on');
 
@@ -412,10 +412,17 @@ for(const id in sliders){
 }
 parameterRanges.simpleBlink=[0,1];
 sliderOf.simpleBlink={range:[0,1],set(value){const v=value>=.5?1:0;$('blinkStyle').value=String(v);return v;}};
-for(const [id,key,range] of [['mouthArtwork','mouthExpressive',[0,1]],['nekoStyle','neko',[0,1]],['tailStyle','tail',[0,1]],['furPalette','furPalette',[0,3]],['tailSide','tailSide',[-1,1]]]){
+for(const [id,key,range] of [['mouthArtwork','mouthExpressive',[0,1]],['nekoStyle','neko',[0,Motion.EARS.length-1]],['tailStyle','tail',[0,Motion.TAILS.length-1]],['furPalette','furPalette',[0,3]],['tailSide','tailSide',[-1,1]]]){
   const el=$(id);parameterRanges[key]=range;
   sliderOf[key]={range,set(value){el.value=String(key==='tailSide'?(value<0?-1:1):Math.round(value));return Number(el.value);}};
   el.addEventListener('change',()=>{setSlider(key,Number(el.value));commitHistory();});
+}
+// Face marks (blush, gloom, anger, sweat): on/off buttons that fade, saved like any setting.
+const MARKS=['markBlush','markGloom','markAnger','markSweat'];
+for(const key of MARKS){
+  const el=document.querySelector('[data-mark="'+key+'"]');parameterRanges[key]=[0,1];
+  sliderOf[key]={range:[0,1],set(value){const on=value>=.5;el?.classList.toggle('active',on);el?.setAttribute('aria-pressed',String(on));return on?1:0;}};
+  el?.addEventListener('click',()=>{setSlider(key,T[key]>=.5?0:1);commitHistory();syncState(true);});
 }
 for(const button of document.querySelectorAll('[data-motion]'))button.addEventListener('click',()=>{
   const amount=Number(button.dataset.motion);
@@ -443,7 +450,7 @@ function setSlider(key,val){
   T[key]=b.set(val);if(paused&&lastFrame)lastFrame[key]=T[key];invalidate();
 }
 
-const toggleIds={idle:'tgIdle',blink:'tgBlink',rand:'tgRand',talk:'tgTalk',cam:'tgCam',mouse:'tgMouse',mic:'tgMic',phys:'tgPhys'};
+const toggleIds={idle:'tgIdle',blink:'tgBlink',rand:'tgRand',talk:'tgTalk',cam:'tgCam',mouse:'tgMouse',mic:'tgMic',phys:'tgPhys',lively:'tgLively'};
 const toggleLabels={cam:'Use camera',mic:'Use microphone'};
 function syncToggle(key){const el=$(toggleIds[key]);el.classList.toggle('on',auto[key]);el.setAttribute('aria-pressed',String(auto[key]));}
 function setAuto(key,value){
@@ -457,7 +464,7 @@ function setAuto(key,value){
 }
 Object.entries(toggleIds).forEach(([key,id])=>{syncToggle(key);$(id).addEventListener('click',()=>setAuto(key,!auto[key]));});
 
-const PRESET_ORDER=['neutral','smile','usume','surprise','jito','winkL','winkR'];
+const PRESET_ORDER=['neutral','smile','usume','surprise','jito','winkL','winkR','smug','angry'];
 const presets={
   neutral:{eyeOpenL:1,eyeOpenR:1,brow:0,mouthOpen:0,mouthForm:0,mouthRound:0,mouthTeeth:0,jawDrop:0,irisScale:1},
   smile:{eyeOpenL:0,eyeOpenR:0,brow:0.45,mouthOpen:0,mouthForm:0.9,irisScale:1},
@@ -467,13 +474,29 @@ const presets={
   winkL:{eyeOpenL:0,eyeOpenR:1,brow:0.2,mouthOpen:0.4,mouthForm:0.7,irisScale:1},
   winkR:{eyeOpenL:1,eyeOpenR:0,brow:0.2,mouthOpen:0.4,mouthForm:0.7,irisScale:1},
   grin:{eyeOpenL:.85,eyeOpenR:.85,brow:.25,mouthOpen:.6,mouthForm:.9,mouthTeeth:1,irisScale:1},
-  jawdrop:{eyeOpenL:1,eyeOpenR:1,brow:1,mouthOpen:1,mouthForm:-.25,mouthRound:1,jawDrop:1,irisScale:.75}};
-let activePreset=null;
+  jawdrop:{eyeOpenL:1,eyeOpenR:1,brow:1,mouthOpen:1,mouthForm:-.25,mouthRound:1,jawDrop:1,irisScale:.75},
+  // Brow angle > 0 drops the inner ends (angry), < 0 lifts them (worried); see deform().
+  smug:{eyeOpenL:.5,eyeOpenR:.58,brow:-.1,browAngL:-.45,browAngR:.25,mouthForm:.75,irisScale:1},
+  angry:{eyeOpenL:.72,eyeOpenR:.72,brow:-.55,browAngSym:.85,mouthForm:-.85,irisScale:.9,markAnger:1},
+  sad:{eyeOpenL:.62,eyeOpenR:.62,brow:.3,browAngSym:-.8,mouthForm:-.6,irisScale:1.05},
+  gloomy:{eyeOpenL:.42,eyeOpenR:.42,brow:-.25,browAngSym:-.4,mouthForm:-.45,irisScale:.9,markGloom:1},
+  flustered:{eyeOpenL:.8,eyeOpenR:.8,brow:.35,browAngSym:-.55,mouthOpen:.15,mouthForm:-.25,mouthRound:.6,irisScale:1.1,markBlush:1,markSweat:1},
+  pouty:{eyeOpenL:.75,eyeOpenR:.75,brow:-.15,browAngSym:.35,mouthForm:-.5,mouthRound:.35,irisScale:1,markBlush:1}};
+// Brow angles and marks are not reset by every expression: a preset puts back the ones it set.
+const PRESET_EXTRAS=['browAngSym','browAngL','browAngR',...MARKS];
+let activePreset=null,presetBefore=null;
 function highlightPresets(){document.querySelectorAll('[data-preset]').forEach(b=>{const on=b.dataset.preset===activePreset;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));});}
 function togglePreset(name){
   if(!presets[name])return;
-  if(activePreset===name){activePreset=null;for(const k in presets.neutral)setSlider(k,presets.neutral[k]);}
-  else{for(const [k,v] of Object.entries({...presets.neutral,...presets[name]}))setSlider(k,v);activePreset=name;}
+  if(activePreset){   // after a reload nothing was remembered: undo the preset's own extras
+    const before=presetBefore||Object.fromEntries(PRESET_EXTRAS.filter(k=>k in presets[activePreset]).map(k=>[k,DEFAULTS[k]]));
+    for(const [k,v] of Object.entries(before))setSlider(k,v);
+  }
+  if(activePreset===name){activePreset=null;presetBefore=null;for(const k in presets.neutral)setSlider(k,presets.neutral[k]);}
+  else{
+    presetBefore=Object.fromEntries(PRESET_EXTRAS.filter(k=>k in presets[name]).map(k=>[k,T[k]]));
+    for(const [k,v] of Object.entries({...presets.neutral,...presets[name]}))setSlider(k,v);activePreset=name;
+  }
   highlightPresets();commitHistory();syncState(true);
 }
 function clearPreset(){if(!activePreset)return;togglePreset(activePreset);}
@@ -525,7 +548,7 @@ function applySettings(value,opts={}){
     const legacy={facedetail:1.02,nose:1.15,eyewhite:1.06,irides:1.08,eyelash:1.12,eye_close:1.12,eye_close2:1.12,eyebrow:1.14,mouth_open:1.08,mouth_close:1.08};
     for(const r of data.layers){const L=layers.find(L=>L.id===r.id);if(L&&Math.abs(r.depth-legacy[L.bn])<1e-6)r.depth=L.defaultDepth;}
   }
-  activePreset=null;
+  activePreset=null;presetBefore=null;
   for(const [key,n] of Object.entries(data.params))setSlider(key,n);
   activePreset=data.preset;highlightPresets();
   Object.assign(cur,T);
@@ -715,9 +738,9 @@ $('btnReadme').addEventListener('click',openReadme);$('btnReadme2').addEventList
 $('readmeClose').addEventListener('click',closeDialog);$('shortcutClose').addEventListener('click',closeDialog);
 document.querySelectorAll('.overlay-dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d)closeDialog();}));
 const SHORTCUTS=[
-  [['Space'],'Pause / Play'],[['1','–','7'],'Expressions (same key clears)'],[['0'],'Clear expression'],[['Shift','1','–','9'],'Switch toggles (blush, tears…)'],
+  [['Space'],'Pause / Play'],[['1','–','9'],'Expressions (same key clears)'],[['R'],'Blush'],[['G'],'Gloom'],[['A'],'Anger mark'],[['D'],'Sweat drop'],[['0'],'Clear expression'],[['Shift','1','–','9'],'Switch toggles (blush, tears…)'],
   [['Ctrl','Z'],'Undo'],[['Ctrl','Shift','Z'],'Redo (or Ctrl+Y)'],[['Ctrl','S'],'Save adjustments in this browser'],
-  [['Ctrl','O'],'Open PSD'],[['E'],'Edit anchors mode'],[['F'],'Fit the preview'],
+  [['Ctrl','O'],'Open PSD'],[['N'],'Nod'],[['H'],'Shake head'],[['T'],'Tilt (huh?)'],[['Y'],'Yay bounce'],[['L'],'Shy look away'],[['E'],'Edit anchors mode'],[['F'],'Fit the preview'],
   [['B'],'Change background'],[['Wheel'],'Zoom the preview'],[['Drag'],'Pan the zoomed preview'],
   [['Double-click'],'Fit the preview'],[['?'],'Show or hide this list'],[['Esc'],'Close dialogs and Edit anchors']];
 $('shortcutTable').innerHTML=SHORTCUTS.map(([keys,desc])=>'<tr><td>'+keys.map(k=>k==='–'?'–':'<kbd>'+k+'</kbd>').join(' ')+'</td><td>'+desc+'</td></tr>').join('');
@@ -748,16 +771,20 @@ document.addEventListener('keydown',e=>{
     return;
   }
   if(textEntry||e.altKey||e.ctrlKey||e.metaKey)return;
-  if(e.repeat&&!e.key.startsWith('Arrow')){if(e.code==='Space'||/^[0-7ebf?]$/i.test(e.key))e.preventDefault();return;}
+  if(e.repeat&&!e.key.startsWith('Arrow')){if(e.code==='Space'||/^[0-9ebf?rgad]$/i.test(e.key))e.preventDefault();return;}
   if(t.closest&&t.closest('#overlay .handle')&&e.key.startsWith('Arrow'))return;   // arrow keys move anchors
   if(e.code==='Space'){
     if(layers.length&&!/BUTTON|INPUT/.test(tag)&&!t.closest('[role="button"]')){e.preventDefault();togglePause();}
     return;
   }
   if(e.shiftKey&&/^Digit[1-9]$/.test(e.code)){const L=toggleLayers()[e.code.slice(5)-1];if(L){e.preventDefault();flipToggle(L);}return;}
-  if(/^[0-7]$/.test(e.key)&&layers.length){e.preventDefault();if(e.key==='0')clearPreset();else togglePreset(PRESET_ORDER[Number(e.key)-1]);return;}
+  if(/^[0-9]$/.test(e.key)&&layers.length){e.preventDefault();if(e.key==='0')clearPreset();else togglePreset(PRESET_ORDER[Number(e.key)-1]);return;}
+  const markKey={r:'markBlush',g:'markGloom',a:'markAnger',d:'markSweat'}[k];
+  if(markKey&&layers.length){e.preventDefault();setSlider(markKey,T[markKey]>=.5?0:1);commitHistory();syncState(true);return;}
   if(k==='e'&&layers.length){e.preventDefault();setAnchorMode(!anchorMode);return;}
   if(k==='f'){e.preventDefault();resetView();return;}
+  const gestureKey={n:'nod',h:'shake',t:'tilt',y:'yay',l:'shy'}[k];
+  if(gestureKey&&layers.length){e.preventDefault();playGesture(gestureKey);return;}
   if(k==='b'){e.preventDefault();const i=RT.BACKGROUNDS.indexOf(background);setBackground(RT.BACKGROUNDS[(i+1)%RT.BACKGROUNDS.length]);commitHistory();return;}
   if(e.key==='?'){e.preventDefault();openDialog('shortcutOverlay','shortcutClose');return;}
   if(e.key==='Escape'&&anchorMode){e.preventDefault();setAnchorMode(false);}
@@ -1304,6 +1331,7 @@ function randomVowel(){let r=Math.random();for(const [v,p] of VOWEL_MIX){if((r-=
 function oneVowel(v){return {a:0,i:0,u:0,e:0,o:0,[v]:1};}
 
 function fadeAlpha(L,e,alt){
+  if(L.kind==='mark')return clamp(e[L.param],0,1);
   if(L.companion)return (L.kind==='ear'?e.neko:e.tail)>.5?1:0;
   if(e.replaced?.has(L.bn))return 0;   // an alternate hairstyle/outfit is on
   const weights=Motion.mouthWeights(e.mouthOpen,e.mouthTeeth,e.mouthRound,e.mouthExpressive);
@@ -1339,6 +1367,14 @@ function deform(L,e){
   const nS=L.strands?L.strands.length:0;
   const bcx=L.x+L.w/2,bcy=L.y+L.h/2;
   const physOn=nS&&auto.phys&&L.su;
+  let chestWeights=null,chestDX=0,chestDY=0;
+  if(bn==='topwear'&&auto.phys&&e.bust>0){
+    const height=e.bustY*70*FS,key=[CHEST.cx,CHEST.cy,CHEST.rx,CHEST.ry,height].join(',');
+    if(L.chestKey!==key){L.chestWeights=Motion.chestWeights(b,CHEST,height);L.chestKey=key;}
+    chestWeights=L.chestWeights;
+    chestDX=Motion.chestOffset(bounceX.dx,e.bust,fh);
+    chestDY=Motion.chestOffset(bounce.dy,e.bust,fh);
+  }
   for(let k=0;k<n;k+=2){
     let x=b[k],y=b[k+1];
     const vi=k>>1;
@@ -1390,7 +1426,8 @@ function deform(L,e){
     }
     if(L.fade==='mouthClose'){
       x=A.mouth.cx+(x-A.mouth.cx)*(1+.08*e.mouthForm);
-      y-=e.mouthForm*3*FS*(Math.pow(Math.abs(x-A.mouth.cx)/(mHalfW+4),1.5)-.35);
+      // Drawn mouths are mostly smiles already, so a frown bends harder to read as one.
+      y-=e.mouthForm*(e.mouthForm<0?8:3)*FS*(Math.pow(Math.abs(x-A.mouth.cx)/(mHalfW+4),1.5)-.35);
       y+=e.mouthCY*14*FS;
       const thM=e.mouthCAng*0.35;
       if(thM){const ct=Math.cos(thM),st=Math.sin(thM),rx=x-A.mouth.cx,ry=y-A.mouth.cy;x=A.mouth.cx+rx*ct-ry*st;y=A.mouth.cy+rx*st+ry*ct;}
@@ -1419,11 +1456,8 @@ function deform(L,e){
     y-=(L.group==='body'?e.breath*2.0:e.breathHead*1.6)*FS;
     if(bn==='topwear'&&y<CHEST.cy)y-=e.breath*2.2*FS*smooth((CHEST.cy-y)/(CHEST.ry*2));   // shoulders rise
     if(bn==='topwear')x=NP.cx+(x-NP.cx)*(1+e.breath*0.003);
-    // --- bust jiggle ---
-    if(bn==='topwear'){
-      const gx=(x-CHEST.cx)/CHEST.rx,gy=(y-(CHEST.cy+e.bustY*70*FS))/CHEST.ry;
-      y+=bounce.dy*e.bust*Math.exp(-gx*gx-gy*gy);
-    }
+    // --- chest bounce ---
+    if(chestWeights){const g=chestWeights[vi];y+=chestDY*g;x+=chestDX*g;}
     // --- arms ---
     if(bn==='handwear'){
       const w=smooth((y-L.y)/L.h*1.15);
@@ -1467,8 +1501,10 @@ function updateSprings(e,t,dt,wind){
       RT.spring(sp.liftSoft,tyv,46,7,dt);sp.liftSoft.dx=(sp.liftSoft.x-tyv)*1.3;
     }
   }
-  const bustTgt=(e.breath*3.0-e.angleY*6.0+e.body*4.0)*FS;
+  // The chest lags the torso and overshoots: breathing, head bobs, nods, hops; sideways with the torso arc.
+  const bustTgt=(e.breath*3.0-e.angleY*6.0+e.body*4.0)*FS+(e.nodPose?.body||0)*(A.face.y1-A.face.y0);
   RT.spring(bounce,bustTgt,140,4.2,dt);bounce.dy=auto.phys?-(bounce.x-bustTgt)*3.0:0;
+  RT.spring(bounceX,bodyDX,90,4.5,dt);bounceX.dx=auto.phys?-(bounceX.x-bodyDX)*1.5:0;
   const bx=(e.body*7+e.angleX*3)*FS,by=(-e.angleY*3+(wind?Math.sin(t*2.2)*1.4:0))*FS;
   RT.spring(motion.x,bx,52,8-e.motionBounce*2,dt);RT.spring(motion.y,by,64,8-e.motionBounce*2,dt);
   e.followX=auto.phys?(motion.x.x-bx)*e.motionBounce:0;
@@ -1484,16 +1520,21 @@ function updateSprings(e,t,dt,wind){
   e.hatX=auto.phys?clamp((motion.hatX.x-hatX)*2.6+(wind?fh*(.025*Math.sin(t*1.3)+.01*Math.sin(t*3.1)):0),-limit,limit)*e.accAmp:0;
   e.hatY=auto.phys?clamp((motion.hatY.x-headDY)*2,-limit,limit)*e.accAmp:0;
   RT.spring(motion.tail,e.body*.5+e.angleX*.28,22,4,dt);
-  e.tailPhase=t*1.8;e.tailSway=auto.phys?clamp((wind?.8:0)+(motion.tail.x-e.body*.5-e.angleX*.28)*3,-1.8,1.8)*e.tailMotion:0;
+  const tailKind=Motion.TAILS[Math.round(e.tail)],speed={fox:1.25,wolf:1.1,devil:2.6}[tailKind]||1.8;
+  const idleSway=wind?.6+.3*Math.sin(t*.31)+.7*Math.pow(Math.max(0,Math.sin(t*.53+1)),14):0;   // a lazy sway, now and then a flick
+  e.tailPhase=t*speed;e.tailSway=auto.phys?clamp(idleSway+(motion.tail.x-e.body*.5-e.angleX*.28)*3,-1.8,1.8)*e.tailMotion:0;
 }
 // Still pose used while editing anchors: handles line up with the drawing.
 function restPose(dt){
-  const e=Object.assign({},T,{angleX:0,angleY:0,angleZ:0,body:0,eyeX:0,eyeY:0,irisBounceX:1,irisBounceY:1,breath:0,breathHead:0});
+  const e=Object.assign({},T,{angleX:0,angleY:0,angleZ:0,body:0,eyeX:0,eyeY:0,irisBounceX:1,irisBounceY:1,breath:0,breathHead:0,bust:0});
   if(blinkEditor){e.eyeOpenL=blinkView==='both'||blinkView==='L'?0:1;e.eyeOpenR=blinkView==='both'||blinkView==='R'?0:1;}
   else{if(anchorPreview==='L')e.eyeOpenL=0;if(anchorPreview==='R')e.eyeOpenR=0;}
   updateSprings(e,0,dt,false);e.followX=e.followY=e.earL=e.earR=e.tailSway=e.hatX=e.hatY=0;
   return e;
 }
+const gesture={name:null,at:0,next:0};
+function playGesture(name){if(Motion.GESTURES.includes(name)&&layers.length){gesture.name=name;gesture.at=simulationTime;}}
+document.querySelectorAll('[data-gesture]').forEach(b=>b.addEventListener('click',()=>playGesture(b.dataset.gesture)));
 function animate(now,dt){
   if(anchorMode)return restPose(dt);
   const t=now/1000;
@@ -1531,6 +1572,12 @@ function animate(now,dt){
   if(auto.idle&&!camLive)motion.nodTime=(motion.nodTime+dt*cur.nodSpeed)%2;   // sway runs at half speed
   const nod=auto.idle&&!camLive?Motion.nodPose(motion.nodTime,cur.nodDepth,1,cur.swayDepth):{head:0,body:0,squash:1,pitch:0,tilt:0};
   tgt.angleY+=nod.pitch;tgt.angleZ+=nod.tilt;
+  // Little gestures: while idle with no camera, now and then a nod, a happy bounce or a tilt.
+  if(!auto.lively||!auto.idle||camLive||gesture.name||!gesture.next)gesture.next=Math.max(gesture.next,now+9000);
+  else if(now>=gesture.next){gesture.name=['nod','yay','tilt'][Math.floor(Math.random()*3)];gesture.at=now;gesture.next=now+15000+Math.random()*17000;}
+  const gest=gesture.name?Motion.gesture(gesture.name,Math.max(0,now-gesture.at)/1000):null;
+  if(!gest)gesture.name=null;
+  else for(const [k,v] of [['angleX','x'],['angleY','y'],['angleZ','z'],['body','body'],['brow','brow'],['mouthForm','mouthForm'],['eyeX','eyeX'],['eyeY','eyeY']])tgt[k]+=gest[v];
   if(!camLive){
     tgt.angleZ+=Motion.TURN_TILT*tgt.angleX;
     tgt.angleY-=Math.min(.12,.05*turnSpeed);   // a head turn travels on a dipping arc, not a flat slide
@@ -1605,16 +1652,39 @@ function animate(now,dt){
 }
 
 // ---------- render loop ----------
+// Where a face mark goes, from the eye and face anchors (so Edit anchors moves them too).
+function markBox(L){
+  const f=A.face,fw=f.x1-f.x0,fh=f.y1-f.y0;
+  if(L.mark==='blush'){
+    const eye=A[L.markSide<0?'eyeL':'eyeR'],ew=eye?eye.x1-eye.x0:fw*.22;
+    const cx=eye?(eye.x0+eye.x1)/2:f.cx+L.markSide*fw*.22,y=eye?eye.y1:f.y0+fh*.55;
+    return {x:cx-ew*.62,y:y+ew*.02,w:ew*1.24,h:ew*.7};
+  }
+  if(L.mark==='gloom'){
+    const top=f.y0+fh*.08,eyes=[A.eyeL,A.eyeR].filter(Boolean),bottom=eyes.length?Math.max(...eyes.map(a=>a.y1))+fh*.16:f.y0+fh*.65;
+    return {x:f.x0,y:top,w:fw,h:bottom-top};
+  }
+  // The face layer often runs up under bangs or a hat, so these two go by the eyes.
+  const eyes=[A.eyeL,A.eyeR].filter(Boolean),ew=eyes.length?eyes.reduce((s,a)=>s+a.x1-a.x0,0)/eyes.length:fw*.22;
+  if(L.mark==='anger'){
+    const eye=A.eyeL,cx=eye?eye.x0-ew*.15:f.x0+fw*.15,cy=eye?eye.y0-ew*1.15:f.y0+fh*.15,s=ew*1.25;
+    return {x:cx-s/2,y:cy-s/2,w:s,h:s};
+  }
+  const eye=A.eyeR,cx=eye?eye.x1+ew*.45:f.x1-fw*.06,cy=eye?eye.y0-ew*.75:f.y0+fh*.25,w=ew*.6;   // the sweat drop, at the temple
+  return {x:cx-w/2,y:cy-w*.75,w,h:w*1.5};   // the sweat drop, at the temple
+}
 function companionPoint(L,x,y,e){
   const fw=A.face.x1-A.face.x0,fh=A.face.y1-A.face.y0;
+  if(L.kind==='mark'){const b=markBox(L);return [b.x+x/L.w*b.w,b.y+y/L.h*b.h];}
   if(L.kind==='ear'){
     const width=fw*.34*e.earSize,height=fw*.50*e.earSize;
-    const p=Motion.earPoint((x-64)/128,(y-151)/151,width,height,L.earSide,
-      .14+(e[L.earSide<0?'earL':'earR']||0)*e.earMotion);
+    const p=Motion.earPoint((x-64)/128,(y-311)/151,width,height,L.earSide,
+      (Motion.EAR_TILT[Motion.EARS[Math.round(e.neko)]]??.14)+(e[L.earSide<0?'earL':'earR']||0)*e.earMotion);
     return [A.face.cx+L.earSide*fw*.42*e.earSpread+p[0],L.crown+fh*.12+e.earLift*fh+p[1]];
   }
   const side=e.tailSide<0?-1:1;
-  const p=Motion.tailPoint((x-64)/128,clamp((380-y)/365,0,1),fh*1.25*e.tailSize,fw*.26*e.tailSize,side,e.tailPhase||0,e.tailSway||0);
+  const wide={fox:1.7,wolf:1.45}[Motion.TAILS[Math.round(e.tail)]]||1;   // bushy tails
+  const p=Motion.tailPoint((x-64)/128,clamp((380-y)/365,0,1),fh*1.25*e.tailSize,fw*.26*e.tailSize*wide,side,e.tailPhase||0,e.tailSway||0);
   const torso=layers.find(part=>part.bn==='topwear');
   const rootY=torso?Math.min(NP.cy+fh*.8,torso.y+torso.h*.65):NP.cy+fh*.6;
   return [NP.cx+side*fw*.28+e.tailX*fw+p[0],rootY+e.tailY*fh+p[1]];
@@ -1644,12 +1714,12 @@ function updateStageBounds(){
     includeTorso(p,y,pad);
   }
   const pose={...T,earL:0,earR:0,tailPhase:0,tailSway:0};
-  for(const L of layers.filter(L=>L.companion&&(L.kind==='ear'?T.neko:T.tail)>.5)){
+  for(const L of layers.filter(L=>L.companion&&L.kind!=='mark'&&(L.kind==='ear'?T.neko:T.tail)>.5)){
     const pad=(L.kind==='ear'?20*FS+(A.face.y1-A.face.y0)*.14*T.nodDepth:(A.face.y1-A.face.y0)*.38*T.tailSize*T.tailMotion+16*FS);
     for(const twitch of L.kind==='ear'?[-.8,0,.8]:[0]){
       pose.earL=pose.earR=twitch;
       for(let j=0;j<=16;j++)for(const x of [0,L.w]){
-        const p=companionPoint(L,x,L.h*j/16,pose);
+        const p=companionPoint(L,x,(L.top||0)+(L.h-(L.top||0))*j/16,pose);
         includeTorso(p,p[1],pad);
       }
     }
@@ -1665,16 +1735,17 @@ function updateStageBounds(){
   $('overlay').setAttribute('viewBox',[renderBox.left,renderBox.top,renderBox.w,renderBox.h].join(' '));fit();
 }
 function updateCompanionArt(e){
-  const palette=Math.round(e.furPalette);if(palette===motion.palette)return;
+  const palette=Math.round(e.furPalette),ear=Motion.EARS[Math.round(e.neko)]||'cat',tail=Motion.TAILS[Math.round(e.tail)]||'cat',key=[palette,ear,tail].join();
+  if(key===motion.palette)return;
   const rgb=Motion.palette(currentRig,palette);
-  for(const L of layers.filter(L=>L.companion)){
-    const image=Motion.art(L.kind,rgb);gl.activeTexture(gl.TEXTURE0);
-    const old=L.tex;L.tex=renderer.texture(image);gl.deleteTexture(old);
+  for(const L of layers.filter(L=>L.companion&&L.kind!=='mark')){
+    const image=Motion.art(L.kind,rgb,L.kind==='ear'?ear:tail);gl.activeTexture(gl.TEXTURE0);
+    const old=L.tex;L.tex=renderer.texture(image);gl.deleteTexture(old);L.top=image.top;
   }
-  motion.palette=palette;
+  motion.palette=key;
 }
 function render(e){
-  updateStageBounds();updateCompanionArt(e);
+  updateCompanionArt(e);updateStageBounds();   // art first: the bounds use where each design starts
   // Observable diagnostics for browser checks; no imagery or device data is logged.
   const closed=e.eyeOpenL<0.1;
   if(closed&&!closedOnPreviousFrame)blinkCount++;
@@ -1750,8 +1821,9 @@ function updateLiveTicker(){
 Object.defineProperty(window,'Anime25D',{value:Object.freeze({version:APP_VERSION,state(){
   return {modelId,modelName,layers:layers.filter(L=>!L.companion).length,paused,anchorMode,blinkEditor,blinkView,activePreset,background,unsaved,
     anchors:JSON.parse(JSON.stringify(anchorOffsets)),params:Object.assign({},T),auto:Object.assign({},auto),
-    pose:lastFrame?{eyeL:lastFrame.eyeOpenL,eyeR:lastFrame.eyeOpenR,mouth:lastFrame.mouthOpen,angleX:lastFrame.angleX,tilt:lastFrame.angleZ,torso:lastFrame.torso?{...lastFrame.torso}:null,followX:lastFrame.followX,followY:lastFrame.followY,tailSway:lastFrame.tailSway,earL:lastFrame.earL,earR:lastFrame.earR,nod:lastFrame.nodPose?.head||0}:null,
-    companions:{ears:T.neko>.5,tail:T.tail>.5},
+    pose:lastFrame?{eyeL:lastFrame.eyeOpenL,eyeR:lastFrame.eyeOpenR,mouth:lastFrame.mouthOpen,angleX:lastFrame.angleX,tilt:lastFrame.angleZ,torso:lastFrame.torso?{...lastFrame.torso}:null,followX:lastFrame.followX,followY:lastFrame.followY,chestY:bounce.dy,chestX:bounceX.dx,tailSway:lastFrame.tailSway,earL:lastFrame.earL,earR:lastFrame.earR,nod:lastFrame.nodPose?.head||0}:null,
+    companions:{ears:T.neko>.5,tail:T.tail>.5,ear:Motion.EARS[Math.round(T.neko)],tailKind:Motion.TAILS[Math.round(T.tail)]},
+    marks:Object.fromEntries(MARKS.map(k=>[k.slice(4).toLowerCase(),T[k]])),
     synth:currentRig?Object.assign({},currentRig.synth):null,
     shading:{vertices:layers.reduce((n,L)=>n+(L.shadingBindings?.length||0),0),pixels:layers.reduce((n,L)=>!L.flow?n:L.flow.reduce((m,v,i)=>Math.max(m,Math.abs(v)*(i%2?L.h:L.w)),n),0)},
     cam:Object.assign({},cam),camLive:cam.live&&performance.now()-lastTrackingAt<1200,calibrated:!!prefs.calibration,

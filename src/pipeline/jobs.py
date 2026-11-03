@@ -37,6 +37,12 @@ STAGES_BY_OPERATION = {
     "edit": {"image": (0.0, 1.0, "Repainting the selection…")},
     "extend": {"image": (0.0, 1.0, "Extending the canvas…")},
     "refine": {"image": (0.0, 1.0, "Refining details…")},
+    # measured on the 8 GB laptop: ~4 min for the mesh (engine start ~1 min), ~15 s to rig
+    "avatar3d": {"mesh": (0.0, 0.92, "Building the 3D model…"), "rig": (0.92, 1.0, "Rigging the avatar…")},
+    "generate3d": {"image": (0.0, 0.08, "Painting the character…"), "separate": (0.08, 0.62, "Separating layers…"),
+                   "expressions": (0.62, 0.69, "Painting expressions…"),
+                   "assemble": (0.69, 0.7, "Packaging PSD + Cubism files…"),
+                   "mesh": (0.7, 0.98, "Building the 3D model…"), "rig": (0.98, 1.0, "Rigging the avatar…")},
 }
 KEEP_FINISHED = 20
 ACTIVE = ("queued", "running")
@@ -167,7 +173,10 @@ class JobQueue:
         elif job.state == "running":
             manager = get_progress_manager()
             stage = manager.stages.get(job.id, "image")
-            stages = STAGES_BY_OPERATION.get(getattr(job.request, "operation", "generate"), STAGES)
+            operation = getattr(job.request, "operation", "generate")
+            if operation == "generate" and getattr(job.request, "avatar3d", None):
+                operation = "generate3d"
+            stages = STAGES_BY_OPERATION.get(operation, STAGES)
             lo, hi, label = stages.get(stage, (0.0, 1.0, ""))
             tracker = manager.get_tracker(job.id)
             frac = min(1.0, tracker.current_step / tracker.total_steps) if tracker and tracker.total_steps else 0.0
@@ -178,6 +187,8 @@ class JobQueue:
                 # Per-stage ETA only: stage durations differ too much to extrapolate a total.
                 eta=round(tracker.eta) if tracker and tracker.current_step else None,
             )
+            if job.id in manager.artwork:   # the artwork is ready while later stages run
+                data["artwork"] = manager.artwork[job.id]
         return data
 
     def _prune(self):

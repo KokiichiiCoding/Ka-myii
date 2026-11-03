@@ -288,6 +288,26 @@ def draw_symbol(region: str, mask: np.ndarray, kind: Optional[str] = None) -> Im
     return layer
 
 
+def draw_blush(mask: np.ndarray, boxes: list) -> Image.Image:
+    """Pink cheeks with manga hatch lines (full-canvas RGBA) in ``mask``, the cheek region under
+    each eye box: the drawn blush 3D avatars get when the character has no painted one."""
+    soft = np.asarray(_soft(mask, 6), np.float32) / 255
+    layer = np.zeros((*mask.shape, 4), np.uint8)
+    layer[..., :3] = (255, 110, 135)
+    layer[..., 3] = (soft * 150).astype(np.uint8)
+    image = Image.fromarray(layer, "RGBA")
+    draw = ImageDraw.Draw(image)
+    for x0, y0, x1, y1 in boxes:
+        ew, cx, cy = x1 - x0, (x0 + x1) / 2, y1 + 0.38 * (x1 - x0)
+        for i in range(4):
+            lx = cx + (i - 1.5) * 0.17 * ew
+            draw.line((lx - 0.05 * ew, cy + 0.12 * ew, lx + 0.05 * ew, cy - 0.12 * ew),
+                      fill=(214, 58, 92, 210), width=max(2, int(ew * 0.045)))
+    alpha = np.asarray(image.getchannel("A")) * _grow(mask, 2)   # lines stay on the cheeks
+    image.putalpha(Image.fromarray(alpha.astype(np.uint8)))
+    return image
+
+
 # Positions around the head (share of the aura box), clear of the face like the sparkles.
 AROUND = [(.11, .36, .09), (.88, .25, .1), (.1, .72, .06), (.9, .66, .07), (.24, .08, .06)]
 

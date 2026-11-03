@@ -8,7 +8,7 @@
   const SETTINGS_FORMAT = 'anime25d-settings';
   const SETTINGS_VERSION = 2;
   const PRESETS = ['neutral','smile','usume','surprise','jito','winkL','winkR','grin','jawdrop'];
-  const AUTO_KEYS = ['idle','blink','rand','talk','mouse','phys'];
+  const AUTO_KEYS = ['idle','blink','rand','talk','mouse','phys','lively'];
   const BACKGROUNDS = ['checker','green','dark'];
   // Editable anchor offsets (PSD pixels) and the axes each one may move.
   const ANCHOR_KEYS = {face:['dx','dy'],eyeL:['dx','dy'],eyeR:['dx','dy'],eyeLClose:['dx','dy'],eyeRClose:['dx','dy'],mouth:['dx','dy'],neck:['dx','dy'],chest:['dx','dy']};

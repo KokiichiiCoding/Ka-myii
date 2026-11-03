@@ -18,12 +18,13 @@
             <a class="km-tab {% block tab_home %}{% endblock %}" href="/"><i class="fas fa-house"></i> Home</a>
             <a class="km-tab {% block tab_studio %}{% endblock %}" href="/generator"><i class="fas fa-wand-magic-sparkles"></i> Studio</a>
             <a class="km-tab {% block tab_gallery %}{% endblock %}" href="/gallery"><i class="fas fa-images"></i> Gallery</a>
+            <a class="km-tab {% block tab_3d %}{% endblock %}" href="/3d"><i class="fas fa-cube"></i> 3D</a>
         </div>
         <div class="spacer"></div>
-        <span class="km-pill" id="navModelStatus" title="Generation backend status">
+        <a class="km-pill" id="navModelStatus" title="Generation backend status" aria-live="polite">
             <span class="led" id="navLed"></span>
             <span id="navModelText">checking…</span>
-        </span>
+        </a>
     </nav>
 
     <main>
@@ -31,8 +32,22 @@
     </main>
 
     <footer class="km-foot">
-        Ka-myii <span>Character workshop / Made on your machine</span>
+        Ka-myii <span>Character workshop / Made on your machine · <button type="button" class="link-btn" id="kmHelpBtn">Keyboard shortcuts (?)</button></span>
     </footer>
+
+    <dialog class="km-help" id="kmStatus" aria-labelledby="kmStatusTitle">
+        <h2 id="kmStatusTitle">Ka-myii on this machine</h2>
+        <table id="kmStatusTable"><tr><td>Checking…</td></tr></table>
+        <p class="hint" id="kmStatusNote"></p>
+        <form method="dialog" class="km-status-actions"><button type="button" class="btn" id="kmEmptyTrash" hidden>Empty trash</button><button class="btn">Close</button></form>
+    </dialog>
+
+    <dialog class="km-help" id="kmHelp" aria-labelledby="kmHelpTitle">
+        <h2 id="kmHelpTitle">Keyboard shortcuts</h2>
+        <table>{% block shortcuts %}{% endblock %}
+            <tr><td><kbd>?</kbd></td><td>Show or hide this list</td></tr></table>
+        <form method="dialog"><button class="btn">Close</button></form>
+    </dialog>
 
     <script src="/static/vendor/ui/bootstrap.bundle.min.js"></script>
     <script src="/static/vendor/ui/axios.min.js"></script>
@@ -52,6 +67,97 @@
             const txt = document.getElementById('navModelText');
             if (txt) txt.textContent = 'offline';
         }
+    })();
+
+    // The status pill (when no job is running) opens what is installed and how much space is used.
+    (function () {
+        const dialog = document.getElementById('kmStatus'), table = document.getElementById('kmStatusTable');
+        const mb = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : Math.round(n / 1e6) + ' MB';
+        async function show() {
+            if (!dialog.open) dialog.showModal();
+            try {
+                const { data } = await axios.get('/api/generation/system');
+                const rows = [
+                    ['Mode', data.demo ? 'Demo (placeholder art, no GPU)' : 'Real (your GPU)'],
+                    ['Layer separation', data.layers_engine ? 'See-through installed' : 'Not installed (run.bat offers to install it)'],
+                    ['3D avatars', data.engine3d ? 'Engine installed' : 'Optional engine not installed (python scripts/install_3d.py)'],
+                    ['Characters', `${data.characters} · ${mb(data.characters_bytes)}`],
+                    ['Trash', `${data.trash_items} · ${mb(data.trash_bytes)} (emptied after 7 days)`],
+                    ['Free disk', mb(data.free_bytes)],
+                    ['Folder', data.outputs],
+                ];
+                table.replaceChildren(...rows.map(([k, v]) => {
+                    const tr = document.createElement('tr'), a = document.createElement('td'), b = document.createElement('td');
+                    a.textContent = k; b.textContent = v; tr.append(a, b); return tr;
+                }));
+                const empty = document.getElementById('kmEmptyTrash');
+                empty.hidden = !data.trash_items;
+                empty.onclick = async () => {
+                    if (!confirm(`Permanently delete the ${data.trash_items} character(s) in the trash? This cannot be undone.`)) return;
+                    const r = await axios.post('/api/generation/trash/empty');
+                    document.getElementById('kmStatusNote').textContent = `Removed ${r.data.removed} from the trash.`;
+                    show();
+                };
+            } catch (e) { table.innerHTML = '<tr><td>The local server is not answering.</td></tr>'; }
+        }
+        const pill = document.getElementById('navModelStatus');
+        pill.style.cursor = 'pointer';
+        pill.addEventListener('click', (e) => { if (!pill.getAttribute('href')) { e.preventDefault(); show(); } });
+    })();
+
+    // "?" lists the page's shortcuts (each template fills the shortcuts block).
+    (function () {
+        const help = document.getElementById('kmHelp');
+        document.getElementById('kmHelpBtn').addEventListener('click', () => help.showModal());
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== '?' || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+            e.preventDefault();
+            if (help.open) help.close(); else if (!document.querySelector('dialog[open]')) help.showModal();
+        });
+    })();
+
+    // Outside the Studio, show the running job in the nav and say when it is done.
+    (function () {
+        if (location.pathname.startsWith('/generator')) return;  // the Studio shows jobs itself
+        const pill = document.getElementById('navModelStatus');
+        const led = document.getElementById('navLed'), txt = document.getElementById('navModelText');
+        let watching = null, idle = null;
+        const title = document.title;
+        async function tick() {
+            if (document.hidden) return;
+            try {
+                const { data } = await axios.get('/api/generation/jobs');
+                const jobs = data.jobs || [];
+                const running = jobs.find(j => j.state === 'running');
+                const queued = jobs.filter(j => j.state === 'queued').length;
+                if (running) {
+                    if (!idle) idle = [led.className, txt.textContent];
+                    watching = running.id;
+                    led.className = 'led busy';
+                    txt.textContent = `Creating · ${Math.round(running.progress)}%` + (queued ? ` · ${queued} queued` : '');
+                    pill.href = '/generator'; pill.title = running.message || 'Open the Studio';
+                    document.title = `${Math.round(running.progress)}% · ${title}`;
+                } else if (watching) {
+                    const done = jobs.find(j => j.id === watching);
+                    watching = null;
+                    document.title = title;
+                    if (document.hidden && done && done.state === 'completed') {   // say so until the user looks
+                        document.title = `✓ Ready · ${title}`;
+                        document.addEventListener('visibilitychange', () => { document.title = title; }, { once: true });
+                    }
+                    if (done && done.state === 'completed' && done.model_id) {
+                        led.className = 'led on'; txt.textContent = 'Character ready ↗';
+                        pill.href = '/generator?model=' + encodeURIComponent(done.model_id); pill.title = 'Open the new character';
+                        window.dispatchEvent(new CustomEvent('kamyii:job-done', { detail: done }));
+                    } else if (idle) {
+                        [led.className, txt.textContent] = idle; pill.removeAttribute('href');
+                        if (done && done.state === 'failed') txt.textContent = 'Last job failed';
+                    }
+                    idle = null;
+                }
+            } catch (e) { /* offline: the status text already says so */ }
+        }
+        tick(); setInterval(tick, 4000);
     })();
     </script>
 </body>

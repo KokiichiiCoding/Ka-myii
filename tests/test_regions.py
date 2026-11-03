@@ -178,6 +178,55 @@ def test_extend_api_queues_an_outpaint(client):
     assert client.post("/api/generation/extend/abc-123", json={"mode": "sideways"}).status_code == 400
 
 
+def test_front_redraw_replaces_a_dynamic_pose(client):
+    """A submitted bard holding a harp side-on is redrawn whole, standing and facing forward."""
+    from src.core import outpaint
+
+    _, mask, info = outpaint.plan(Image.new("RGB", (200, 300), "white"), np.zeros((300, 200), bool), "front")
+    assert (mask == 255).all() and "placed" not in info, "Nothing kept, so no head layers are carried over"
+    points = info["pose_points"]
+    assert points[1][0] == 100 and points[10][0] < 100 < points[13][0], "Standing on the canvas centre"
+    assert outpaint.full_body_prompt("1girl, holding instrument, instrument, from side, blue cloak, "
+                                     "exposed shoulders, standing", front=True) == "1girl, blue cloak, exposed shoulders, standing"
+
+    (config.OUTPUT_DIR / "abc-123" / "metadata.json").write_text(json.dumps(
+        {"request": {"prompt": "1girl, upper body, blonde hair, holding instrument, looking to the side"}}))
+    r = client.post("/api/generation/extend/abc-123", json={"mode": "front", "guided": False, "prompt": "red boots"})
+    assert r.status_code == 202
+    req = client.submitted[-1]
+    assert req.strength == 1.0 and req.pose_image and req.extension["guided"], "Always guided by the standing pose"
+    assert req.prompt == "1girl, blonde hair, red boots" and req.framing == "full_body"
+    assert "facing viewer" in req.edit_prompt and "arms at sides" in req.edit_prompt and "holding instrument" in req.negative_prompt
+    assert req.extension["reference_strength"] == 0.65
+    assert req.extension["source_model"] == "abc-123"
+    # Describe stance without insisting on exposed legs or a different pair of shoes.
+    assert "long legs" not in req.edit_prompt and ", shoes," not in req.edit_prompt
+
+
+def test_front_redraw_keeps_clothing_and_validates_reference_influence(client):
+    from src.core import outpaint
+
+    clothing = "gold dress with crossed lacing, calf-length skirt, white underskirt, embroidered blue cloak"
+    assert outpaint.full_body_prompt(clothing + ", holding harp, crossed arms, profile", front=True) == clothing
+    model = config.OUTPUT_DIR / "abc-123"
+    (model / "metadata.json").write_text(json.dumps({"request": {"prompt": "1girl, " + clothing + ", holding harp"}}))
+    for strength in (0, 0.85, 1):
+        response = client.post("/api/generation/extend/abc-123", json={
+            "mode": "front", "reference_strength": strength, "prompt": "brown lace-up boots"})
+        assert response.status_code == 202
+        req = client.submitted[-1]
+        assert req.extension["reference_strength"] == strength
+        assert clothing in req.prompt and "brown lace-up boots" in req.prompt
+        assert "holding harp" not in req.prompt
+    count = len(client.submitted)
+    for invalid in (-0.1, 1.01, True, False, "not-a-number", [], "NaN", "Infinity"):
+        response = client.post("/api/generation/extend/abc-123", json={"mode": "front", "reference_strength": invalid})
+        assert response.status_code == 400 and "reference_strength" in response.get_json()["error"]
+    assert len(client.submitted) == count
+    assert client.post("/api/generation/extend/abc-123", json={"mode": "full_body"}).status_code == 202
+    assert "reference_strength" not in client.submitted[-1].extension, "Ordinary extensions retain their own behaviour"
+
+
 def test_extend_can_continue_to_layers_and_rejects_ambiguous_flags(client):
     r = client.post("/api/generation/extend/abc-123", json={"mode": "full_body", "separate": True, "prompt": "black boots"})
     assert r.status_code == 202

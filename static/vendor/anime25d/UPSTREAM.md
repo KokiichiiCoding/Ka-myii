@@ -74,3 +74,13 @@ and gives `mouth_a … mouth_o` layers (`fade:'viseme'`) normalized stack alphas
 (`replaces`, one per part); mouth emotes (tongue out, cat mouth, fang) replace the talking mouth.
 New drawn symbols float with Idle. Motion: Live2D-sample blink timing and idle periods,
 turn-coupled tilt, eye-led gaze shifts, idle saccades, turn dips/blinks and speech beats.
+
+Gestures (2026-11-01): `RigMotion.gesture` adds one-shot Nod / Shake head / Huh? tilt / Yay /
+Shy pose offsets (keys N H T Y L, buttons under Expressions) on simulation time, starting and
+ending at rest. **Little gestures** (`auto.lively`, saved in settings, default on) plays a nod,
+bounce or tilt every 15–32 s while Idle runs without the camera. Button gestures are not relayed to
+OBS; an OBS window plays its own Little gestures when the setting is on.
+
+Chest-motion refinement (2026-11-03): the 2D chest influence is calculated in original
+artwork coordinates and cached until the chest anchor or height changes. Displacement is
+smoothly bounded after the user's strength setting; anchor editing uses a still chest.

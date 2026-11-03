@@ -14,6 +14,11 @@ Read this whole file before changing anything. Keep it up to date when you finis
 
 - **Self-contained**: Ka-myii installs and runs its own PyTorch stack. It must NOT depend on
   ComfyUI or any other app being installed.
+  (2026-10-28: the optional 3D avatar path runs Pixal3D in a **private, pinned ComfyUI that
+  Ka-myii's own installer puts in `engines/comfy3d`** — the same pattern as See-through's engine,
+  never the user's ComfyUI. The owner asked for 2D or 3D avatars from the Studio and allowed taking
+  components from Atelier3D, which uses exactly this engine. Model files are hard-linked from a
+  sibling Atelier3D checkout when present.)
 - **End goal = Cubism handoff + live preview**: keep the best possible PSD / Live2D Cubism project
   export, AND add an in-browser preview where the character is animated (blink, mouth, head tilt,
   hair sway) driven by the user's webcam — so they see a working VTuber before opening Cubism.
@@ -27,10 +32,10 @@ Read this whole file before changing anything. Keep it up to date when you finis
   `7bdb230`; the owner switches GitHub's default to it in Settings) and
   `claude/automated-vtuber-model-011CUg6gEfYhoWvMuuXdF2hJ` (the development branch, kept in step
   with main). The old default `Ka-myii` is a stale ancestor; leave it alone.
-- **M1–M5 are committed** (2026-10-17); the 2026-10-18 preview motion polish and
-  manual blink editor, and the 2026-10-23 motion/companion, nod, neck/tilt, shoulders/collar/hat/extend, torso/mouth/full-body UI, seamless-extend/toggles, guided-extension/fidelity and stance/checks/visemes/variants passes below are uncommitted. The owner asked to make Ka-myii a good initial
-  product to push to GitHub; M1–M3 were committed as one baseline (`c113da1`), M4 work
-  (section 9) and M5 (section 10) as separate commits on top. Commit or push only when the owner asks.
+- **Everything below is committed** and pushed to `main` and the development branch: M1–M5
+  (2026-10-17), the 2026-10-18…24 passes (2026-10-24), and on 2026-11-03, at the owner's request
+  ("push to main … when you are satisfied"), the 3D VRM avatars, the QoL passes, chest physics
+  (Claude + Codex) and moods/face marks/animal ears in one commit. Commit or push only when the owner asks.
   **Never run `git checkout .`, `git reset --hard`, `git stash` or `git clean` on this tree**
   (`outputs/` holds the owner's characters).
 - **The repo is public.** The local git config's email is the owner's personal address; commit as
@@ -45,7 +50,8 @@ Read this whole file before changing anything. Keep it up to date when you finis
 | App venv | `.venv\` (Python 3.12; torch 2.8.0+cu128, diffusers 0.37.0, transformers 5.0.0, accelerate 1.13.0, peft, Flask, psd-tools, pytoshop). `run.bat` now prefers an existing `.venv\`, then `venv\`, and creates `.venv\` otherwise. |
 | See-through engine | `engines\see-through\` (git clone, pinned commit `df019de`), its own venv `engines\see-through\.venv\` (torch 2.8.0+cu128, bitsandbytes 0.49.2, diffusers 0.37.0, transformers 5.0.0) |
 | Model weights | See-through NF4 weights in the HF cache (`%USERPROFILE%\.cache\huggingface\hub`, repos `24yearsold/seethroughv0.0.2_layerdiff3d_nf4`, `24yearsold/seethroughv0.0.1_marigold_nf4`). SDXL checkpoint `models\checkpoints\novaAnimeXL_ilV140.safetensors` (Illustrious-based; a **hard link** to the owner's ComfyUI copy — never delete or modify it in place). |
-| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests --ignore=tests/e2e -q` → 98 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs` and `node tests/tagcomplete.test.cjs`. CI (`.github/workflows/tests.yml`) runs the same on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine. |
+| Tests (no GPU, no torch needed) | `.\.venv\Scripts\python.exe -m pytest tests --ignore=tests/e2e -q` → 164 must pass; on sandbox permission conflicts add `-p no:cacheprovider --basetemp <fresh dir>`. Plus `node tests/preview_runtime.test.cjs`, `node tests/tagcomplete.test.cjs`, `node tests/3d_tracking.test.cjs`, and `node tests/3d_motion.test.cjs`. CI (`.github/workflows/tests.yml`) runs the GPU-free suite on Windows + Ubuntu without torch. `tests/conftest.py` forces `seethrough.available() == False` so no test can start the real engine (likewise `mesh3d.available()` and DWPose's `pose.model_path`). |
+| 3D engine (optional) | `.\.venv\Scripts\python.exe scripts\install_3d.py` → `engines\comfy3d\` (ComfyUI v0.42.1 + own venv, torch 2.14.1+cu130 via uv hard links, Pixal3D/MoGe/DINOv3/VAE files hard-linked from `..\Atelier3D\models`, DWPose into the HF cache). Engine log per job: `outputs\<id>\avatar3d\engine.log`; port 8198 (`KAMYII_3D_PORT`). |
 | Re-run layer post-processing on old results (no GPU) | `.\.venv\Scripts\python.exe scripts\rebuild_layers.py <model_id> [...]` — re-separates from the saved See-through PSD, regenerates PSD/ORA/Cubism/preview/metadata |
 | Demo mode (no GPU) | `.\.venv\Scripts\python.exe app.py --dummy --host 127.0.0.1 --port 5055` |
 | Real mode | `.\.venv\Scripts\python.exe app.py --port 5055` (add `--open` to launch the browser). Production + 127.0.0.1 are now the defaults; `FLASK_ENV=development` brings back the Werkzeug reloader, which **restarts the server (killing a running job) whenever you edit a file**. Templates are cached in production: restart after editing them. |
@@ -87,6 +93,15 @@ src/core/auto_physics.py       physics3.json from layer names (keywords: hair+fr
 templates/, static/            "Studio" UI (generator.js: form, job polling, queue panel, layer grid)
 tests/test_pipeline.py         demo-mode end-to-end + See-through mapping/filter/order/cutout tests (GPU-free, monkeypatched)
 tests/test_jobs.py             job queue order/cancel, assembly-line cancel cleanup, See-through progress + kill
+src/core/mesh3d.py             3D mesh: frames the cut-out, Atelier3D's Pixal3D graph (no BiRefNet), starts/stops the
+                               private ComfyUI per job (HTTP polling, progress from its KSampler tqdm lines)
+scripts/comfy3d_nodes/kamyii3d engine node copied in at every start: Atelier3D's photo paint + a JSON camera-fit report
+src/core/pose.py               DWPose ONNX (top-down on the mask's box, no YOLOX): 133 whole-body keypoints
+src/core/rig3d.py              GLB read, camera <-> artwork mapping, joints, skin weights, hair springs, T-pose,
+                               expression decals, VRM 0.x writer, demo mannequin
+AssemblyLine.make_avatar3d     job op "avatar3d" (Gallery) or after a "generate" with request.avatar3d (Studio 2D + 3D);
+                               builds in avatar3d.new/, swaps into avatar3d/ only on success
+tests/test_avatar3d.py         GPU-free 3D tests; tests/e2e/test_3d_stage.py Gallery -> Make 3D avatar -> stage journey
 ```
 
 Layer naming follows See-through's tags (keep it — the live-preview tools expect it):
@@ -180,12 +195,95 @@ ordered back→front by `metadata.order` (filename prefix `NN_`).
    `model_dir_for()` for every URL id, `/generate` accepts only listed checkpoints/LoRAs
    (it loaded any path on disk), bounded numbers, and a Host-header check against DNS
    rebinding when bound to loopback. Uploads are re-encoded by PIL before anything uses them.
+   2026-11-01: no CORS still let other sites send *simple* cross-site POSTs (an auto-submitted
+   multipart upload form would queue a GPU job). `reject_cross_site_writes` in app.py refuses
+   non-GET requests labelled `Sec-Fetch-Site: cross-site/same-site` (same-site = another
+   localhost port) or with an `Origin` that isn't this host; test clients without the headers pass.
 
 21. **Cubism files are checked against Live2D's official JSON schemas** (embedded in the
    markdown of github.com/Live2D/CubismSpecs, `FileFormats/*.json.md`; that repo has no license,
    so they are not vendored). model3/cdi3/motion3 passed; physics3 lacked required Meta fields
    and drove undeclared, invalid ids — fixed. `test_cubism_files_follow_the_specs_…` checks the
    rules without the schemas; re-validate with them after changing the assembler.
+
+22. **3D: everything lines up through Pixal3D's camera.** The mesh is glTF-framed (Y up, faces +Z,
+   the character's left is +X); the input crop was seen from (0, 0, f), f = 0.5 / tan(fov/2), fov =
+   MoGe's, reported by a `PreviewAny` node. Ka-myii frames the crop itself (`mesh3d.frame`, the math
+   of ComfyUI's ImageCropToMask, pad 1.1, subject on black) instead of BiRefNet, so crop <-> artwork is
+   exact. The photo-paint node's silhouette fit (moments, score, azimuth, flip) is returned as JSON and
+   stored in `camera.json`; `rig3d.Camera` refuses to rig below 0.85 match or a turned-around mesh.
+   Bard run: match 0.98, 19% of texels painted from the artwork.
+23. **Rig joints:** DWPose gets the shoulders/elbows/wrists/hips/knees/ankles/feet/68 face points/hands
+   right on clean anime full bodies (bard 0.65–0.9 scores; RGB input, mmpose means). But its elbow sits
+   on the arm's *outline*: the ray there grazed the arm and hit the cape (elbow 18 cm too deep, ray
+   "thickness" 1 mm). Limb joints therefore take the front-most hit among 9 nearby rays minus a radius
+   from anime proportions (x shoulder-keypoint width); torso joints use the middle of the first solid.
+24. **Torso weights by height, not nearest segment**: the neck segment is tiny, and 37% of face vertices
+   went to the neck (face tore on head turns). Blend zones at joints are absolute (25% of the shorter
+   neighbour). Head pivot at 80% from the shoulder line to the chin; head height = 2.2x eye-to-chin.
+25. **Arms: label the surface, then cut fused contacts.** Capsules alone took the cape/thigh/pouch and a
+   too-soft falloff left the arm's own surface 66% arm (T-pose streaks). Now: front-surface vertices take
+   the top See-through layer at their pixel (`handwear-l/-r` are exactly the bare arms + hands), labels
+   spread over the surface by Dijkstra (`spread_parts`, ~0.7 s for 66k vertices), an arm = its own part
+   within 2.5x radius. Pixal3D fuses hands to thighs/pouches; triangles joining arm and body more than
+   half an upper arm from the shoulder are deleted (~500 of 100k on the bard) — 0 stretched edges after;
+   `cap_holes` then fans each opened loop around its centre with that side's weights (closed mesh again).
+26. **VRM 0.x needs a T-pose rest** (apps lower the arms from it; an A-pose rest would be pushed into the
+   body). The A-pose arms are raised by LBS with the final weights; three-vrm/stage `relaxArms` lowers
+   them again (round trip looks like the artwork). VRM 0.x faces -Z: export flips x and z.
+27. **Expression decals**: closed eyes / open mouth from `expressions/` become copies of the face
+   triangles under them (front-facing, front-most), UV'd into an atlas of the painted crops, 2 mm under
+   the skin; a morph target pushes them 2 mm out. All of them share one primitive because glTF requires
+   every primitive of a mesh to have the same morph targets. A drawn-open mouth uses `mouth_close`
+   shown by default and pushed in for "A".
+28. **Engine polling**: `/history/<id>` timed out (5 s) while a node held the GIL; poll with 30 s and
+   retry. `MoGe inference:` prints its own tqdm bar — only unnamed bars count as sampler steps.
+   Real numbers (2026-10-28, Standard, 100k faces, 2K): engine start ~25–50 s, prompt 178 s, rig 10–13 s;
+   **peak VRAM 6.99 GB** of 8 GB through the app (no other GPU users) — close to the spill point.
+29. Editing this repo through bash heredocs: `\n` inside a heredoc'd Python string became a real newline
+   and broke `scripts/install_3d.py` once (Atelier3D noted the same); patch with Edit or a script file.
+30. **Generated VRMs pass the official VRM 0.0 JSON schemas** (github.com/vrm-c/vrm-specification,
+   `specification/0.0/schema/*.json`, Draft 4; not vendored): 0 errors on the bard avatar, and the check
+   flags planted bad `allowedUserName` / bone / preset values. Re-check after changing `write_vrm`:
+   download the 15 schema files, then `uv run --no-project --with jsonschema --with referencing` a
+   Draft4Validator over `extensions.VRM` with a `referencing.Registry` of the files.
+   Khronos' glTF validator (npm `gltf-validator` 2.0.0-dev.3.10, `validateBytes`): 0 errors, only the
+   inherent VRM 0.x warning `INVALID_EXTENSION_NAME_FORMAT` ("VRM"); unused joint slots point at joint 0
+   and skinned mesh nodes sit at the scene root because it flagged both.
+32. **Pixal3D's GLB is split along its UV seams** (bard: 70k vertices, 50k positions, 38k open edges).
+   Label spreading, weight smoothing and hole capping all run on `weld(pos)[faces]` (first vertex per
+   position) and results are copied back to every copy. Before this, a third of the mesh got no part
+   label and the T-posed arms came apart chart by chart; seams could also crack under posing.
+33. **3D closed-eye decals used to leave the open iris showing** (witch: ~16% of iris pixels had
+   no decal triangle; Joy/blink looked half-open). Two causes: (a) decal triangles needed *all three*
+   corners to be front-most, and Pixal3D triangles are big (~14 px), so one corner touching a bang
+   strand that crosses the eye dropped a whole chunk; vertex normals are also noisy there (p99 57°
+   from the face normal). Now: facing by the triangle's own normal and 2 of 3 corners front-most
+   (iris coverage 83.8% → 99.8%, no triangle more than 5 cm behind picked up). (b) the painted
+   closed eyes are feathered for the 2D rig; `cover_open_eyes` makes the blink and > < / spiral
+   decals opaque over the eye-white/iris/lash area (closed eyes on the face layer's inpainted skin,
+   the artwork's own hair where bangs cross). Two tiny specks remain on the witch (probably iris
+   colour painted onto strand geometry). Debug trick: a solid magenta eye_close shows coverage.
+31. **Expression toggles in 3D**: painted toggles whose region is on the face (cheeks, tears, eyes,
+   temple, forehead, mouth) become custom VRM expressions (`presetName: "unknown"`, named by the
+   toggle's label, e.g. "Blush"); floating symbols (above/aura/notes/hearts/gloom) are skipped (no
+   surface). Painted A/I/U/E/O mouths replace the generic open mouth. Each decal sits a little
+   further out than the one before (2 mm + 0.5 mm each) so two shown at once never z-fight.
+34. **Chest springs in 3D** (`rig3d.bust_springs`, rig 3): per side a non-humanoid `bustL`/`bustR`
+   bone under `chest` (root 30% of the way from the chest joint to the front surface, child `…_tip` *at*
+   the surface, so the spring's tail points forward and vertical body motion pitches it = up/down
+   bounce). Weights: a Gaussian (σ = 0.16 × shoulder width) at ±0.22 sw, chest height, × front ramp ×
+   the vertex's chest+spine weight × `parts == "body"` (arms, hair, neck never move). Own VRM boneGroup
+   "bust" (stiffness 1.2, drag 0.2, no gravity). **Skipped when the mesh ends above the under-bust**
+   (witch bust: the cut edge would wobble). The tip needs an explicit node: three-vrm/VRM 0.x give a
+   leaf joint a 7 cm virtual tail along its offset from the parent, which for this bone points sideways.
+35. **Drawn face marks in 3D** (`rig3d.DRAWN_MARKS`, rig 4): `decals()` adds `toggle:blush/gloom/anger/sweat`
+   for every avatar whose character has no painted one, drawn on the CPU from the 2D layers
+   (`expressions.draw_blush` for cheeks, `draw_symbol` for the rest, regions from `toggle_mask`).
+   Gloom is cut to skin the front hair doesn't cover: in 2D it sits *under* the bangs, but a mesh
+   decal lands on the front-most surface, i.e. on the bangs, with jagged triangle edges. The marks
+   need `assets/` layers with eyes and a face; without them (tests' bare fixtures, imported files)
+   nothing is added. Sorrow binds tears **and** gloom.
 
 ## 6. Known limitations / backlog
 
@@ -1032,6 +1130,562 @@ Neck seam and head/body size (2026-10-24, committed as `7bdb230` with all earlie
 - GPU, same seeds/options as Sol: hoodie → **`c05b46df`** "Hoodie - full body v2 (clean neck,
   head size)" 7.1 heads (was 8.0), clean neck and newly drawn choker; witch → **`af5b9c67`**
   "Witch - full body v2 …" 7.1 heads (was 8.1), the dress's own halter neckline. Both all clear.
+
+Redraw facing forward (2026-10-24, uncommitted):
+
+- Owner (Gallery screenshot: an imported bard `72e7b3cf`, side-on, holding a harp → the straight-on
+  witch/hoodie sketches → the front-facing bust): "add the option to turn character submissions in
+  dynamic poses to be redone in the VTuber forward looking style".
+- `/extend` mode **`front`**: `outpaint.plan` keeps nothing (mask 255, strength 1.0, no `placed`, so
+  no head-layer transfer) and always uses the standing pose guide at its default centred figure
+  (chosen proportions). The brief loses pose/view/prop tags (`POSE_TAGS`: holding, instrument,
+  from side, looking to the side, sitting, …) and gains `FRONT_TAGS`; `FRONT_NEGATIVE` forbids
+  profile/holding. Identity therefore comes from the tag brief only: colours/outfit survive,
+  small details (patterns, accessories the tagger missed) can change. Checks run (duplicate,
+  feet/top, hands); head-size/shoulder checks need result_geometry, which a front redraw lacks.
+- UI: Studio "Complete the body" checkbox **Redraw facing forward** (disables keep-face/guided,
+  hides the fit guide); Gallery card More options → **Redraw facing forward** opens
+  `/generator?model=<id>#front`. "Try another seed" re-sends the same mode.
+- Verified: 99 GPU-free pytest, new Edge journey (gallery link → checkbox → artwork sketch with
+  mode front) + the full-body/import/export journeys. **Not run on the GPU yet** (the owner's own
+  server on :5000 held 4 GB RAM / the GPU with 1.5 GB free; it needs a restart for the new code).
+  Not done: IP-Adapter/reference identity (new ~3 GB download), an upper-body front pose,
+  offering it in the upload form.
+
+Clothing-faithful front redraws (2026-10-25–26, uncommitted):
+
+- Owner compared imported bard **72e7b3cf-de5c-4c98-9564-9d14f37f90c1** (Study 9C9A067E)
+  with front redraw **7b5fa8a3-46e6-45d0-b516-8abe5c627b61** (Study C9E483B4): long gold
+  dress/cream underskirt and embroidered cloak had become a short, simplified outfit.
+  Cause: all-white front mask + strength 1 meant the reference pixels contributed nothing;
+  WD tags missed garment length, colour and trim. This supersedes the text-only limitation above.
+- **Visual reference:** new lazy `src/core/reference.py`, IP-Adapter Plus SDXL ViT-H from
+  `h94/IP-Adapter`, Apache-2.0, pinned **018e402774aeeddd60609b4ecdb7e298259dc729**.
+  About 3.4 GB of encoder/adapter weights in HF cache, no package upgrade or ComfyUI dependency.
+  Fit the entire image into a white 224px square before CLIP; default centre cropping would
+  discard hems/boots. Source pixels are never edited; all inference is local.
+- `/extend` mode front accepts **reference_strength 0..1**, default **.65**, saved in extension.
+  Zero bypasses the visual encoder/adapter and keeps text-only behaviour. The staged input
+  image itself supplies the reference: no new client-controlled filesystem path.
+- **Memory order:** text embeddings → release both text encoders → encode image with ViT-H →
+  free image encoder → load adapter into UNet → existing FP8-storage/FP16-compute casting →
+  ControlNet. Negative/positive patch embeddings passed explicitly (CFG ordering tested).
+  Existing .86 CUDA allocator cap retained; temporary adapted pipeline unloaded after work.
+  Preparation errors now share the cleanup finally, including allocator-cap restoration.
+- **Clothing prompts:** removed mandatory `legs, feet, shoes` / `long legs` additions which
+  competed with longer clothing; standing guidance still controls anatomy. Pose filters match
+  tag starts, preserving e.g. `dress with crossed lacing`. Redraws now honour saved steps/CFG
+  (the repaint caller previously dropped them).
+- **Studio:** Reference influence slider, download/pose tradeoff explanation, detailed outfit
+  placeholder. Setting, outfit and proportions restore on reopen; quality-check retries use
+  the original source and saved reference strength. **Compare with the reference** shows source
+  and result side-by-side, with an original-artwork link; source ID validated before URL use.
+- **Real GPU:** first .65 trial, seed1229928384, Animagine XL4, 28 steps/CFG5, 329.7s incl.
+  cold imports/loading, `outputs/redraw-review/reference-trial.png`. Long gold dress, cream
+  underskirt/cuffs, blue/gold cloak, braid and pouch survived; clasp/trim/style still changed.
+  Final complete API job **gen_daddbc4d**, .70 + explicit outfit details, same seed, saved CFG6.5,
+  created **e49689a3-0d2c-4738-bd2b-8470332e73dc**, **Bard - faithful outfit redraw**.
+  **357s**, sketch for review (Separate layers available), automatic checks all clear.
+  Both measured **4760MiB allocated / 5034MiB reserved**, GPU0MiB after completion.
+  The second load slowed under severe system RAM pressure (~173MB free); stopped only our
+  concurrent Edge/test processes, then generation finished. Do GPU and browser QA sequentially
+  on this laptop. No owner generation was cancelled; only the idle app server was restarted.
+- **Limitations:** visual guidance improves resemblance, not exact garment reconstruction;
+  embroidery/fasteners, hair silhouette and drawing style may change. Higher strengths can
+  copy the unwanted pose/props. Tested Animagine XL4; other SDXL/LoRA combinations unverified.
+  Full-body extension and generic region edits retain their existing conditioning paths.
+- **Verification:** 114 GPU-free tests pass across runs (113 in the suite, one existing export
+  test's sandbox-denied directory rename passed on an escalated retry); both Node suites pass.
+  New tests cover encoder cleanup on success/cancel/failure, full-image fit, CFG ordering,
+  memory sequencing, zero bypass, invalid strength values and source immutability.
+  Final expanded Edge journey passed (78.30s): saved strength/outfit, comparison, phone layout,
+  and retry using original source/settings. Real-result comparison inspected, no page errors;
+  screenshot `outputs/redraw-review/final-comparison.png`. No commit or push.
+- Final real server on127.0.0.1:5055, reloader off, launcher **32736**, logs
+  `outputs/redraw-review/server-final.*.log`. Originals and prior uncommitted front-redraw work preserved.
+
+3D avatar stage foundation (2026-10-27, uncommitted):
+
+- Owner wants to create real 3D VTuber characters with tracking, like professional VTubers.
+  This is a new, long-term product goal. A true avatar needs 3D geometry, a skinned humanoid
+  rig, facial expressions, materials, spring bones and a compatible export. Existing PSD/2.5D
+  layers do not provide those automatically. Do not present the stage as 3D generation.
+- **First milestone:** `/3d`, linked in the main navigation, opens a local `.vrm` avatar or a
+  static `.glb` file in the browser (`templates/3d_studio.html`, `static/js/3d_studio.js`).
+  Orbit/zoom, fit, head turn/tilt, mouth, idle, blinks, spring-bone update and transparent
+  PNG are supported when the avatar supplies those features. T-pose upper arms are gently
+  lowered; already lowered arms are left as-is. VRM missing blink/mouth expressions is reported;
+  unrigged GLB has face controls disabled. File bytes remain in the browser. Invalid files and
+  glTF references to external resources are rejected; failed replacements preserve the model.
+- `static/js/3d_tracking.js` bridges existing local FaceMesh and `FaceFeatures.Tracker` to
+  compatible VRMs: head, independent blink and mouth, optional neutral calibration, a 1.2s
+  dropout hold, and cancellation/permission/disconnect cleanup. Camera off by default; no face
+  frames leave the device. This is face/estimated head tracking, not full-body/hand mocap.
+- Vendored **three.js 0.180.0** and **three-vrm 3.5.5**, MIT, in `static/vendor/vrm3d`;
+  licenses included, credited in README. No CDN, new GPU packages or new server upload API.
+  VRM0 orientation is corrected with `VRMUtils.rotateVRM0`; each avatar has its own license.
+- **Real browser test:** VRoid beta sample Vivi (CC0; official license
+  https://vroid.pixiv.help/hc/en-us/articles/360014900273) downloaded only into ignored
+  `outputs/vrm-review/Vivi.vrm`, SHA256
+  `EAF902E041A7A810F1423599AE75682F61184AB6EF0206DA9A8ED9CAA8EC3A9D`.
+  VRM0 avatar renders, relaxed arms, pose/mouth controls, reset and local assets work; screenshot
+  `outputs/vrm-review/vrm-stage-final.png`. A tiny synthetic GLB checks static rendering,
+  rejection of external links/corrupt inputs, preservation after failed replacement and 390px
+  width. `tests/e2e/test_3d_stage.py` real VRM test needs `KAMYII_TEST_VRM` pointing to Vivi;
+  otherwise it skips. VRM1 and physical camera tracking remain untested.
+- Verification: **114 GPU-free pytest**, both existing Node suites and
+  `node tests/3d_tracking.test.cjs` passed. Edge VRM/GLB journeys passed; final camera denial
+  check with real Vivi and mocked camera denial passed twice (retry works, stays off).
+  3D files, camera and PNG stay on-device. No owner projects modified.
+- **Generation research:** `docs/3D_ROADMAP.md` records a staged local plan. TripoSR is MIT and
+  upstream reports ~6GB VRAM for a raw unrigged mesh, but its Windows/native setup, quality and
+  16GB RAM fit are unverified. Free physical RAM was ~0.5–1.6GB, so no 3D generation attempt,
+  installation or model download was started. This machine has CUDA nvcc 11.8; current
+  torchmcubes needs CUDA 12+ for its GPU build and native build tools are not on PATH. UniRig's
+  >=8GB/native deps and Windows fit also need testing. Do not treat a raw GLB as a VRM rig or
+  guarantee professional-quality 3D from one image. Close unnecessary apps only with owner choice.
+- The real server was started with empty queue at 127.0.0.1:5055, launcher PID 11852, reloader
+  disabled; logs `outputs/vrm-review/server.*.log`. No commit or push. Existing uncommitted work
+  remains intact. Physical webcam/mic and human Cubism import remain outstanding.
+
+3D avatar generation (2026-10-28, Claude, uncommitted):
+
+- Owner: improve 3D model generation "so the user has the option to create 3d or 2d avatars in the
+  studio", taking Atelier3D components as needed. Built roadmap stages 2–4 in one path:
+  artwork -> Pixal3D mesh (mesh3d.py, Atelier3D's graph + photo-paint node) -> DWPose joints, skin
+  weights, hair spring chains, T-pose, painted blink/mouth decals -> **VRM 0.x** (rig3d.py).
+- UI: Studio **Avatar: 2D / 2D + 3D** (3D locks Full body and adds "standing, arms at sides, facing
+  viewer"; the 2D character is kept if 3D fails, with the reason in `metadata.avatar3d_error` and a
+  note under the result); result button **3D avatar ↗**; Gallery **Make 3D avatar** / **3D avatar ↗**
+  / More options **Download VRM**, **Rebuild 3D avatar**; 3D stage picker of Ka-myii avatars,
+  `/3d?model=<id>`, **Download VRM**. API: `POST /api/generation/avatar3d/<id>` {quality},
+  `/generate` {"avatar3d": true|{quality}}, artifacts `vrm` and `mesh`, `/options.avatar3d`.
+  Job stages `avatar3d` / `generate3d` in jobs.py. Demo mode builds a box mannequin VRM.
+- Installer `scripts/install_3d.py` (run.bat/run.sh offer it, default No, `engines/comfy3d.skip`).
+  Installed on this PC: 0 extra GB for models (hard links), venv from the uv cache.
+- **Verified:** real GPU runs on the bard front redraw **7b5fa8a3** (scratch run, then a real API job
+  `gen_a77cab36` on a .venv server at :5058: ~4 min, peak 6.99 GB VRAM). Its avatar is in
+  `outputs/7b5fa8a3-…/avatar3d/` (re-rigged afterwards with hair springs: 2 chains). Renders in
+  three-vrm (headless Edge): relaxed pose looks like the artwork, head turn/tilt clean, wave pose,
+  her own blink and open mouth; stage page loads it with no page errors. VRM 0.0 schema: 0 errors.
+  Final checks: 128 GPU-free tests (14 in `tests/test_avatar3d.py`), Node suites, all 9 Studio/Gallery
+  journeys, all 4 3D-stage journeys (incl. Vivi + expression chips, Gallery -> stage, Studio 2D + 3D).
+- **Studio 2D + 3D, real GPU** (job `gen_10f12ddc`, brief "1girl, pink hair, long hair, twintails, ...",
+  novaAnimeXL): the 3D tags gave a full-body, front, arms-down figure on white; 2D finished (SDXL,
+  See-through, expressions; 1247 s in all, slow because ~1.5 GB RAM was free), peak VRAM 7.4 GB over
+  the job. Its 3D stage **failed** (`hair_springs`: a strand starting a link below the jaw had an empty
+  first band -> IndexError); the 2D character was kept with `avatar3d_error`, as designed. Fixed (nearest
+  hair vertices by height, regression test) and springs made non-fatal. Character **72213aa1**.
+- **After the fixes (welded topology, caps, outlines), real GPU, through the API on :5058:** idol
+  **72213aa1** (Gallery route, `gen_48d8457f`, ~4 min, peak 7.06 GB): clean T-pose with whole arms,
+  relaxed pose matches the art, 4 hair chains (twin tails), her own ^^ blink and open mouth. Witch
+  bust **004b7e89** (upper body, `gen_005ba176`, peak 6.58 GB): 0.5 m bust, painted A I U E O, 11
+  face toggles as VRM expressions (Heart eyes + Blush, > < eyes + Tongue out checked), braids on 6-7
+  spring chains swinging in the live stage. Both re-rigged on the CPU with the final code (`rig3d.build`
+  on the existing `avatar3d/`). README image `docs/images/avatar3d.jpg` comes from these renders.
+- Hard case: the bard's cape is drawn over her upper arms, so the upper arm reads as cape and only the
+  forearm rises in the T-pose (relaxed poses look right). Tried letting the inpainted `handwear` layer
+  claim covered upper-arm vertices: +16 vertices, no visible change (Pixal3D fused the upper arm into
+  the cape), so it was removed. A real fix needs a separate arm in the mesh (multi-view input).
+- **Not verified:** VSeeFace / Unity / VRoid Hub import by a human; characters other than the bard
+  (busts, long skirts, held props); spring-bone behaviour beyond a quick turn; physical webcam.
+- Body MToon has a 0.06 cm world-space outline (`OUTLINE_CM`), decals none.
+- **Known artifacts:** flat caps/slivers where cut fused triangles were (cape by the upper arms),
+  thin arms in the T-pose (Pixal3D builds the arm as a relief on the cape), backs are Pixal3D's guess.
+- Ideas next: cut-and-cap fused contacts instead of deleting; finger bones from DWPose hands;
+  eye bones/look-at; multi-view (front + back Redraw) Pixal3D for better backs; Draft/High in the UI.
+
+3D rig, expressions and reliability (2026-10-28, uncommitted):
+
+- Owner asked Codex to continue Claude's 3D pipeline and make it stronger. They explicitly chose
+  **continue without a GPU test**; no 3D engine/GPU run was started. Earlier Claude Pixal3D
+  results are evidence for the old engine path only. The new engine startup/polling changes below
+  still need an end-to-end GPU run on the owner's 8GB laptop before claiming them verified.
+- **Rig quality:** actual hair is separated from rigid head attachments in `rig3d.py`; hats,
+  human/cat ears and earrings follow the head instead of acquiring hair spring chains. Vertices
+  projected outside source-image bounds no longer borrow border labels or occlude valid vertices.
+  Focused synthetic tests cover both. Existing witch/idol/bard meshes were re-rigged as copies in
+  `outputs/vrm-review/rig-quality/`: witch 99,982 triangles/6 hair chains/16 painted toggles and
+  visemes; idol 99,746/4/3; bard 99,801/3/3. Counts and expression sets match their baselines;
+  original files are unchanged. No `write_vrm` schema was changed.
+- **Saved mesh refresh:** Gallery More options → **Refresh rig & expressions** submits
+  `/avatar3d/<id>` with `reuse_mesh: true`; it runs DWPose and `rig3d.build` on the CPU using
+  existing `mesh.glb`, `camera.json`, `crop.png`, with no Pixal3D launch. Requires all three files,
+  reports when unavailable, retains original mesh/quality/seed and carries current painted face
+  expressions. API rejects this option for a new text-to-character request. Gallery list adds
+  `can_refresh_rig` in the response only when the required files exist, without writing metadata.
+  A real copied witch through `AssemblyLine.make_avatar3d(... reuse_mesh=True)` took 27.8s,
+  kept 99,982 triangles, six hair chains and 16 painted expression entries, and matched source
+  mesh/original avatar SHA256. Copy lives under ignored `outputs/3d-quality-refresh/witch-copy`.
+- **Safe replacement:** `_replace_avatar` moves the old folder to a unique backup before a swap,
+  restores it if the new folder rename fails, and leaves the named backup recoverable with a
+  clear error if restoration also fails. The 3D path checks cancellation after CPU rigging and
+  before the swap; cancellation/failure never intentionally deletes the previous avatar.
+  Gallery now opens `/generator?model=<id>` after 3D queue submission so a very fast CPU refresh
+  that finishes before navigation still shows its result (previously Studio only reattached to
+  running jobs and could appear blank).
+- **Stage expression controls:** available painted A/I/U/E/O expressions can be selected for
+  mouth motion; no automatic phoneme recognition claimed. Eye emotes are mutually exclusive and
+  fade during blinks; > < suppresses regular blink decals. Mouth emotes are mutually exclusive
+  and suppress speaking mouth shapes, while independent cheek emotes combine. Paired eye artwork
+  remains one decal and fades together for winks. Failed VRM/file replacements restore the prior
+  selection, model and correct download URL. Existing VRM0/GLB/Vivi behavior remains supported.
+- **Engine hardening:** port preflight rejects any occupied listener, the engine must print its own
+  post-bind startup message before requests (latched even if later logs roll out of the tail),
+  forbidden engine args cannot override private paths,
+  30s history and 60s prompt calls remain cancellable, engine output GLB paths are constrained to
+  its private output folder, staged inputs are cleaned after failures, and child-exit races do not
+  hide the actual error. `tests/test_mesh3d_safety.py` covers these with a fake engine; no real
+  GPU generation was rerun per the owner. Keep this limitation visible until a real 3D job succeeds.
+- **Verification:** 146 GPU-free pytest, Node preview/tagcomplete/3D-tracking suites, and 7 Edge
+  journeys (`test_3d_stage.py`, `test_3d_refresh.py`, `test_3d_expression_quality.py`) passed.
+  Browser tests cover Gallery refresh, source/seed preservation, VRM/GLB import, external-resource
+  rejection, mobile layout, mouth shapes, blink-aware/exclusive expressions and failed replacement.
+  Screenshot `outputs/3d-expressions-review/witch-expressions.png` is a browser QA image.
+  Final real server is on 127.0.0.1:5055, launcher PID 19676 (queue empty before restart), logs
+  `outputs/vrm-review/quality-server.*.log`. Live Gallery refresh button and witch mouth choices
+  checked without invoking a job; `outputs/3d-expressions-review/witch-stage.png` is the live stage. A physical
+  webcam and third-party VSeeFace/Unity import remain untested. Changes and owner work uncommitted.
+
+3D motion and input fidelity (2026-10-28, uncommitted):
+
+- Owner authorized GPU tests and requested better-looking, more responsive 3D avatars.
+  `mesh3d.frame` resizes the cut-out in premultiplied RGBA before compositing against black,
+  rather than resampling the original background into the edge. Crop geometry and the mask
+  are unchanged. Tests cover the halo; comparisons using saved character masks found changes
+  at 8,430–13,541 edge-near pixels on three characters. This is an input correction, not a
+  demonstrated guarantee that the finished mesh is visually better.
+- The 3D stage now uses frame-rate-independent, bounded head and smaller delayed torso follow,
+  varied quiet idle motion, a blink with a closed hold, and separate mouth attack/release.
+  Idle resumes after tracking drops out. This is face tracking and inferred torso motion, not
+  full-body tracking. `static/js/3d_motion.js` contains the math; a new Node suite and browser
+  tests cover head/torso motion, independent eyelids, mouth and synthetic tracking dropout.
+- `rig3d.py` retains a painted closed neutral mouth when the original art has an open mouth
+  and painted vowels; mouth expressions move that neutral decal behind the face. The exact
+  open-mouth-plus-vowels scenario was tested synthetically, not on an existing character.
+  T-pose rotation handles opposite arm directions and fails clearly for a missing direction.
+- Two sequential real Pixal3D runs used the witch artwork and identical seed 1052685790 in
+  separate ignored folders. The pre-fix run completed in 324.7 s and verified the hardened
+  engine startup/polling; the revised framing run completed in 453.6 s with silhouette fit
+  0.983, 99,982 triangles and 6 hair chains. The observed maximum VRAM sample was 6,575 MiB,
+  not a guaranteed peak; memory briefly dropped to about 1 GiB available during loading. GPU
+  returned to 0 MiB. The revised mesh was CPU-rigged; output, logs and stage screenshot are in
+  `outputs/3d-gpu-review-edgefix-20261028/`; the originals were never replaced. The screenshot
+  shows remaining facial/blink and cropped-hat artifacts; inspect and improve those, do not
+  claim professional output or that the edge correction alone improved the final rendering.
+- Verification: 149 GPU-free pytest tests, four Node suites, and 9 Chrome 3D browser journeys
+  passed, including the actual newly generated VRM and synthetic tracking. VRM 0.0 official
+  schema validation: 0 errors on that VRM. Current Edge exited on launch through Playwright;
+  the browser tests use Chrome and the newer headless mode. No physical webcam or external VRM
+  app was tested. Real server restarted with an empty queue at 127.0.0.1:5055, launcher PID
+  41868, logs in the review folder. No commit or push.
+
+Preview ribbon and hair cutouts (2026-11-01, uncommitted):
+
+- Owner reported the ribbon on silver-haired `82c64229-de47-435c-bce7-759724a5e096` leaves
+  a ribbon-shaped hole as it sways. The original See-through back and front hair both have
+  transparent holes at the ribbon's rest position; the headwear layer moves independently.
+- Preview PSD v17 repairs small gaps under later, nearly opaque (`alpha >= 250`) headwear in
+  front/back/side hair. A bounded morphological close estimates the hair silhouette; local
+  normalized colour interpolation fills only existing transparent pixels under the accessory.
+  Translucent edges, outside-hair regions, visible pixels, original assets and artist exports
+  are untouched. PSD cache rebuilds lazily; no GPU generation is needed.
+- On the owner's model the repair filled 7,919 back-hair and 6,497 front-hair pixels. The
+  before/after preview composite at rest differed by at most 5 channel levels because most
+  See-through accessory interiors have alpha 254. Chrome rendered the real preview with 26
+  layers and headwear moving under head turns, without page errors. Screenshot and layer
+  comparisons: `outputs/ribbon-review/`. Minor fine-edge artifacts remain possible at
+  extreme poses; fills interpolate hidden hair, they do not reconstruct individual strands.
+- Verification: 150 GPU-free pytest tests pass, including a new regression for concealed
+  holes, translucent accessory edges, unrelated gaps, silhouette and source immutability.
+  No GPU work or saved studio-setting changes. Real server started at 127.0.0.1:5055 after
+  confirming no queued jobs; launcher PID 37068, logs in `outputs/ribbon-review/`.
+
+Lively pages, gestures and quality of life (2026-11-01, Claude, uncommitted):
+
+- Owner: "make the pages more lively and unique and continue to develop model outputs and
+  animations", then "keep working adding Quality of Life changes until all session credits are used".
+  No GPU run was needed: browser-side work, small API additions (favorite, reveal, thumbnails,
+  rig_outdated), a cross-site POST guard, and CPU-side rig3d output fixes.
+- **3D gestures** (`3d_motion.js` `gesture(name, t)`, applied in `3d_studio.js`): Wave, Nod, Shake head,
+  Hop, Bow, Cheer buttons + keys 1–6, layered over follow-through and camera tracking. Arms are given
+  as elevation-from-horizontal + elbow bend; `rigInfo()` measures in world space which way each upper
+  arm rises and which way the spine bends forward (VRM0 and VRM1 flip x/z rotations), so the same
+  numbers work on Ka-myii VRM0 avatars, Vivi and already-lowered artist poses. Hop moves the hips by a
+  share of the avatar height. **Little gestures** (default on): while idle with no tracked face, a
+  nod/wave/hop every 16–34 s. Gotcha: rAF timestamps can be earlier than the click's
+  `performance.now()`; the first frame then saw negative elapsed time and cancelled the gesture
+  (now clamped). Checked on idol 72213aa1: wave/cheer/bow look right (bow tips forward);
+  the hip sliver under a raised arm is the known fused-hand mesh artifact, not the gesture.
+- **3D stage**: background picker (Studio, Green/Blue screen for OBS chroma key, Dark, Light,
+  Checkerboard; PNG export stays transparent), Turntable (OrbitControls autoRotate), Fullscreen,
+  reopens the last viewed Ka-myii avatar when there is no `?model=` (localStorage `kamyii.3d`, which
+  also keeps the background, framing, Idle and Little gestures).
+- **2D Live Preview gestures** (`lib/motion.js` `gesture`, `lib/app.js`): Nod (N), Shake head (H),
+  Huh? tilt (T), Yay (Y), Shy (L); additive pose targets on simulation time (pauses with the preview),
+  listed in the Shortcuts dialog. Button gestures are not relayed to OBS (an OBS window plays its
+  own Little gestures). `app.js?v=m4`; the vendored UPSTREAM.md notes the change.
+- **Gallery**: filter chips with counts (All / Ready / Sketches / 3D avatars / Needs attention; empty
+  groups hide), sort (newest, oldest, name), remembered per browser (`kamyii.gallery`), `/` focuses
+  search, Esc clears it; 3D and Blink & talk badges on the art; hover lift + breathing art; More options
+  → **Make a variation** (`/generator?brief=<id>`: same brief/settings/toggles, seed -1, no result shown).
+  The list reloads by itself when the nav sees a job finish (`kamyii:job-done` event).
+- **Nav (every page but the Studio)**: polls `/api/generation/jobs` every 4 s; shows "Creating · 42%"
+  (+ queued count) linking to the Studio, then "Character ready ↗" linking to the new character. The
+  tab title follows ("42% · Ka-myii — Collection", "✓ Ready · …" if it finished in a background tab).
+- **Studio**: ✦ Surprise me (random VTuber-friendly tag brief), unsent prompt/negative draft kept in
+  localStorage (`kamyii.studio.draft`, restored only without `?model=`/active job), Create scrolls the
+  progress into view. `fillForm(saved)` is now shared by reopen and variation (also restores toggles
+  and 2D + 3D).
+- **Home**: the character sheet cycles through up to six separated characters (crossfade every 5 s,
+  pauses on hover/hidden tab, off with reduced motion), shows the name and No. x / y; a Recent cast
+  strip of the eight newest characters links to Live Preview or the Studio.
+
+- **3D output** (`rig3d.py`): VRM emotion presets **Joy** (closed eyes + blush), **Angry** (anger vein),
+  **Sorrow** (tears), **Fun** (star or heart eyes + blush), each only when the painted parts exist —
+  VSeeFace-style apps bind hotkeys to these; the stage labels three-vrm's happy/sad/relaxed as
+  Joy/Sorrow/Fun and groups Joy/Fun with the eye emotes. Closed-eye decal fixes: fact 33. Checked on a
+  CPU re-rig of a **copy** of the witch (`outputs/qol-review/witch-emotions/avatar.vrm`, 27 s, 99,982
+  triangles, 6 chains, 18 shapes): VRM 0.0 schemas 0 errors, 3D e2e on it pass; before/after shots
+  `outputs/qol-review/joy-before.jpg` / `joy-after.jpg`. **The owner's avatars were not changed**:
+  Gallery → More options → Refresh rig & expressions applies this to each (CPU, ~30 s).
+- **Stage framing**: Full body / Bust / Face presets sized by shoulder width (Ka-myii's head pivot
+  sits near the chin, so the aim is above it), remembered per browser; idle **breathing** (chest lift
+  + shoulder rise, `motion.breath`).
+- **Studio**: drop an image anywhere on the page or paste one (Ctrl+V) to import it.
+- **Verification** (latest): 162 GPU-free pytest and the 4 Node suites pass. Every browser e2e file
+  passes with the final code — Studio/Gallery journeys + `test_qol.py` (34; the import/edit journey
+  needed the "Paint scrolls" fix below) and the 3D files (10 + 2 skips: the optional licensed
+  Vivi sample, and the clip-size check in headless Chrome). Run 3D e2e with
+  `KAMYII_E2E_CHANNEL=chrome` and `KAMYII_TEST_GENERATED_VRM` = the witch (the expression test needs
+  her toggles; the idol fails it by design). One earlier full run was stopped by Claude Code for low
+  system memory (not a failure); later runs were split per file. No stray output folders after any
+  run. Real server on 127.0.0.1:5055 (logs `outputs/qol-review/`); the owner's :5000 server was not
+  touched. No commit or push.
+- **Rig version**: `rig3d.RIG_VERSION` (now 4, drawn face marks; 3 was chest springs) is written to `rig.json`; `/list` adds
+  `avatar3d.rig_outdated` when a refreshable avatar was rigged by an older version, and the Gallery
+  card then shows **Update 3D rig ✦** (the same CPU refresh, ~30 s). Bump it whenever a refresh
+  improves existing avatars. All three of the owner's avatars currently show it.
+- More small things: Live Preview **Little gestures** toggle (`auto.lively`, saved in settings);
+  rotating tips under the Studio progress bar; Studio tab title says "✓ Ready" / "✕ Failed" when a
+  job ends in a background tab; Gallery dates are relative ("4 days ago", exact time on hover) and the
+  art's tooltip is the prompt; the 3D stage header is shorter so the stage fits an 850 px screen;
+  the Studio remembers whether Advanced is open; Home's three steps link to the Studio, Gallery and the
+  latest character's Live Preview; dropping an exported .zip on the Gallery reopens it.
+- **3D microphone lip sync** (no camera needed): **Use microphone** on the stage reuses
+  `RigDevices.createMic` (level → mouth) and `RigVisemes.classify` (vowel weights, blended at 18/s),
+  spread over the avatar's painted A/I/U/E/O mouths when it has more than one, otherwise the chosen
+  mouth shape. Tested with an oscillator stream standing in for `getUserMedia`; no real microphone.
+- **Studio rename**: the result shows the character's name as an editable heading (Enter saves via
+  `/rename`, Esc reverts). Fixed `.rename-input` / `.result-name` losing to the generic
+  `input[type=text]` rule (the Gallery rename box had been 12 px instead of 22 px).
+- Home hero has a few slow ✦ sparkles (CSS only; off with reduced motion). README documents the
+  gestures, stage tools, emotion presets and Studio/Gallery conveniences.
+- **Thumbnails**: `/preview/<id>?size=thumb` serves a 640 px WebP cached as `<character>/thumb.webp`
+  (remade when the preview/base image is newer; served from memory because Windows cannot replace a
+  file another response still holds open). Gallery and Home use it: 13.1 MB → 0.63 MB for the owner's
+  15 characters. The Studio canvas still loads the full PNG. Thumbs travel in export zips (~40 KB).
+- 3D page with characters but no avatars shows "Make one from a Gallery character ↗". e2e covered.
+- 3D stage keys: Shift+1–9 toggle expression chips (like Live Preview), M toggles the microphone. The
+  first nine chips show their key (`⇧1`… in an aria-hidden `<kbd>`, so accessible names are unchanged).
+- Create with an empty prompt now flashes the box and says what to do (Surprise me / Recent) instead
+  of only moving focus. e2e covered.
+- Studio "Expression toggles" label counts the selection ("2 selected, about 30 s"; ~15 s each).
+- Studio **Clear** (next to Recent / Surprise me): forgets the remembered brief and reloads with the
+  default settings (asks first when a prompt is typed). e2e covered.
+- 3D **Record clip**: MediaRecorder on the canvas (VP9 WebM, 8 Mbit/s, max 15 s, `kamyii-3d.webm`);
+  the chosen background is set as `scene.background` while recording (green screen pixels measured
+  exactly #00b140), then the canvas goes back to transparent. 2 s ≈ 0.8 MB. Hop on busts (< 1 m tall)
+  lifts 35% as far (the witch bobs 8 mm instead of floating). Gotchas: setting `scene.background` in
+  the same task as `captureStream()` made the **first** recording on a page empty (no frames) — the
+  background now switches on the next animation frame; the blob URL lives 60 s so slow downloads
+  finish. Headless Chrome + SwiftShader captures **no** frames from an on-page WebGL canvas (a
+  detached one works), so the e2e test checks the flow and skips only the size check there.
+- **Export** leaves out `live_preview/` (the preview PSD cache — its key includes file times, which
+  unzipping changes, so it could never be reused; 5–12 MB per character), `thumb.webp`, and
+  `avatar3d.new` / `avatar3d.backup-*` work folders (`_download_zip(..., skip=...)`, tested).
+- Studio result **Open folder** too (e2e test intercepts the request — never let a test hit `/reveal`
+  for real, it opens Explorer on the owner's desktop).
+- Gallery More options → **Open folder** (`POST /reveal/<id>`, `os.startfile` / `open` / `xdg-open`),
+  only for a browser on the same machine; covered by a test with the opener mocked (never clicked
+  for real here, it would pop up Explorer on the owner's desktop).
+- **Security** (fact 20 addendum): cross-site POSTs are refused.
+- **Favorites**: ☆/★ on each Gallery card (`POST /favorite/<id>` {favorite: bool} → `metadata.json`
+  `favorite`, so it travels with exports) and a ★ Favorites filter chip (hidden until something is
+  starred). The star sits on the card, not inside the art link.
+- **Quick look** (Gallery; swipe left/right on touch screens too, checked at 390 px): ⤢ on each card opens a native `<dialog>` with the full-size art;
+  ←/→ flip through the current filtered/sorted list (wrapping), Esc or the backdrop closes it, with
+  Artwork & layers / Live Preview links, plus ★ Favorite and Separate layers (sketches/failed; queues
+  `/retry/<id>` and stays in the viewer) for triaging a batch. The grid re-renders on close. The art
+  link itself still opens the Studio. e2e covered.
+- Studio result **Make 3D avatar** (when the engine is installed or in demo mode, and the character
+  has none yet): queues `/avatar3d/<id>` and follows the job; the failure note now points at it.
+  e2e covered. Also **Add blink & talk** (See-through characters without painted expressions, same
+  rule as the Gallery): visibility checked on real characters (b6f6fe2f shows both, the idol neither);
+  not clicked (a real GPU job) and not e2e-testable in demo mode (no See-through backend there).
+- **Character notes**: `POST /notes/<id>` {notes} (printable + newlines, 500 chars; empty clears) →
+  `metadata.json` `notes`. Gallery More options → Notes edits in place (Ctrl+Enter/blur saves, Esc
+  cancels); the note shows under the name (two lines) and search includes it. Rename in More options
+  is no longer red (that colour is for Delete). Unit + e2e covered. Quick look shows the note under the
+  name; Home's recent-cast cards use the note (or prompt) as their tooltip.
+- **Status panel**: clicking the nav pill (when no job link) opens `GET /system` — mode, See-through and
+  3D engine installed, character count/size, trash count/size, free disk, outputs folder — with
+  **Empty trash** (`POST /trash/empty`, browser confirm first). Owner's machine on 2026-11-01:
+  15 characters = 627 MB, **14.5 GB free disk**; agent review folders in `outputs/` total ~450 MB
+  (not counted; left alone because this file references some of them).
+- Live Preview header: **Gallery** link, and **3D avatar ↗** when the character has one
+  (`has_avatar3d` from the `/preview/<id>` route).
+- **Separate all starred sketches**: in the ★ Favorites view a button queues `/retry/<id>` for every
+  starred sketch (sequential POSTs, "Queued n of m"). Batch workflow: How many 8 → quick look and star
+  the keepers → Favorites → Separate all. e2e covered (two demo separations take ~100 s). Queued ids
+  are remembered for the page (`separating`), so neither the bulk button nor quick look's Separate
+  offers the same sketch twice (a separation creates a new character; the sketch stays a sketch).
+- **Whole-brief draft**: `kamyii.studio.draft` now stores the brief shaped like a saved request
+  (prompt, negative, style, framing, checkpoint, sampler, steps, CFG, size, clip skip, LoRA, toggles,
+  2D + 3D — never the seed) on every form change/chip click, and `restoreDraft` hands it to
+  `fillForm`; older `{prompt, negative}` drafts still load. All 9 journeys pass with it.
+- **Delete is recoverable**: `DELETE /delete/<id>` moves the folder to `outputs/_trash/<id>` (with a
+  `.deleted` timestamp; trash older than `TRASH_DAYS` = 7 is purged on later deletes), `POST
+  /restore/<id>` moves it back; the Gallery dropped its confirm dialog for an 8 s **Undo** toast. Ids
+  starting with `_` are refused (the old endpoint would have erased `outputs/_uploads` if asked).
+  `/list` skips `_trash` (no metadata.json at its top). Unit + e2e covered. Disk space is freed after
+  a week, not immediately — tell the owner if space matters.
+- Gallery scroll position survives Back (saved in sessionStorage on `pagehide`, restored once after the
+  first render on a `back_forward` navigation). The e2e test passes, but Chrome's back/forward cache
+  may be what restores it there; the code covers reloads without that cache.
+- Gallery More options → **Copy prompt** (clipboard). Studio errors: CUDA out-of-memory messages
+  (`out of memory`, `CUDA_ERROR_OUT_OF_MEMORY`, `CUBLAS_STATUS_ALLOC_FAILED`) are shown as advice
+  (close GPU apps, try again, Retry layers if the artwork exists). e2e covered with a mocked job.
+- **Paint scrolls the picture into view**: the result name heading pushed the edit panel down, so
+  opening "Edit a region" left the canvas above the viewport (the import/edit journey's mouse strokes
+  landed at y < 0 and nothing was painted). Turning Paint on now scrolls the mask canvas into view.
+  (The 404s for `/layers/<id>` on sketches in that journey are pre-existing and harmless.)
+- **Jobs in progress** (Gallery): a strip above the grid with each running/queued job (oldest first):
+  prompt, state/progress bar, and the artwork thumbnail once `artwork` is known; polls `/jobs` every
+  3 s while something is active, 10 s otherwise. Note for tests: the Gallery now polls `/jobs` too, so
+  a mock must not count calls (the nav test was rewritten to flip the job's state explicitly).
+- **? shortcuts list**: base.html has a `<dialog id="kmHelp">` filled by each template's
+  `{% block shortcuts %}` (Studio, Gallery, 3D; Live Preview keeps its own), opened with `?` or the
+  footer link. The Studio's Esc-to-reset now ignores Esc while a dialog is open or while typing in
+  any field (it used to hide the result when closing things or editing the prompt). e2e covered.
+- **Artwork while separating**: once the base image is saved, the pipeline records
+  `ProgressManager.artwork[task_id] = model.id` (dropped by `forget`); `JobQueue.describe` adds
+  `artwork` to a running job, and the Studio's progress overlay shows its thumbnail during the ~10 min
+  See-through stage, so a miss can be cancelled early. Unit + e2e covered (e2e mocks the job API).
+- **How many** (Studio, prompt mode): 1/2/4/8 queues the rest of a batch behind the first job, one
+  seed each (a set seed counts up: 100, 101, …; random stays random). A failure posting an extra job
+  shows in the queue note without ending the first job's progress view. e2e covered. Its hint shows
+  rough totals (sketch ~1 min, layers ~11, 2D + 3D ~15 per character). The prompt box grows with
+  long briefs (`field-sizing: content`, up to 340 px; browsers without it keep the fixed box).
+- Studio queue panel **Cancel all queued** (shown with two or more waiting jobs; the running job and
+  the one on the canvas are untouched). e2e covered with a mocked job API.
+- **Recent briefs**: Studio ↺ Recent lists the last eight distinct prompts from the collection
+  (newest first, uploads skipped); picking one fills prompt + negative and the draft.
+- **Test isolation leak found and fixed**: the front-redraw journey ends by clicking "Try another seed";
+  that job kept running after the test, the autouse `OUTPUT_DIR` patch was undone, and it wrote a
+  half-made character (metadata.json only, the bard test brief) into the **real** `outputs/`
+  (`13eb1bbf…`, removed). The `base_url` (journeys/QoL) and `stage` (3D) fixtures now wait up to 60 s
+  for queued/running jobs before shutting the server down. The same thing happened in unit tests
+  (a new security test of mine queued a real demo job: `7d79f9f6…`, prompt "1girl", removed), so the
+  autouse `_private_outputs` fixture in `tests/conftest.py` now also waits for the shared
+  `generation.job_queue` to go idle before the patch is undone. If a stray folder with only a test
+  brief appears in the Gallery, this is where it came from; check `outputs/` after test runs.
+
+### Chest physics (2026-11-02, Claude, uncommitted)
+
+Owner asked for "boob jiggle physics" (standard on VTuber models). Three places:
+- **3D/VRM**: chest spring bones (fact 34), so VSeeFace and other VRM apps bounce the chest too.
+  `RIG_VERSION` 3, `rig.json` `bust_springs` (0 or 2). Re-rigged copies: `outputs/qol-review/idol-bust/`
+  (2 springs, 0 VRM schema errors) and `witch-emotions/` (0: cropped bust). Weight pictures
+  `outputs/qol-review/*-bust-weights.png`. The owner's own avatars get it via **Update 3D rig ✦**.
+- **3D stage**: **Chest bounce** slider (shown only when the avatar has `bustL/R` springs; 0 = still,
+  50% = as rigged/what VRM apps play, 100% = stiffness × 0.45 and drag × 0.4), remembered in
+  `kamyii.3d.bounce`; `Kamyii3D.state.chestSprings` reports stiffness/drag/swing. On the idol a Hop
+  swings 0.14 rad at 50% and 0.31 rad at 100%, settling in ~1 s; no tearing seen at the maximum.
+  Capturing that headless needs a virtual clock (SwiftShader frames take seconds; the gesture is
+  over before a screenshot) — scratchpad `bounce_shots.py` overrides `performance.now`/rAF.
+- **Live Preview (2D)**: the old jiggle was hidden under "Breathing sway"/"Breathing origin" (same
+  `bust`/`bustY` settings, now labelled **Chest bounce**/**Chest height** with a hint). Default
+  `bust` 0.4 → 1 (the witch moved ±3 px on Yay before, ~±7 px now); nods (`nodPose.body`) also drive
+  it, and a second spring (`bounceX`) sways it sideways with the torso arc. `Anime25D.state().pose`
+  has `chestY`/`chestX`. Characters with a saved `bust` keep their value.
+- **Cubism scaffold**: `auto_physics` adds a "Bust" pendulum → `ParamBustX` (Cubism standard id)
+  when there is a `topwear` layer; it does nothing until the artist rigs that parameter.
+- Not verified: VSeeFace/Unity playback, a flat-chested or male character (all three avatars are
+  1girl; the springs are added regardless of shape — the 3D slider or 2D 0 turns them off), real
+  head tracking driving the bounce (only Hop/Yay/nods were measured).
+- Verification: 164 GPU-free pytest (two new rig tests + the Cubism test extended), 4 Node suites,
+  3D e2e 8 + 2 skips (new: a stick figure rigged with chest springs bounces on Hop and the slider
+  stiffens it), journeys 9/9, and the Live Preview gesture test now also checks the chest bounce.
+
+### Chest-motion refinement (2026-11-03, Codex, uncommitted)
+
+- Owner requested a visual/performance review of Claude's 2D and 3D chest physics. In the 2D
+  preview, chest influence is now evaluated in each topwear layer's original artwork coordinates
+  and cached until chest height or anchor changes. Previously the Gaussian was recomputed per
+  vertex on every frame using already-deformed positions, so it could drift across clothing.
+  A smooth per-axis limit of 12% of face height applies after the strength slider, keeping
+  abrupt extreme inputs bounded while preserving small motions. Zero strength skips this work;
+  anchor editing forces a still chest. Existing settings and source art are unchanged.
+- 3D's zero slider formerly set stiffness/drag but still lagged on a hop. At zero the stage now
+  resets the two named chest joints after each simulation update; hair joints remain active.
+  Re-enabling the slider resumes their motion. This changes stage playback only, not VRM rig
+  generation, export, or spring values used by other applications.
+- Verified 164 GPU-free pytest, Node preview and 3D-motion suites, and focused Chrome 2D and 3D
+  browser tests. The 2D test exercises rendered topwear with the control at 0/1/4; the 3D test
+  checks a hop, zero during a hop, and re-enabling. Existing silver `82c64229` and witch
+  `004b7e89` previews rendered without page errors; sampled raw 2D spring ranges on Yay were
+  -5.69…7.04 and -5.11…6.15 px respectively, before the strength/limit. The separately saved
+  idol VRM `outputs/qol-review/idol-bust/avatar.vrm` showed spring movement on Hop and zero
+  when disabled, with no page errors. Images/scripts in `outputs/chest-review-codex/`.
+  These are browser/gesture checks, not physical webcam testing or a measured FPS benchmark.
+  The VRM's behaviour in external apps and subtle artifacts across other body shapes remain
+  unverified. The local server was restarted after confirming an empty queue, launcher PID
+  19964, logs in that review folder. No original character or saved setting was changed.
+
+### Moods, face marks, animal ears & tails (2026-11-03, Claude)
+
+Owner asked for "blush, gloom, smug, angry, and other toggles … as well as better tails and animal
+ears", then to push to main when satisfied.
+- **Live Preview moods** (`app.js` presets): Smug (key 8), Angry (9), Sad, Gloomy, Flustered, Pouty.
+  Brow angle sign: `browAngSym` > 0 drops the inner ends (angry), < 0 lifts them (worried); eyebrow
+  side L is the *image* left (rigger splits by centroid vs face centre). Brow angles and marks are
+  `PRESET_EXTRAS`: not reset by every preset; a preset remembers the ones *it* sets (`presetBefore`)
+  and puts them back when cleared or replaced (after a reload, back to defaults). A frowning closed
+  mouth bends ×8 instead of ×3 (drawn mouths are mostly smiles; ×3 at −0.85 moved the corners ~2 px).
+- **Face marks**: `mark blush L/R`, `mark gloom`, `mark anger`, `mark sweat` are companion-style
+  layers from `Motion.markArt` (canvas-drawn, MIT), placed each frame by `markBox()` from the eye and
+  face anchors. Anger and sweat go by the **eyes**, not `A.face.y0`: the face layer runs up under the
+  bangs/hat (on the witch the anger mark first landed on her hat). Params `markBlush/Gloom/Anger/Sweat`
+  (0/1, fade with the usual smoothing), buttons `[data-mark]`, keys R/G/A/D, saved like other params,
+  `Anime25D.state().marks`. Painted toggles are unchanged and separate.
+- **Ears/tails 2D**: `neko` 0–5 = off/cat/fox/wolf/bunny/bear, `tail` 0–4 = off/cat/fox/wolf/devil
+  (`Motion.EARS/TAILS`; old saves' 1 = cat). Ear canvases are now 128×320 (root y 311, the cat drawn in
+  the bottom half, so old fits look the same); `image.top` tells `updateStageBounds` where the drawing
+  starts so short ears don't pad the stage. Fox/wolf tails draw wider (×1.7/×1.45); idle sway breathes
+  with an occasional flick; tail phase speed per kind. Art is redrawn when design or fur changes
+  (`motion.palette` now keys palette+ear+tail; art runs before the bounds).
+- **3D**: drawn marks in every VRM (fact 35, rig 4 → Gallery offers **Update 3D rig ✦**); three-vrm
+  maps joy/angry/sorrow to `happy/angry/sad` chips. New `static/js/3d_companions.js`: stage-only ears
+  (extruded outlines on the raw head bone, placed by raycasting the skinned mesh from above) and a
+  rebuilt-every-frame tube tail on the hips (needs a full body; a few heights are tried because the
+  test stick figure has a gap at the hip joint). **Texture images are not readable after upload**
+  (`map.image` empty in r180), so "Match hair" reads the rendered stage pixels (`stagePixel`,
+  `preserveDrawingBuffer`) at probes beside the face sized by shoulder width (the crown is a hat on
+  the witch; two probes once hit a white hair highlight, so it's a median of up to 12). Settings per
+  character in `kamyii.3d` → `companions[source id or file name]`. `Kamyii3D.state.companions`.
+- Owner's characters/avatars untouched. Re-rigged review copy: `outputs/qol-review/idol-bust/`
+  (rig 4: blush/gloom/anger/sweat + 2 chest springs). The old VRM schema validator in the scratchpad
+  was gone; the check was three-vrm loading it with no page errors (structure not re-validated
+  against the JSON schema this time).
+- Verified: 165 GPU-free pytest (new: drawn marks / painted blush kept), 4 Node suites (new: ear/tail
+  menus match `EARS/TAILS`), journeys 9/9, QoL 28/28 (new: Angry adds and removes its mark and brow
+  angle, a self-chosen blush survives Gloomy, bunny ears + devil tail render), 3D 11 + 2 skips + refresh
+  (new: fox ears/tail fit, sway, pink "match hair", remembered after reload). Visual sheets of the witch
+  (2D moods/marks/ears) and idol/witch (3D marks, ears, orbited tails) were inspected.
+- Not verified: VSeeFace playback of the new expressions; 3D ears on unusual heads (hats put them on
+  the hat, as in 2D — Ear height slider); ears/tail on a webcam-tracked stream; the smug brow tilt is
+  hidden under bangs on both test characters.
 
 ## 11. How to work in this repo
 
