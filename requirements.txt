@@ -2,7 +2,7 @@
 # ---------------------------------------------------------------------------
 # Install everything:           pip install -r requirements.txt
 # Minimum to run the WebUI in demo mode (no GPU):
-#   pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv
+#   pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv requests
 # ---------------------------------------------------------------------------
 
 # --- Core web framework (required) ---
@@ -19,6 +19,7 @@ six>=1.16.0           # pytoshop runtime dependency
 
 # --- Utilities ---
 python-dotenv>=1.0.0
+requests>=2.31.0      # talks to the private 3D engine (src/core/mesh3d.py)
 
 # ===========================================================================
 # AI image generation (heavy — install for real, high-quality generation).

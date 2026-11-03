@@ -17,7 +17,8 @@ jobs:
         with:
           python-version: "3.12"
       # The suite is GPU-free: demo mode plus monkeypatched See-through, so no torch is needed.
-      - run: python -m pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv pytest
+      # The annotate plugin lists failing tests on the commit page, readable without opening the logs.
+      - run: python -m pip install Flask Pillow numpy psd-tools pytoshop six python-dotenv requests pytest pytest-github-actions-annotate-failures
       # Browser journeys (tests/e2e) on Linux only; elsewhere they skip without a browser.
       - if: runner.os == 'Linux'
         run: python -m pip install playwright==1.47.0 && python -m playwright install --with-deps chromium
