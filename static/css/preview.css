@@ -9,6 +9,14 @@ header::after{display:none}
 .sample-actions,#obsChip,[data-sec=obs],#btnReadme,#btnSavePsd{display:none!important}
 .collection-link{font-size:11px;color:var(--sub);text-decoration:none}
 .collection-link:hover{color:var(--acc2)}
+.section-hint a{color:var(--acc2)}
+.paint-toggles .variant-form{display:grid;grid-template-columns:auto 1fr;gap:6px 8px;align-items:center;margin-top:10px}
+.paint-toggles .variant-form label{grid-column:1/-1;font-size:12px}
+.paint-toggles .variant-form input{min-width:0}
+.paint-toggles .variant-form button{grid-column:1/-1;justify-self:start}
+.paint-toggles summary{cursor:pointer;margin:8px 0 4px}
+.paint-toggles .picks{display:flex;flex-wrap:wrap;gap:4px 12px;margin:6px 0 8px;font-size:12px}
+.paint-toggles label{display:inline-flex;align-items:center;gap:4px}
 #modelName{font:10px Consolas,monospace;max-width:180px}
 .btn,.stage-btn,.tg,select{border-radius:3px}
 .tg.on{background:#dba58b18;border-color:var(--acc);color:var(--acc2)}
@@ -46,3 +54,12 @@ input[type=range]::-webkit-slider-thumb{background:var(--acc2)}
 .drop-symbol{border-radius:3px;border-color:var(--line);background:none;box-shadow:none;color:var(--acc2)}
 
 .row input[type=range]{accent-color:var(--acc2)}
+
+.blink-views{margin:12px 0}.blink-offsets{display:grid;grid-template-columns:76px minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center;margin:14px 0;font-size:11px;color:var(--sub)}
+.blink-offsets input{width:100%;min-width:0;background:var(--field);border:1px solid var(--line-soft);border-radius:3px;color:var(--txt);padding:7px;font:12px Consolas,monospace}
+#blinkHelp{margin-top:12px}#overlay .blink-box{fill:#e0ae9208;stroke:var(--acc2);stroke-dasharray:5 3;pointer-events:all;cursor:move}#overlay .blink-origin{fill:none;stroke:#c5d5cd;opacity:.7;pointer-events:none}
+#btnBlinkEdit[aria-pressed=true]{background:var(--acc);color:white}#blinkSection.editing{border-left:2px solid var(--acc);padding-left:12px}
+
+@media(max-width:650px){#stageTools{left:10px;right:10px;flex-wrap:wrap;justify-content:flex-end}#stageLabel{display:none}#stageTools .stage-btn{font-size:10px;padding:6px}#anchorHint{font-size:10px;max-width:calc(100% - 24px)}}
+
+.blink-style{display:flex;gap:10px;align-items:center;font-size:11px;color:var(--sub);margin:14px 0 8px}.blink-style select{flex:1;min-width:0;padding:7px;background:var(--field);border:1px solid var(--line-soft);color:var(--txt)}

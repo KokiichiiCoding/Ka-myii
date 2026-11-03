@@ -80,6 +80,8 @@ ACCESSORY_TAGS = {"headwear", "eyewear", "earwear", "neckwear", "objects", "tail
 FACE_DETAIL_TAGS = {"nose", "mouth", "eyebrow-l", "eyebrow-r", "eyelash-l", "eyelash-r",
                     "irides-l", "irides-r", "eyewhite-l", "eyewhite-r"}
 MAX_FACE_DETAIL_SHARE = 0.20
+# Mean RGB error above which no part's prediction is taken to show a source pixel at all.
+ALIEN_ERROR = 90
 
 
 # SkyTNT's anime-segmentation IS-Net (Apache-2.0; the model rembg calls "isnet-anime"), run with
@@ -116,6 +118,24 @@ def _anime_seg_mask(image: Image.Image) -> Optional[np.ndarray]:
 
 def _tag_side(name: str):
     return (name[:-2], name[-1]) if name.endswith(("-l", "-r")) else (name, None)
+
+
+def _components(mask: np.ndarray) -> np.ndarray:
+    """4-connected component labels of a boolean mask (0 = background), by min-label
+    propagation; fine for the small masks it is used on (no SciPy dependency)."""
+    big = mask.size + 1
+    labels = np.where(mask, np.arange(1, mask.size + 1).reshape(mask.shape), 0)
+    while True:
+        cur = np.where(mask, labels, big)
+        nxt = cur.copy()
+        nxt[1:] = np.minimum(nxt[1:], cur[:-1])
+        nxt[:-1] = np.minimum(nxt[:-1], cur[1:])
+        nxt[:, 1:] = np.minimum(nxt[:, 1:], cur[:, :-1])
+        nxt[:, :-1] = np.minimum(nxt[:, :-1], cur[:, 1:])
+        nxt = np.where(mask, nxt, 0)
+        if np.array_equal(nxt, labels):
+            return labels
+        labels = nxt
 
 
 def apply_order_priors(names: List[str]) -> List[str]:
@@ -174,6 +194,8 @@ class AssetSeparator:
 
         # Always provide a clean, background-removed full-character cut-out too.
         cutout_path = output_dir / "character.png"
+        if self.cutout_backend == "anime-seg":  # the PNGtuber pack is built from it
+            self._clip_to_matte([("character", cutout)], np.asarray(cutout.split()[-1]), np.asarray(image))
         cutout.save(cutout_path)
         assets.append(Asset(layer_type="character", file_path=cutout_path, metadata={"order": 999}))
 
@@ -249,10 +271,14 @@ class AssetSeparator:
         # (seen: a hallucinated ribbon blob beside the head); colour keying can cut real white
         # clothing, so it is only trusted for the whole-layer checks above.
         background = ~silhouette if self.cutout_backend == "anime-seg" else None
+        inside = np.stack([np.asarray(c)[..., 3] > 128 for _, c in kept]).any(axis=0)  # before ownership edits
         covered = self._resolve_ownership(kept, src_rgb, background)
-        leftover = self._leftover_layer(source, fg_alpha, covered)
+        leftover = self._leftover_layer(source, fg_alpha, covered, trust_mask=self.cutout_backend == "anime-seg",
+                                        inside=inside)
         if leftover is not None:
             self._place_leftover(kept, leftover)
+        if self.cutout_backend == "anime-seg":
+            self._clip_to_matte(kept, fg_alpha, np.asarray(source))
 
         assets: List[Asset] = []
         for order, (name, canvas) in enumerate(kept):
@@ -298,36 +324,68 @@ class AssetSeparator:
         err = np.where(opaque, err, np.inf)
         acceptable = err <= err.min(axis=0) + margin
         owner = len(arrs) - 1 - np.argmax(acceptable[::-1], axis=0)  # topmost acceptable part
+        # Seen: lavender bangs over purple irises won those near-ties, so iris strokes moved with
+        # the hair and showed through closed eyes. Where a facial detail is acceptable under hair
+        # or headwear, the detail owns the pixel; real strands over an eye still differ a lot
+        # from the iris predicted beneath them, so they stay with the hair.
+        names = [name for name, _ in kept]
+        detail = np.array([n in FACE_DETAIL_TAGS for n in names])
+        covers = np.array([n in ("front hair", "headwear") for n in names])
+        if detail.any() and covers.any():
+            detail_ok = acceptable & detail[:, None, None]
+            topmost_detail = len(arrs) - 1 - np.argmax(detail_ok[::-1], axis=0)
+            prefer = covers[owner] & detail_ok.any(axis=0)
+            owner = np.where(prefer, topmost_detail, owner)
         claimed = opaque.any(axis=0)
+        # Seen: See-through's witch hat was rejected as a hallucination, and the hat's top went to
+        # the back hair, whose hidden region happened to span it (black hat vs lavender hair). A
+        # pixel no part predicts anywhere near the source belongs to none of them: it is cut from
+        # all of them and left to the leftover/headwear step. Facial details match loosely by
+        # nature (thin lines) and keep their pixels.
+        alien = claimed & (err.min(axis=0) > ALIEN_ERROR) & ~detail[owner]
+        # Only solid regions: scattered mismatches along outlines stay with their best part,
+        # or they would become speckle holes the leftover step's clean-up drops.
+        alien = np.asarray(Image.fromarray(alien.astype(np.uint8) * 255)
+                           .filter(ImageFilter.MinFilter(9)).filter(ImageFilter.MaxFilter(9))) > 0
+        if alien.any():
+            logger.info("Ownership: %d px match no part (mean error > %d); left unclaimed", int(alien.sum()), ALIEN_ERROR)
         for i, (name, canvas) in enumerate(kept):
             a = arrs[i]
-            above = claimed & (owner < i)
+            above = claimed & ((owner < i) | alien)
             cut = above & opaque[i]
             if cut.any():
                 # ...and the semi-transparent fringe around the cut, which would draw the outline.
                 near = np.asarray(Image.fromarray(cut.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(5))) > 0
                 a[cut | (near & above), 3] = 0
                 logger.info("Ownership: cut %d px of %s that the source shows belong to a part below", int(cut.sum()), name)
-            mine = claimed & (owner == i)
+            mine = claimed & (owner == i) & ~alien
             a[mine, :3] = src_rgb[mine]
             canvas.paste(Image.fromarray(a.astype(np.uint8)))
         return np.stack([a[..., 3] > 128 for a in arrs]).any(axis=0)
 
     @staticmethod
-    def _leftover_layer(source: Image.Image, fg_alpha: np.ndarray, covered: np.ndarray) -> Optional[Image.Image]:
-        """Character pixels no See-through layer covers (seen: cat ears it assigned to nothing),
-        so the PSD still holds the whole character. ``None`` when only slivers remain."""
+    def _leftover_layer(source: Image.Image, fg_alpha: np.ndarray, covered: np.ndarray,
+                        trust_mask: bool = False, inside: Optional[np.ndarray] = None) -> Optional[Image.Image]:
+        """Character pixels no See-through layer covers (seen: cat ears it assigned to nothing; a
+        whole red hoodie), so the PSD still holds the whole character. ``None`` when only slivers
+        remain. ``trust_mask``: the cut-out came from the segmentation model, not the colour key."""
         w, h = source.size
         # Background-coloured pixels here are background seen through gaps (e.g. between hair
-        # strands) that the border-connected cut-out keeps, not a part See-through missed.
-        background = AssetSeparator._background_like(np.asarray(source.convert("RGBA")))
+        # strands) that the cut-out keeps, not a part See-through missed. A trusted mask also says
+        # what the background is; the border guess misfires when clothing fills most of it.
+        background = AssetSeparator._background_like(np.asarray(source.convert("RGBA")),
+                                                     sample=(fg_alpha < 16) if trust_mask else None)
+        if trust_mask and inside is not None:
+            # Pixels a part had covered but did not match (pale chest skin under a predicted
+            # shirt) are character, not background seen through a gap.
+            background &= ~inside
         mask = Image.fromarray(((fg_alpha > 128) & ~covered & ~background).astype(np.uint8) * 255)
         # Opening drops the 1–2 px anti-aliasing fringe along every part's outline.
         mask = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))
         area = int((np.asarray(mask) > 0).sum())
         if area < 0.001 * w * h:
             return None
-        if area > 0.25 * w * h:  # more likely a failed background cut-out than missing parts
+        if area > 0.25 * w * h and not trust_mask:  # likely the colour key's background, not missing parts
             logger.warning("Skipping leftover layer: %d uncovered px looks like background", area)
             return None
         layer = source.copy()
@@ -337,10 +395,12 @@ class AssetSeparator:
 
     @staticmethod
     def _split_leftover(leftover: Image.Image, kept: list) -> list:
-        """Name what See-through missed by where it is. Seen: a witch hat, cat ears and a spiky
-        halo left in ``leftover``. The browser rig moves each layer with either the head or the
-        body, so one layer holding a halo and chest skin tore when the head turned, and Cubism
-        got no ``headwear``. Above the chin becomes ``headwear``; the rest stays ``leftover``."""
+        """Name what See-through missed by where it is. Seen: a witch hat, cat ears, a spiky halo
+        and a whole hoodie left in ``leftover``. The browser rig moves each layer with either the
+        head or the body, so one layer holding a halo and chest skin tore when the head turned,
+        and Cubism got no ``headwear``. Each connected piece whose centre is above the chin becomes
+        ``headwear``; the rest stays ``leftover`` (whole pieces, so headphones resting on a hoodie
+        are not sliced at the chin)."""
         names = [name for name, _ in kept]
         if "face" not in names:
             return [("leftover", leftover)]
@@ -350,11 +410,20 @@ class AssetSeparator:
             return [("leftover", leftover)]
         chin = int(rows.max()) + 1
         alpha = np.asarray(leftover.split()[-1])
+        h, w = alpha.shape
+        # Label pieces on a small copy (thin bits lost there fall back to their row).
+        scale = max(1, int(np.ceil(max(h, w) / 256)))
+        small = np.asarray(Image.fromarray(alpha).resize((max(1, w // scale), max(1, h // scale)), Image.Resampling.BOX)) > 128
+        labels = _components(small)
+        above = np.zeros(labels.max() + 1, bool)
+        for label in np.unique(labels[labels > 0]):
+            above[label] = (np.nonzero(labels == label)[0].mean() + 0.5) * scale < chin
+        full = np.asarray(Image.fromarray(labels.astype(np.int32)).resize((w, h), Image.Resampling.NEAREST))
+        head = np.where(full > 0, above[full], np.arange(h)[:, None] < chin)
         min_px = 0.001 * alpha.size  # same floor as _leftover_layer
         pieces = []
-        for name, keep_rows in (("headwear", slice(0, chin)), ("leftover", slice(chin, None))):
-            part = np.zeros_like(alpha)
-            part[keep_rows] = alpha[keep_rows]
+        for name, keep in (("headwear", head), ("leftover", ~head)):
+            part = np.where(keep, alpha, 0).astype(np.uint8)
             if (part > 128).sum() >= min_px:
                 canvas = leftover.copy()
                 canvas.putalpha(Image.fromarray(part))
@@ -362,16 +431,58 @@ class AssetSeparator:
         return pieces or [("leftover", leftover)]
 
     @staticmethod
+    def _clip_to_matte(kept: list, fg_alpha: np.ndarray, source: np.ndarray) -> None:
+        """Outer edges follow the segmentation matte, in place. Seen: See-through's parts reach a
+        few px into the (white) background, a light outline over a dark stream backdrop; the
+        matte's soft edge also gets the background colour un-mixed from its pixels."""
+        sample = fg_alpha < 16
+        if sample.sum() < 100:
+            return
+        # Only the outline: the matte reads 250-254 across most interiors, which must stay solid
+        # (and keep the hidden, inpainted parts lower layers carry).
+        band = (np.asarray(Image.fromarray(sample.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(9))) > 0) & ~sample
+        fg_alpha = np.where(band | sample, fg_alpha, 255).astype(np.uint8)
+        a = fg_alpha.astype(np.float32) / 255
+        px = source[..., :3][sample].astype(np.int16)
+        colours, counts = np.unique(px // 8, axis=0, return_counts=True)
+        plain = (np.abs(px // 8 - colours[counts.argmax()]) <= 1).all(axis=1)
+        bg = np.median(px[plain], axis=0).astype(np.float32)
+        # Un-mixing needs a plain background; over scenery only the alpha is clipped.
+        # Fainter pixels would amplify noise; their alpha hides them anyway.
+        soft = (a >= 0.25) & (a < 1) & (plain.mean() > 0.6)
+        arrs = [np.asarray(canvas).copy() for _, canvas in kept]
+        # In the soft band only the topmost solid part shows: stacked parts each at the matte's
+        # alpha would compose more opaque than the source (a dark outline over white).
+        edge = fg_alpha < 255
+        owner = np.full(fg_alpha.shape, -1)
+        for i in reversed(range(len(arrs))):
+            owner[edge & (owner < 0) & (arrs[i][..., 3] > 128)] = i
+        for i, ((_, canvas), arr) in enumerate(zip(kept, arrs)):
+            arr[edge & (owner >= 0) & (owner != i), 3] = 0
+            arr[..., 3] = np.minimum(arr[..., 3], fg_alpha)
+            fix = soft & (arr[..., 3] > 0)
+            rgb = arr[..., :3].astype(np.float32)
+            rgb[fix] = bg + (rgb[fix] - bg) / a[fix][:, None]
+            arr[..., :3] = np.clip(rgb, 0, 255).round().astype(np.uint8)
+            canvas.paste(Image.fromarray(arr, "RGBA"))
+
+    @staticmethod
     def _place_leftover(kept: list, leftover: Image.Image):
-        """Add the leftover pieces to ``kept`` (bottom-to-top list of (name, canvas)) in place."""
+        """Add the leftover pieces to ``kept`` (bottom-to-top list of (name, canvas)) in place.
+        Uncovered pixels never overlap a kept part's opaque ones, so merging is lossless."""
         for name, canvas in AssetSeparator._split_leftover(leftover, kept):
             names = [n for n, _ in kept]
+            area = lambda image: int((np.asarray(image.split()[-1]) > 128).sum())  # noqa: E731
             if name == "headwear" and "headwear" in names:
-                # Uncovered pixels never overlap a kept part's opaque ones: merging is lossless.
                 at = names.index("headwear")
                 kept[at] = ("headwear", Image.alpha_composite(canvas, kept[at][1]))
             elif name == "headwear":
                 kept.append((name, canvas))  # front hair < headwear, as in ORDER_PRIORS
+            elif "topwear" in names and area(canvas) > area(kept[names.index("topwear")][1]):
+                # Seen: See-through's topwear was a hoodie's drawstrings and the hoodie went
+                # unclaimed. Unclaimed pixels outweighing the clothing layer are the clothing.
+                at = names.index("topwear")
+                kept[at] = ("topwear", Image.alpha_composite(canvas, kept[at][1]))
             else:
                 # Uncovered pixels look identical at any depth; just above the back hair suits
                 # the usual case (hair ties, collars, skin in clothing gaps).
@@ -652,9 +763,12 @@ class AssetSeparator:
         return Image.fromarray(arr, "RGBA")
 
     @staticmethod
-    def _background_like(arr: np.ndarray) -> np.ndarray:
-        """Pixels close to the most common border colour (the flat preset background)."""
+    def _background_like(arr: np.ndarray, sample: Optional[np.ndarray] = None) -> np.ndarray:
+        """Pixels close to the background colour: the most common colour where ``sample`` (a
+        mask of known background) is set, else along the border (the flat preset background)."""
         border = np.concatenate([arr[0, :, :3], arr[-1, :, :3], arr[:, 0, :3], arr[:, -1, :3]])
+        if sample is not None and sample.sum() >= 100:
+            border = arr[..., :3][sample]
         colours, counts = np.unique(border // 8, axis=0, return_counts=True)
         bg_color = colours[counts.argmax()] * 8 + 4
         return np.linalg.norm(arr[..., :3].astype(int) - bg_color, axis=-1) < 28

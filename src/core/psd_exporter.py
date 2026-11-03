@@ -28,16 +28,28 @@ from src.models.vtuber_model import Asset
 logger = logging.getLogger(__name__)
 
 try:
+    import struct
+
     import pytoshop
+    import pytoshop.util
     from pytoshop import enums
     from pytoshop.user import nested_layers
 
+    def _encode_unicode_string(s):
+        # pytoshop counts the terminating NUL as a character, so every layer's Unicode name
+        # (what Photoshop, psd-tools and Cubism show) ended in a junk "\x00". Photoshop's own
+        # files count the characters only and then write the NUL.
+        return struct.pack(">L", len(s)) + s.encode("utf_16_be") + b"\0\0"
+
+    pytoshop.util.encode_unicode_string = _encode_unicode_string
     PYTOSHOP_AVAILABLE = True
 except Exception:  # pragma: no cover - optional
     PYTOSHOP_AVAILABLE = False
 
 
-LayerTuple = Tuple[str, Image.Image, Tuple[int, int]]  # (name, cropped RGBA, (left, top))
+# (name, cropped RGBA, (left, top), visible). Painted expression layers (closed eyes, the other
+# mouth) are shipped hidden: the document still looks like the artwork, the art is there to rig.
+LayerTuple = Tuple[str, Image.Image, Tuple[int, int], bool]
 
 
 def _clean_name(name: str) -> str:
@@ -73,7 +85,7 @@ def _build_layer_tuples(assets: List[Asset]) -> Tuple[List[LayerTuple], Tuple[in
         if cropped is None:
             continue
         region, (left, top) = cropped
-        tuples.append((asset.layer_type, region, (left, top)))
+        tuples.append((asset.layer_type, region, (left, top), not asset.metadata.get("expression")))
     return tuples, (canvas_w, canvas_h)
 
 
@@ -90,13 +102,13 @@ def export_psd(assets: List[Asset], output_path: Path) -> Optional[Path]:
     layers = []
     # pytoshop stacks the *last* list item on top, which matches our
     # back-to-front ordering (front layer is last).
-    for name, region, (left, top) in tuples:
+    for name, region, (left, top), visible in tuples:
         arr = np.asarray(region)
         h, w = arr.shape[:2]
         layers.append(
             nested_layers.Image(
                 name=_clean_name(name),
-                visible=True,
+                visible=visible,
                 opacity=255,
                 top=top,
                 left=left,
@@ -144,7 +156,7 @@ def export_ora(assets: List[Asset], output_path: Path) -> Optional[Path]:
     stack_el = ET.SubElement(image_el, "stack")
 
     layer_pngs: Dict[str, Image.Image] = {}
-    for idx, (name, region, (left, top)) in enumerate(reversed(tuples)):
+    for idx, (name, region, (left, top), visible) in enumerate(reversed(tuples)):
         src = f"data/{idx:02d}_{name}.png"
         layer_pngs[src] = region
         ET.SubElement(
@@ -156,7 +168,7 @@ def export_ora(assets: List[Asset], output_path: Path) -> Optional[Path]:
                 "x": str(left),
                 "y": str(top),
                 "opacity": "1.0",
-                "visibility": "visible",
+                "visibility": "visible" if visible else "hidden",
                 "composite-op": "svg:src-over",
             },
         )
@@ -187,8 +199,9 @@ def compose_flat(assets: List[Asset]) -> Optional[Image.Image]:
     if not tuples or cw == 0:
         return None
     canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-    for _name, region, (left, top) in tuples:
-        canvas.alpha_composite(region, dest=(left, top))
+    for _name, region, (left, top), visible in tuples:
+        if visible:
+            canvas.alpha_composite(region, dest=(left, top))
     return canvas
 
 

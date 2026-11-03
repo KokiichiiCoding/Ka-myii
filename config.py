@@ -88,8 +88,8 @@ IMAGE_GENERATION = {
     "default_width": _env_int("KAMYII_DEFAULT_WIDTH", 832),
     "default_height": _env_int("KAMYII_DEFAULT_HEIGHT", 1216),
     "default_steps": _env_int("KAMYII_DEFAULT_STEPS", 28),
-    "default_guidance_scale": float(os.getenv("KAMYII_DEFAULT_CFG", "6.5")),
-    "default_sampler": os.getenv("KAMYII_DEFAULT_SAMPLER", "DPM++ 2M Karras"),
+    "default_guidance_scale": float(os.getenv("KAMYII_DEFAULT_CFG", "5")),  # Animagine XL 4.0 card: 4-7, 5 recommended
+    "default_sampler": os.getenv("KAMYII_DEFAULT_SAMPLER", "Euler a"),
     "model_name": DEFAULT_MODEL,
     # Supported values: "auto", "sd15", "sdxl". SDXL is the modern default.
     "pipeline": os.getenv("KAMYII_MODEL_PIPELINE", "auto"),
@@ -264,6 +264,18 @@ MODEL_ASSEMBLY = {
 # ---------------------------------------------------------------------------
 # Pipeline / API
 # ---------------------------------------------------------------------------
+# Paint character-specific closed eyes and the other mouth state after separation (~1-2 min),
+# so Live Preview blinks and talks with the character's own art instead of generic shapes.
+EXPRESSIONS = _env_bool("KAMYII_EXPRESSIONS", True)
+
+# Optional 3D avatar (VRM) from a finished character: Pixal3D in a private ComfyUI engine
+# installed by scripts/install_3d.py, started only for the length of a 3D job.
+AVATAR3D = {
+    "engine_dir": os.getenv("KAMYII_3D_ENGINE_DIR", str(BASE_DIR / "engines" / "comfy3d")),
+    "port": _env_int("KAMYII_3D_PORT", 8198),
+    "engine_args": os.getenv("KAMYII_3D_ENGINE_ARGS", ""),   # e.g. "--novram" if a run spills
+}
+
 PIPELINE = {
     "save_intermediate_steps": True,
     "cleanup_temp_files": False,

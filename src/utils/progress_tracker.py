@@ -94,6 +94,9 @@ class ProgressManager:
         """Initialize progress manager"""
         self.trackers: Dict[str, ProgressTracker] = {}
         self.stages: Dict[str, str] = {}
+        # task id -> character id once its artwork is saved, so the Studio can show it while the
+        # layers are still being separated (about ten minutes).
+        self.artwork: Dict[str, str] = {}
         # Cancellation outlives any one tracker: each pipeline stage creates a fresh one.
         self.cancelled: set = set()
         logger.info("ProgressManager initialized")
@@ -130,6 +133,7 @@ class ProgressManager:
     def forget(self, task_id: str):
         self.trackers.pop(task_id, None)
         self.stages.pop(task_id, None)
+        self.artwork.pop(task_id, None)
         self.cancelled.discard(task_id)
 
     def get_tracker(self, task_id: str) -> Optional[ProgressTracker]:

@@ -152,6 +152,16 @@ def test_long_prompts_are_chunked_at_commas_not_truncated():
     assert chunk_token_ids([], COMMA) == [[]]
 
 
+def test_graded_inpaint_redraws_each_pixel_for_its_share_of_the_steps():
+    import numpy as np
+    from src.core.image_generator import free_during
+
+    change = np.array([0.0, 0.25, 0.5, 1.0])
+    redrawn = sum(free_during(change, step, 20).astype(int) for step in range(20))
+    assert list(redrawn) == [0, 5, 10, 20]                 # 0.5 ≈ the last half of the steps
+    assert list(free_during(change, 99, 20)) == [False, True, True, True]  # kept pixels stay kept
+
+
 def test_seethrough_order_priors_keep_real_parts_and_leftovers(workdir, monkeypatch):
     """Real run regressions: See-through stacked an iris under its eye white (the colour check then
     deleted the eye white), emitted few-pixel accessory specks and assigned cat ears to no layer."""
@@ -266,6 +276,20 @@ def test_leftover_above_the_chin_becomes_headwear():
     merged = np.asarray(kept[-1][1])[..., 3]
     assert merged[5, 5] == 255 and merged[5, 50] == 255 and merged[85, 50] == 0  # stars + ears
 
+    # Headphones resting on a hoodie cross the chin; the piece is kept whole (it follows the body).
+    hoodie = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    hoodie.paste((200, 30, 30, 255), (0, 70, 100, 100))
+    hoodie.paste((20, 20, 20, 255), (20, 50, 30, 75))  # headphone cup reaching above the chin (60)
+    pieces = dict(AssetSeparator._split_leftover(hoodie, [("face", face)]))
+    assert set(pieces) == {"leftover"} and np.asarray(pieces["leftover"])[55, 25, 3] == 255
+    # ...and when it outweighs See-through's topwear (seen: just the drawstrings), it IS the top.
+    strings = Image.new("RGBA", (100, 100), (0, 0, 0, 0)); strings.paste((220, 40, 40, 255), (45, 75, 48, 95))
+    kept = [("back hair", Image.new("RGBA", (100, 100))), ("topwear", strings), ("face", face)]
+    AssetSeparator._place_leftover(kept, hoodie)
+    assert [n for n, _ in kept] == ["back hair", "topwear", "face"]
+    top = np.asarray(kept[1][1])[..., 3]
+    assert top[90, 10] == 255 and top[80, 46] == 255
+
 
 def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     """physics3.json lacked Meta.EffectiveForces / PhysicsDictionary (required by Live2D's schema)
@@ -276,7 +300,7 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     from src.models.vtuber_model import Asset
 
     assets = []
-    for i, name in enumerate(["back hair", "face", "ears-l", "front hair", "headwear"]):
+    for i, name in enumerate(["back hair", "face", "ears-l", "front hair", "headwear", "topwear"]):
         path = workdir / f"{i:02d}_{name}.png"
         Image.new("RGBA", (64, 64), (200, 100, 50, 255)).save(path)
         assets.append(Asset(layer_type=name, file_path=path, metadata={"order": i}))
@@ -288,7 +312,7 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
     for key in ("PhysicsSettingCount", "TotalInputCount", "TotalOutputCount", "VertexCount",
                 "EffectiveForces", "PhysicsDictionary"):
         assert key in meta
-    assert meta["PhysicsSettingCount"] == len(settings) == len(meta["PhysicsDictionary"]) == 3
+    assert meta["PhysicsSettingCount"] == len(settings) == len(meta["PhysicsDictionary"]) == 4
     assert meta["TotalInputCount"] == sum(len(s["Input"]) for s in settings)
     assert meta["VertexCount"] == sum(len(s["Vertices"]) for s in settings)
 
@@ -297,4 +321,50 @@ def test_cubism_files_follow_the_specs_and_drive_declared_parameters(workdir):
            {o["Destination"]["Id"] for s in settings for o in s["Output"]}
     assert used <= declared and all(re.fullmatch(r"[A-Za-z0-9_]+", p) for p in declared)
     assert {o["Destination"]["Id"] for s in settings for o in s["Output"]} == \
-        {"ParamHairBack", "ParamHairFront", "ParamAccessorySway"}  # no physics for the real ears
+        {"ParamHairBack", "ParamHairFront", "ParamAccessorySway", "ParamBustX"}  # none for the real ears
+
+
+
+def test_large_leftover_is_kept_when_the_segmentation_mask_is_trusted():
+    """See-through gave a red hoodie (45 % of the image) to no layer; the leftover then exceeded
+    the 25 % cap meant for colour-key failures and the body vanished from the layers."""
+    import numpy as np
+    from PIL import Image
+    from src.core.asset_separator import AssetSeparator
+
+    source = Image.new("RGBA", (100, 100), (255, 255, 255, 255))
+    source.paste((200, 30, 30, 255), (0, 40, 100, 100))  # hoodie: 60 % of the canvas, most of the border
+    source.paste((255, 255, 255, 255), (48, 50, 52, 54))  # background seen through a gap
+    fg = np.zeros((100, 100), np.uint8); fg[40:] = 255
+    covered = np.zeros((100, 100), bool)
+    assert AssetSeparator._leftover_layer(source, fg, covered) is None  # colour key: distrust
+    layer = np.asarray(AssetSeparator._leftover_layer(source, fg, covered, trust_mask=True))[..., 3]
+    assert layer[70, 20] == 255 and layer[10, 50] == 0  # the hoodie is kept...
+    assert layer[52, 50] == 0  # ...but not the white gap: the mask's background says white
+
+
+def test_layers_follow_the_matte_without_a_white_rim():
+    """See-through's parts reach into the white background; the matte trims them and the soft
+    edge loses its white tint (seen as a light outline over a dark stream backdrop)."""
+    import numpy as np
+    from PIL import Image
+    from src.core.asset_separator import AssetSeparator
+
+    source = np.full((40, 40, 4), 255, np.uint8)
+    source[10:30, 10:30, :3] = (40, 20, 60)  # a dark figure on white
+    source[10:30, 30, :3] = (148, 138, 158)  # its anti-aliased edge: half figure, half white
+    fg = np.zeros((40, 40), np.uint8); fg[10:30, 10:30] = 255; fg[10:30, 30] = 128
+    part = np.zeros((40, 40, 4), np.uint8)
+    part[8:32, 8:34] = (255, 255, 255, 255)  # a white rim beyond the figure...
+    part[10:30, 10:30] = (40, 20, 60, 255)
+    part[10:30, 30] = (148, 138, 158, 255)
+    fg[14:26, 14:26] = 252  # the matte is rarely exactly 255 inside the figure
+    body = np.zeros((40, 40, 4), np.uint8); body[12:30, 12:30] = (200, 150, 120, 255)  # hidden under the hair
+    kept = [("body", Image.fromarray(body, "RGBA")), ("hair", Image.fromarray(part, "RGBA"))]
+    AssetSeparator._clip_to_matte(kept, fg, source)
+    out, hidden = np.asarray(kept[1][1]), np.asarray(kept[0][1])
+    assert out[9, 20, 3] == 0 and out[20, 32, 3] == 0      # the rim is gone
+    assert out[20, 20].tolist() == [40, 20, 60, 255]         # the figure is untouched, solid inside
+    assert hidden[20, 20].tolist() == [200, 150, 120, 255]   # hidden parts are kept inside
+    assert hidden[20, 30, 3] == 0                            # but not under the hair's soft edge
+    assert out[20, 30, 3] == 128 and np.abs(out[20, 30, :3].astype(int) - (40, 20, 60)).max() <= 3  # un-mixed

@@ -1,7 +1,7 @@
 """
 Starter physics3.json for the Cubism scaffold, from the layers that exist.
 
-One pendulum per group (front hair, back hair, accessories, skirt), shaped like Live2D's own
+One pendulum per group (front hair, back hair, accessories, skirt, bust), shaped like Live2D's own
 sample models: head and body sway in, an angle out on a parameter the scaffold declares in
 cdi3.json, so the physics drive something once the artist rigs those parameters in Cubism.
 Validated against the physics3.json schema in Live2D's CubismSpecs.
@@ -22,6 +22,8 @@ GROUPS = [
     ("Accessories", "ParamAccessorySway", "Accessory Sway",
      {"headwear", "earwear", "neckwear", "tail", "wings", "accessories"}, 8, 0.9, 0.85, 1.2, 1.0),
     ("Skirt", "ParamSkirtSway", "Skirt Sway", {"bottomwear"}, 10, 0.9, 0.8, 1.0, 1.0),
+    # Cubism's standard "Bust X": a short, quick pendulum, so the chest sways after the body
+    ("Bust", "ParamBustX", "Bust X", {"topwear"}, 4, 0.9, 0.85, 1.5, 1.0),
 ]
 # Head and body sway feed every pendulum (ids from the scaffold's standard parameter set).
 INPUTS = [("ParamAngleX", "X", 60), ("ParamAngleZ", "Angle", 60),

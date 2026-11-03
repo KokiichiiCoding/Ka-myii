@@ -17,6 +17,7 @@ class GenerationStatus(Enum):
     MODEL_ASSEMBLY = "model_assembly"
     RIGGING = "rigging"
     COMPLETED = "completed"
+    SKETCH = "sketch"  # artwork only; its layers can be separated later
     FAILED = "failed"
 
 
@@ -56,7 +57,28 @@ class GenerationRequest:
     # Advanced options
     include_rigging: bool = False
     custom_layers: Optional[List[str]] = None
-    reference_image: Optional[str] = None
+    reference_image: Optional[str] = None  # server-side path of artwork to import instead of generating
+    sketch: bool = False  # stop after the artwork (~1 min) instead of separating layers
+    source: str = "prompt"  # prompt | upload (the user's file) | artwork (re-separating saved artwork)
+    # What the job does: "generate" (artwork -> layers -> package), "expressions" (paint closed
+    # eyes / the other mouth onto ``target_model`` in place), "edit" / "extend" (repaint part of
+    # ``reference_image`` through ``mask_image`` into a new sketch).
+    operation: str = "generate"
+    target_model: Optional[str] = None
+    pose_image: Optional[str] = None  # staged local standing guide for extension
+    mask_image: Optional[str] = None
+    strength: float = 0.9
+    edit_prompt: Optional[str] = None  # what to paint into the selection (edit / extend)
+    extension: Optional[Dict] = None  # measured placement/proportions, retained for artwork-first copies
+    toggles: Optional[List[str]] = None  # expression toggles to paint (src/core/expressions.TOGGLES)
+    regions: Optional[List[List[int]]] = None  # refine: boxes redrawn one at a time (src/core/refine.py)
+    visemes: bool = False  # paint the A/I/U/E/O mouths (src/core/expressions.VISEMES)
+    variant: Optional[Dict] = None  # {"part": "hair", "prompt": "short bob"} (src/core/variants.py)
+    # Uploads: {"frame": bool, "plain_background": bool, "enhance": 0..0.6} (src/core/importer.py)
+    import_options: Optional[Dict] = None
+    # {"quality": "draft" | "standard" | "high"}: also build a rigged 3D VRM avatar
+    # (src/core/mesh3d.py + rig3d.py); operation "avatar3d" builds one for ``target_model``.
+    avatar3d: Optional[Dict] = None
 
 
 @dataclass

@@ -44,7 +44,7 @@ def create_app(use_dummy_generators: bool = False):
     """
     app = Flask(__name__)
     app.config['SECRET_KEY'] = config.SECRET_KEY
-    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
+    app.config['MAX_CONTENT_LENGTH'] = 1024 ** 3  # an exported character to reopen (~60 MB)...
     # No CORS: the UI is same-origin, and allowing other origins would let any website the
     # user visits drive this local server (queue jobs, delete results).
     app.config['LOCAL_ONLY'] = False
@@ -54,6 +54,23 @@ def create_app(use_dummy_generators: bool = False):
         # DNS rebinding: a website can point its own hostname at 127.0.0.1 and become "same origin".
         if app.config['LOCAL_ONLY'] and request.host.rsplit(':', 1)[0] not in LOOPBACK_HOSTS:
             abort(403)
+
+    @app.before_request
+    def reject_cross_site_writes():
+        # Without CORS other sites can't read responses, but a page can still auto-submit a
+        # "simple" form (e.g. an artwork upload that queues a GPU job). Browsers label those.
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        origin = request.headers.get('Origin')
+        if request.headers.get('Sec-Fetch-Site') in ('cross-site', 'same-site') or \
+                (origin and origin.split('://', 1)[-1] != request.host):
+            abort(403)
+
+    @app.before_request
+    def limit_request_size():
+        # ...every other request (artwork uploads, JSON) stays under 16 MB.
+        if request.endpoint != 'generation.open_project' and (request.content_length or 0) > 16 * 1024 * 1024:
+            abort(413)
 
     # Initialize assembly line
     init_assembly_line(use_dummy=use_dummy_generators)
@@ -72,6 +89,11 @@ def create_app(use_dummy_generators: bool = False):
         """Model generator page"""
         return render_template('generator.html')
 
+    @app.route('/3d')
+    def studio_3d():
+        """Local VRM character workspace."""
+        return render_template('3d_studio.html')
+
     @app.route('/gallery')
     def gallery():
         """Model gallery page"""
@@ -85,10 +107,22 @@ def create_app(use_dummy_generators: bool = False):
             abort(404)
         from src.utils.helpers import load_json
         metadata_path = model_dir / 'metadata.json'
-        name = load_json(metadata_path).get('name', model_id[:8]) if metadata_path.exists() else model_id[:8]
+        metadata = load_json(metadata_path) if metadata_path.exists() else {}
+        name = metadata.get('display_name') or metadata.get('name', model_id[:8])
         if name.startswith('model_'):
             name = 'Study ' + name[6:].upper()
-        return render_template('preview.html', model_id=model_id, character_name=name,
+        studio_path = model_dir / 'studio.json'  # the Studio's saved adjustments (PUT /api/generation/studio)
+        from src.core import expressions
+        made = expressions.read(model_dir)
+        painted = {**made.get('toggles', {}), **({'visemes': True} if made.get('visemes') else {})}
+        paintable = any(a.get('metadata', {}).get('backend') == 'see-through' for a in metadata.get('assets', []))
+        has_avatar3d = bool(metadata.get('metadata', {}).get('avatar3d'))
+        return render_template('preview.html', model_id=model_id, character_name=name, has_avatar3d=has_avatar3d,
+                               toggle_options=[{'id': k, 'label': t.label, 'painted': k in painted}
+                                               for k, t in expressions.TOGGLES.items()]
+                               + [{'id': 'visemes', 'label': 'A I U E O mouths', 'painted': 'visemes' in painted}]
+                               if paintable else [],
+                               studio_settings=load_json(studio_path) if studio_path.exists() else None,
                                preview_psd=url_for('generation.get_artifact', model_id=model_id, kind='preview_psd'))
 
     @app.route('/health')

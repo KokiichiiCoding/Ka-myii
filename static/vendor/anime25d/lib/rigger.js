@@ -31,6 +31,7 @@
     'mouth_close': 'mouthclose mouthclosed closedmouth 閉じ口 口閉じ',
     'nose':        'nose 鼻 はな',
     'ears':        'ears ear 耳',
+    'cat ears':    'catears catear nekomimi kemonomimi animalears 猫耳 ねこみみ ネコミミ',
     'earwear':     'earwear earring earrings イヤリング ピアス 耳飾り',
     'neck':        'neck 首',
     'neckwear':    'neckwear necktie tie necklace choker ネクタイ ネックレス チョーカー 首飾り',
@@ -41,7 +42,7 @@
     'footwear':    'footwear shoes shoe boots 靴 ブーツ',
     'headwear':    'headwear hat cap hairpin hairband 帽子 カチューシャ 髪飾り ヘアピン',
     'eyewear':     'eyewear glasses 眼鏡 メガネ めがね',
-    'tail':        'tail しっぽ 尻尾 シッポ',
+    'tail':        'tail cattail nekotail しっぽ 尻尾 シッポ',
     'wings':       'wings wing 羽 翼 羽根',
     'objects':     'objects object 小物 持ち物'
   };
@@ -64,6 +65,8 @@
     // "eye_close2" / "eyeclose2" / "閉じ目2" select the long closed-eye variant.
     // A separator before the number ("eye_close_2") is a numbered part instead.
     if (/^(eye_?close|eye close|閉じ目)2$/.test(n)) return 'eye_close2';
+    var animalSide=/^(.+?)[ _-](left|right|l|r)$/.exec(n);
+    if(animalSide&&canonical(animalSide[1])==='cat ears')return 'cat ears';
     var direct = canonical(n);
     if (direct) return direct;
     var m = /^(.+?)[ _-]?(\d+)$/.exec(n);
@@ -93,26 +96,26 @@
 
   function validatePsd(psd) {
     if (!psd || !Number.isInteger(psd.width) || !Number.isInteger(psd.height) || psd.width < 2 || psd.height < 2)
-      throw new Error('PSDのキャンバスサイズが不正です');
+      throw new Error('The PSD canvas size is invalid');
     if (psd.width * psd.height > 24000000 || Math.max(psd.width, psd.height) > 16384)
-      throw new Error('キャンバスが大きすぎます（最大2400万画素・一辺16384px）');
+      throw new Error('The canvas is too large (max 24 megapixels, 16384 px per side)');
     var pixels = 0, count = 0;
     function visit(nodes, depth) {
-      if (depth > 64) throw new Error('フォルダの階層が深すぎます');
+      if (depth > 64) throw new Error('Layer groups are nested too deeply');
       (nodes || []).forEach(function (c) {
-        if (++count > 1000) throw new Error('レイヤー数が多すぎます（最大1000）');
+        if (++count > 1000) throw new Error('Too many layers (max 1000)');
         if (c.children) visit(c.children, depth + 1);
         var w = c.imageData ? c.imageData.width : Math.max(0, (c.right || 0) - (c.left || 0));
         var h = c.imageData ? c.imageData.height : Math.max(0, (c.bottom || 0) - (c.top || 0));
         if (!Number.isInteger(w) || !Number.isInteger(h) || w < 0 || h < 0 || w * h > 24000000)
-          throw new Error('画像レイヤーのサイズが不正または過大です');
+          throw new Error('A layer has an invalid or excessive size');
         pixels += w * h;
         if (c.imageData && (!c.imageData.data || c.imageData.data.length !== w * h * 4))
-          throw new Error('画像レイヤーの画素データが不正です');
+          throw new Error('A layer has invalid pixel data');
       });
     }
     visit(psd.children, 0);
-    if (pixels > 96000000) throw new Error('レイヤー画像の合計が大きすぎます（最大9600万画素）');
+    if (pixels > 96000000) throw new Error('The layers are too large in total (max 96 megapixels)');
     return psd;
   }
 
@@ -130,32 +133,51 @@
     'objects':     { depth: 1.00, group: 'auto' },
     'earwear':     { depth: 0.97, group: 'head', phys: 'sway' },
     'ears':        { depth: 0.96, group: 'head' },
+    'cat ears':    { depth: 1.00, group: 'head', split: true },
     'face':        { depth: 1.00, group: 'head' },
-    'facedetail':  { depth: 1.02, group: 'head' },
+    'facedetail':  { depth: 1.00, group: 'head' },
     'headwear':    { depth: 1.20, group: 'head' },
-    'mouth_close': { depth: 1.08, group: 'head', fade: 'mouthClose' },
-    'mouth_open':  { depth: 1.08, group: 'head', fade: 'mouthOpen' },
-    'nose':        { depth: 1.15, group: 'head' },
-    'eyewhite':    { depth: 1.06, group: 'head', split: true, fade: 'eyeOpen' },
-    'eyebrow':     { depth: 1.14, group: 'head', split: true },
-    'irides':      { depth: 1.08, group: 'head', split: true, fade: 'eyeOpen' },
-    'eyelash':     { depth: 1.12, group: 'head', split: true, fade: 'eyeOpen' },
-    'eye_close':   { depth: 1.12, group: 'head', split: true, fade: 'eyeClose' },
-    'eye_close2':  { depth: 1.12, group: 'head', split: true, fade: 'eyeClose2' },
+    'mouth_close': { depth: 1.00, group: 'head', fade: 'mouthClose' },
+    'mouth_open':  { depth: 1.00, group: 'head', fade: 'mouthOpen' },
+    // Painted vowel mouths (A I U E O) for lip sync; they crossfade in place of mouth_open.
+    'mouth_a':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_i':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_u':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_e':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'mouth_o':     { depth: 1.00, group: 'head', fade: 'viseme' },
+    'nose':        { depth: 1.00, group: 'head' },
+    'eyewhite':    { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eyebrow':     { depth: 1.00, group: 'head', split: true },
+    'irides':      { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eyelash':     { depth: 1.00, group: 'head', split: true, fade: 'eyeOpen' },
+    'eye_close':   { depth: 1.00, group: 'head', split: true, fade: 'eyeClose' },
+    'eye_close2':  { depth: 1.00, group: 'head', split: true, fade: 'eyeClose2' },
     'eyewear':     { depth: 1.18, group: 'head' },
     'side hair':   { depth: 1.22, group: 'head', phys: 'hair' },
     'front hair':  { depth: 1.28, group: 'head', phys: 'hair' },
     'ahoge':       { depth: 1.30, group: 'head', phys: 'hair' }
   };
+  var TOGGLE_SLOT = { depth: 1.00, group: 'head', fade: 'toggle' };
+  // Alternate looks ("toggle Hair: short bob", src/core/variants.py): toggles that replace a part.
+  var VARIANT_PARTS = { hair: ['front hair', 'side hair', 'back hair'], top: ['topwear', 'neckwear'],
+                        bottom: ['bottomwear'], headwear: ['headwear'] };
+  var VARIANT_SLOTS = { hair: { depth: 1.00, group: 'head', fade: 'toggle', phys: 'hair' },
+                        headwear: { depth: 1.20, group: 'head', fade: 'toggle' },
+                        top: { depth: 0.90, group: 'body', fade: 'toggle' },
+                        bottom: { depth: 0.88, group: 'body', fade: 'toggle' } };
+  // Painted mouth emotes stand in for the animated mouth (and its vowel shapes) while on.
+  var MOUTH_EMOTES = /^toggle (tongue out|cat mouth|fang)$/;
+  var MOUTH_LAYERS = ['mouth_open', 'mouth_close', 'mouth_a', 'mouth_i', 'mouth_u', 'mouth_e', 'mouth_o', 'mouth_grin', 'mouth_round'];
   // Human readable role names used by the editor and diagnostics.
   var ROLE_LABELS = {
-    'wings': '翼', 'tail': '尻尾', 'back hair': '後髪', 'footwear': '靴', 'legwear': '脚',
-    'bottomwear': '下半身の服', 'neck': '首', 'topwear': '上半身の服', 'neckwear': '首元',
-    'handwear': '腕・手', 'objects': '小物', 'earwear': '耳飾り', 'ears': '耳', 'face': '顔',
-    'facedetail': '顔の細部', 'headwear': '頭の飾り', 'mouth_close': '閉じ口', 'mouth_open': '開き口',
-    'nose': '鼻', 'eyewhite': '白目', 'eyebrow': '眉', 'irides': '瞳', 'eyelash': 'まつ毛',
-    'eye_close': '閉じ目', 'eye_close2': '長い閉じ目', 'eyewear': '眼鏡', 'side hair': '横髪',
-    'front hair': '前髪', 'ahoge': 'アホ毛'
+    'wings': 'Wings', 'tail': 'Tail', 'back hair': 'Back hair', 'footwear': 'Shoes', 'legwear': 'Legs',
+    'bottomwear': 'Lower clothing', 'neck': 'Neck', 'topwear': 'Upper clothing', 'neckwear': 'Neckwear',
+    'handwear': 'Arms and hands', 'objects': 'Objects', 'earwear': 'Earrings', 'ears': 'Ears', 'cat ears': 'Cat ears', 'face': 'Face',
+    'facedetail': 'Face details', 'headwear': 'Headwear', 'mouth_close': 'Closed mouth', 'mouth_open': 'Open mouth',
+    'mouth_a': 'A mouth', 'mouth_i': 'I mouth', 'mouth_u': 'U mouth', 'mouth_e': 'E mouth', 'mouth_o': 'O mouth',
+    'nose': 'Nose', 'eyewhite': 'Eye whites', 'eyebrow': 'Eyebrows', 'irides': 'Irises', 'eyelash': 'Eyelashes',
+    'eye_close': 'Closed eyes', 'eye_close2': 'Long closed eyes', 'eyewear': 'Glasses', 'side hair': 'Side hair',
+    'front hair': 'Front hair', 'ahoge': 'Ahoge'
   };
 
   // ---------- image ops (full-canvas alpha as Uint8Array) ----------
@@ -516,6 +538,26 @@
     };
   }
 
+  function closedLidY(part,eye) {
+    if(!part)return null;
+    const d=part.img.data,w=part.w,h=part.h,values=[];
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=(y*w+x)*4;
+      if(d[i+3]>180&&x+part.x>=eye.x0&&x+part.x<=eye.x1)values.push((d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722));
+    }
+    if(!values.length)return null;
+    values.sort((a,b)=>a-b);
+    const bg=values[Math.floor(values.length*.7)],cut=bg-35;
+    let total=0,cy=0;
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=(y*w+x)*4,px=x+part.x,py=y+part.y;
+      if(d[i+3]<180||px<eye.x0||px>eye.x1||py<eye.y0-(eye.y1-eye.y0)*.3||py>eye.y1+(eye.y1-eye.y0)*.4)continue;
+      const ink=Math.max(0,cut-(d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722));
+      total+=ink;cy+=py*ink;
+    }
+    return total>0?cy/total:null;
+  }
+
   // ---------- main ----------
   function buildRig(psd, opts) {
     opts = opts || {};
@@ -523,18 +565,18 @@
     var W = psd.width, H = psd.height;
     var warnings = [];
     var kids = imageLayersOf(psd);
-    if (!kids.length) throw new Error('表示可能な画像レイヤーが見つかりません');
-    if (kids.length * W * H > 128000000) throw new Error('リグ解析に必要なメモリが大きすぎます。レイヤー数または解像度を減らしてください');
+    if (!kids.length) throw new Error('No visible image layers found');
+    if (kids.length * W * H > 128000000) throw new Error('Rigging needs too much memory. Use fewer layers or a lower resolution');
 
     // full alphas, cleaned
     var entries = [];
     for (var i = 0; i < kids.length; i++) {
       var name = normName(kids[i].name);
       var fa = cleanAlpha(fullAlphaOf(kids[i], W, H), W, H, 4);
-      if (!bboxOf(fa, W, H, 8)) { warnings.push('空のレイヤー "' + name + '" をスキップしました'); continue; }
+      if (!bboxOf(fa, W, H, 8)) { warnings.push('Skipped empty layer "' + name + '"'); continue; }
       entries.push({ name: name, layer: kids[i], alpha: fa });
     }
-    if (!entries.length) throw new Error('キャンバス内に表示可能な画素がありません');
+    if (!entries.length) throw new Error('No visible pixels inside the canvas');
     // A plain "hair" layer is split by the painter's order: above the face it
     // is front hair, below it back hair (see-through emits both as "hair").
     var faceIndex = -1;
@@ -558,23 +600,40 @@
       var fb = bboxOf(faceAlpha, W, H, 8), fc = centroidOf(faceAlpha, W, H);
       FACE = { cx: fc.cx, cy: fc.cy, x0: fb.x0, x1: fb.x1, y0: fb.y0, y1: fb.y1 };
     } else {
-      warnings.push('face レイヤーがありません — キャンバス中央を顔とみなします');
+      warnings.push('No face layer; assuming the face is at the canvas centre');
       FACE = { cx: W / 2, cy: H * 0.3, x0: W * 0.35, x1: W * 0.65, y0: H * 0.1, y1: H * 0.5 };
     }
 
     // build parts
+    // A reversible browser-only alternative to painted eye patches with copied hair/brows.
+    if(opts.simpleBlink)entries=entries.filter(function(e){return !/^eye_close2?$/.test(baseName(e.name));});
+
     var parts = [], z = 0, sided = {};
     for (var ei = 0; ei < entries.length; ei++) {
       var e = entries[ei];
-      var bn = baseName(e.name);
-      var slot = Object.prototype.hasOwnProperty.call(SLOTS, bn) ? SLOTS[bn] : null;
+      var bn = baseName(e.name), firstPart = parts.length;
+      var variant = /^toggle (hair|top|bottom|headwear): /.exec(bn);
+      var slot = Object.prototype.hasOwnProperty.call(SLOTS, bn) ? SLOTS[bn]
+        : variant ? VARIANT_SLOTS[variant[1]]
+        : /^toggle ./.test(bn) ? TOGGLE_SLOT : null;   // "toggle blush": an overlay switched on and off
       if (!slot || slot.group === 'auto') {
         var c0 = centroidOf(e.alpha, W, H);
         var guessed = (c0 && c0.cy < FACE.y1) ? 'head' : 'body';
-        if (!slot) warnings.push('未知のレイヤー名 "' + e.name + '" — ' + (guessed === 'head' ? '頭' : '体') + 'に追従させます');
+        if (!slot) warnings.push('Unknown layer name "' + e.name + '"; it follows the ' + (guessed === 'head' ? 'head' : 'body'));
         slot = { depth: slot ? slot.depth : 1.0, group: guessed, unknown: !slot };
       }
-      if (slot.split) {
+      var eyeToggle = /^toggle (heart eyes|star eyes|spiral eyes|> < eyes)$/.test(bn);
+      if (eyeToggle) {
+        var eyeMasks = {l:new Uint8Array(W*H),r:new Uint8Array(W*H)};
+        for(var ep=0;ep<e.alpha.length;ep++)if(e.alpha[ep])eyeMasks[ep%W<FACE.cx?'l':'r'][ep]=1;
+        ['l','r'].forEach(function(side, index){
+          if(!eyeMasks[side])return;
+          // Fractional order keeps all following artist layer IDs stable across this upgrade.
+          var part=makePart(e.name+'_'+side,e.layer,e.alpha,eyeMasks[side],W,H,slot,z+(index+1)/100,side.toUpperCase(),null);
+          if(part){part.toggleKey=e.name;part.toggleEye=bn==='toggle > < eyes'?'closed':'open';parts.push(part);}
+        });
+        z++;
+      } else if (slot.split) {
         var masks = splitSides(e.alpha, W, H, FACE.cx);
         var got = false;
         ['l', 'r'].forEach(function (s) {
@@ -590,7 +649,7 @@
             got = true;
           }
         });
-        if (!got) warnings.push('"' + e.name + '" の左右分離に失敗（空レイヤー？）');
+        if (!got) warnings.push('Could not split "' + e.name + '" into left and right (empty layer?)');
       } else if (slot.phys === 'hair') {
         var isPart = /_\d+$/.test(e.name);
         var bb2 = bboxOf(e.alpha, W, H, 16);
@@ -612,6 +671,8 @@
         var rec3 = makePart(e.name, e.layer, e.alpha, null, W, H, slot, z, null, null);
         if (rec3) { if (slot.unknown) rec3.unknown = true; parts.push(rec3); z++; }
       }
+      if (variant) for (var vp = firstPart; vp < parts.length; vp++) { parts[vp].replaces = VARIANT_PARTS[variant[1]]; parts[vp].variantPart = variant[1]; }
+      if (MOUTH_EMOTES.test(bn)) for (var mp = firstPart; mp < parts.length; mp++) { parts[mp].replaces = MOUTH_LAYERS; parts[mp].variantPart = 'mouth'; }
     }
 
     // anchors
@@ -625,18 +686,20 @@
         var ic = ir ? centroidOf(ir, W, H) : centroidOf(ew, W, H);
         a.icx = ic.cx; a.icy = ic.cy;
         var cc = ec ? centroidOf(ec, W, H) : null;
-        a.closeY = cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
+        var closed = parts.find(function(p){return p.fade==='eyeClose' && p.side===s.toUpperCase();});
+        var lidY = closedLidY(closed,a);
+        a.closeY = lidY != null ? lidY : cc ? cc.cy : (b.y0 + (b.y1 - b.y0) * 0.62);
         anchors[K] = a;
       }
     });
-    if (!anchors.eyeL || !anchors.eyeR) warnings.push('目のアンカーが不完全です（eyewhite/irides を確認）');
+    if (!anchors.eyeL || !anchors.eyeR) warnings.push('Eye anchors are incomplete (check eyewhite / irides)');
 
     var mouthAlpha = merged('mouth_open') || merged('mouth_close');
     if (mouthAlpha) {
       var mb = bboxOf(mouthAlpha, W, H, 8), mc = centroidOf(mouthAlpha, W, H);
       anchors.mouth = { x0: mb.x0, x1: mb.x1, y0: mb.y0, y1: mb.y1, cx: mc.cx, cy: mc.cy };
     } else {
-      warnings.push('mouth_open / mouth_close がありません');
+      warnings.push('No mouth_open / mouth_close layers');
       anchors.mouth = { x0: FACE.cx - 20, x1: FACE.cx + 20, y0: FACE.cy + 40, y1: FACE.cy + 60, cx: FACE.cx, cy: FACE.cy + 50 };
     }
 
@@ -677,7 +740,7 @@
             synth.eye = true;
           }
         });
-        if (synth.eye) warnings.push('不足する閉じ目を自動配置しました（「目」の差分バーで調整可）');
+        if (synth.eye) warnings.push('Missing closed eyes were placed automatically (adjust them with the Eyes sliders)');
       }
       // mouth
       if (G.mouth && !findPart('mouth_close').length && merged('mouth_open')) {
@@ -691,10 +754,20 @@
         if (idxM < 0) idxM = lastIndexWhere(parts, function (p) { return p.name === 'face'; });
         parts.splice(idxM + 1, 0, mc);
         synth.mouth = true;
-        warnings.push('mouth_close が無いため汎用閉じ口を自動配置しました（「口」のバーで調整可）');
+        warnings.push('No mouth_close layer, so a generic closed mouth was placed (adjust it with the Mouth sliders)');
       }
     }
-    for (var zi = 0; zi < parts.length; zi++) parts[zi].z = zi;
+    var stableZ=0,lastToggle=null,toggleBase=0;
+    for (var zi = 0; zi < parts.length; zi++) {
+      if(parts[zi].toggleKey){
+        if(lastToggle!==parts[zi].toggleKey){toggleBase=stableZ++;lastToggle=parts[zi].toggleKey;}
+        parts[zi].z=toggleBase+(parts[zi].side==='L'?.01:.02);
+      }else{parts[zi].z=stableZ++;lastToggle=null;}
+      if(parts[zi].fade==='eyeClose'||parts[zi].fade==='eyeClose2'){
+        var eye=anchors['eye'+parts[zi].side];
+        if(eye)parts[zi].closeY=closedLidY(parts[zi],eye) ?? eye.closeY;
+      }
+    }
 
     return { canvas: { w: W, h: H }, layers: parts, anchors: anchors, warnings: warnings, synth: synth };
   }

@@ -25,9 +25,24 @@ logger = logging.getLogger(__name__)
 # Share of a real run per stage, from measured timings (~2 min paint, ~10–12 min decompose,
 # seconds to package) — turns per-stage trackers into one bar that never goes backwards.
 STAGES = {
-    "image": (0.0, 0.15, "Painting the character…"),
-    "separate": (0.15, 0.97, "Separating layers…"),
+    "image": (0.0, 0.12, "Painting the character…"),
+    "separate": (0.12, 0.86, "Separating layers…"),
+    "expressions": (0.86, 0.97, "Painting expressions…"),
     "assemble": (0.97, 1.0, "Packaging PSD + Cubism files…"),
+}
+# Jobs that only run some stages spread the bar over those.
+STAGES_BY_OPERATION = {
+    "expressions": {"expressions": (0.0, 0.9, "Painting expressions…"),
+                    "assemble": (0.9, 1.0, "Packaging PSD + Cubism files…")},
+    "edit": {"image": (0.0, 1.0, "Repainting the selection…")},
+    "extend": {"image": (0.0, 1.0, "Extending the canvas…")},
+    "refine": {"image": (0.0, 1.0, "Refining details…")},
+    # measured on the 8 GB laptop: ~4 min for the mesh (engine start ~1 min), ~15 s to rig
+    "avatar3d": {"mesh": (0.0, 0.92, "Building the 3D model…"), "rig": (0.92, 1.0, "Rigging the avatar…")},
+    "generate3d": {"image": (0.0, 0.08, "Painting the character…"), "separate": (0.08, 0.62, "Separating layers…"),
+                   "expressions": (0.62, 0.69, "Painting expressions…"),
+                   "assemble": (0.69, 0.7, "Packaging PSD + Cubism files…"),
+                   "mesh": (0.7, 0.98, "Building the 3D model…"), "rig": (0.98, 1.0, "Rigging the avatar…")},
 }
 KEEP_FINISHED = 20
 ACTIVE = ("queued", "running")
@@ -124,8 +139,9 @@ class JobQueue:
             job.cancel_requested = True
             if job.state == "queued":
                 job.state, job.finished = "cancelled", time.time()
-                if job.request.reference_image:  # an upload that will now never be imported
-                    Path(job.request.reference_image).unlink(missing_ok=True)
+                for staged in (job.request.reference_image, job.request.mask_image):
+                    if staged:  # uploaded/staged files that will now never be used
+                        Path(staged).unlink(missing_ok=True)
                 self._save()
             else:
                 # The running stage raises InterruptedError at its next check (diffusion step,
@@ -157,7 +173,11 @@ class JobQueue:
         elif job.state == "running":
             manager = get_progress_manager()
             stage = manager.stages.get(job.id, "image")
-            lo, hi, label = STAGES.get(stage, (0.0, 1.0, ""))
+            operation = getattr(job.request, "operation", "generate")
+            if operation == "generate" and getattr(job.request, "avatar3d", None):
+                operation = "generate3d"
+            stages = STAGES_BY_OPERATION.get(operation, STAGES)
+            lo, hi, label = stages.get(stage, (0.0, 1.0, ""))
             tracker = manager.get_tracker(job.id)
             frac = min(1.0, tracker.current_step / tracker.total_steps) if tracker and tracker.total_steps else 0.0
             data.update(
@@ -167,6 +187,8 @@ class JobQueue:
                 # Per-stage ETA only: stage durations differ too much to extrapolate a total.
                 eta=round(tracker.eta) if tracker and tracker.current_step else None,
             )
+            if job.id in manager.artwork:   # the artwork is ready while later stages run
+                data["artwork"] = manager.artwork[job.id]
         return data
 
     def _prune(self):

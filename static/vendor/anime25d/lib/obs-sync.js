@@ -55,7 +55,7 @@ function create(options){
   }
   async function fetchModel(){
     const r=await fetch('/model/current',{cache:'no-store'});
-    if(!r.ok)throw new Error('OBS用のモデルがまだ送られていません');
+    if(!r.ok)throw new Error('No character has been sent to OBS yet');
     let name='model.psd';
     try{name=decodeURIComponent(r.headers.get('X-Model-Name')||'')||name;}catch(err){}
     return {buffer:await r.arrayBuffer(),name,id:r.headers.get('X-Model-Id')||''};
@@ -106,7 +106,7 @@ function create(options){
       const r=await fetch('/model',{method:'PUT',headers:{'Content-Type':'application/octet-stream','X-Model-Name':encodeURIComponent(name),'X-Model-Id':id},body:buffer,signal:controller.signal});
       if(!r.ok)throw new Error('HTTP '+r.status);
       if(token===uploadToken){st.uploaded=id;st.serverModel={id,name};st.error=null;}
-    }catch(err){if(token===uploadToken&&err.name!=='AbortError')st.error='OBSへモデルを送れません: '+err.message;}
+    }catch(err){if(token===uploadToken&&err.name!=='AbortError')st.error='Could not send the character to OBS: '+err.message;}
     finally{if(token===uploadToken){st.uploading=false;uploadController=null;emit();}}
     return token===uploadToken&&!st.error;
   }

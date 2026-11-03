@@ -19,8 +19,31 @@ from src.core.image_generator import ImageGenerator, DummyImageGenerator
 from src.core.asset_separator import AssetSeparator, DummyAssetSeparator
 from src.core.model_assembler import ModelAssembler, DummyModelAssembler
 from src.utils.helpers import save_json
+from src.utils.progress_tracker import get_progress_manager
+from src.core import expressions
+import config
 
 logger = logging.getLogger(__name__)
+
+
+def _replace_avatar(work: Path, final: Path) -> None:
+    """Install a finished avatar without deleting the previous one if a rename fails."""
+    backup = final.with_name(f"{final.name}.backup-{uuid.uuid4().hex}")
+    had_previous = final.exists()
+    if had_previous:
+        final.rename(backup)
+    try:
+        work.rename(final)
+    except BaseException:
+        if had_previous:
+            try:
+                backup.rename(final)
+            except OSError as restore_error:
+                logger.exception("Could not restore previous 3D avatar; it remains at %s", backup)
+                raise RuntimeError(f"The previous 3D avatar was preserved at {backup}, but could not be restored automatically.") from restore_error
+        raise
+    if had_previous:
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 class AssemblyLine:
@@ -110,7 +133,7 @@ class AssemblyLine:
         start_time = time.time()
 
         # Resolve randomness once so the saved brief can reproduce this character.
-        if request.seed is None and not request.reference_image:
+        if request.seed is None and request.source == "prompt":
             from secrets import randbits
             request = replace(request, seed=randbits(31))
 
@@ -137,15 +160,32 @@ class AssemblyLine:
             # Stage 1: Image Generation
             self._enter_stage(task_id, "image", "Generating base image...", 0.1)
             model.status = GenerationStatus.IMAGE_GENERATION
-            if request.reference_image:  # the user's own artwork, validated by the upload route
+            if request.operation in ("edit", "extend", "refine"):  # repaint part of staged artwork
+                self._ensure_generator(request)
+                base_image_path = self._repaint(request, model_output_dir, task_id)
+                model.request = request = replace(request, reference_image=None, mask_image=None, pose_image=None)
+                model.metadata["source"] = request.operation
+                if request.operation == "extend" and (request.extension or {}).get("mode") in ("full_body", "front"):
+                    model.metadata["checks"] = self._review(base_image_path, request.extension)
+            elif request.reference_image:  # artwork the upload/separate routes validated and staged
                 base_image_path = model_output_dir / "base_image.png"
                 shutil.move(request.reference_image, base_image_path)
-                model.request = request = replace(request, reference_image="upload")
-                model.metadata["source"] = "upload"
+                model.request = request = replace(request, reference_image=None)
+                model.metadata["source"] = request.source
+                if request.import_options is not None:
+                    request = model.request = self._prepare_import(request, base_image_path, model, task_id)
             else:
                 self._ensure_generator(request)
                 base_image_path = self._generate_image(request, model_output_dir, task_id)
             model.base_image_path = base_image_path
+            from src.utils.progress_tracker import get_progress_manager
+            get_progress_manager().artwork[task_id] = model.id
+            if request.sketch:
+                # No preview.png: the Gallery and Studio fall back to the artwork itself.
+                model.status = GenerationStatus.SKETCH
+                model.generation_time = time.time() - start_time
+                logger.info("Sketch %s ready in %.0fs", model.id, model.generation_time)
+                return model
             logger.info(f"Base image generated: {base_image_path}")
 
             # Stage 2: Asset Separation
@@ -157,6 +197,17 @@ class AssemblyLine:
             assets = self._separate_assets(base_image_path, model_output_dir, request.custom_layers, task_id)
             model.assets = assets
             logger.info(f"Assets separated: {len(assets)} layers")
+            kept = self._keep_head(request, model_output_dir)
+            if kept:
+                model.metadata["kept_head_layers"] = kept
+
+            # Stage 2b: the character's own closed eyes and other mouth state, for Live Preview.
+            if self._wants_expressions(assets):
+                self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.8)
+                made = self._paint_expressions(request, model_output_dir, task_id, keep=True)
+                if made:
+                    model.metadata["expressions"] = made
+                    assets = model.assets = assets + expressions.as_assets(model_output_dir, made, assets)
 
             # Stage 3: Model Assembly
             self._enter_stage(task_id, "assemble", "Assembling Live2D model...", 0.7)
@@ -207,6 +258,269 @@ class AssemblyLine:
             else:
                 shutil.rmtree(model_output_dir, ignore_errors=True)
             raise
+
+    def _prepare_import(self, request: GenerationRequest, path: Path, model: VTuberModel,
+                        task_id: Optional[str]) -> GenerationRequest:
+        """Frame, whiten, optionally clean up and describe an uploaded design (importer.py)."""
+        from PIL import Image
+        from src.core import importer, tagger
+
+        options = request.import_options or {}
+        with Image.open(path) as img:
+            image = img.convert("RGB")
+        enhance = float(options.get("enhance") or 0)
+        if enhance > 0 and not self.use_dummy_generators:
+            self._ensure_generator(request)
+        prepared, tags = importer.prepare(image, frame_figure=bool(options.get("frame", True)),
+                                          plain_background=bool(options.get("plain_background", True)),
+                                          enhance=enhance, generator=self.image_generator, task_id=task_id,
+                                          tag=None if self.use_dummy_generators else tagger.tag_image)
+        prepared.save(path)
+        updates = {"import_options": None, "width": prepared.width, "height": prepared.height}
+        if tags:
+            model.metadata["tags"] = tagger.describe(tags)
+            if request.prompt.startswith("Uploaded artwork"):
+                updates["prompt"] = model.metadata["tags"]  # a brief for later edits and expressions
+        return replace(request, **updates)
+
+    def _repaint(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str]) -> Path:
+        """Edit / extend: inpaint the staged artwork through the staged mask into a new base image."""
+        from PIL import Image
+
+        staged = [Path(request.reference_image)]
+        with Image.open(staged[0]) as source:
+            image = source.convert("RGB")
+        if request.operation == "refine":
+            return self._refine(request, image, staged, output_dir, task_id)
+        staged.append(Path(request.mask_image))
+        with Image.open(staged[1]) as mask:
+            mask = mask.convert("L")
+        pose = None
+        if request.pose_image:
+            staged.append(Path(request.pose_image))
+            with Image.open(staged[-1]) as source:
+                pose = source.convert("RGB")
+        painted = self.image_generator.inpaint(
+            image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
+            strength=request.strength, steps=request.steps, guidance=request.guidance_scale, seed=request.seed, task_id=task_id,
+            # The extend mask is a change map: the model redraws the art's cut edges gradually into
+            # the new body. A hard mask plus a separate seam pass left straight joins and ghosts.
+            graded=request.operation == "extend", pose=pose,
+            appearance=image if (request.extension or {}).get("mode") == "front" else None,
+            reference_strength=(request.extension or {}).get("reference_strength", .65),
+            label="Extending the canvas" if request.operation == "extend" else "Repainting the selection")
+        path = output_dir / "base_image.png"
+        painted.save(path)
+        for file in staged:
+            file.unlink(missing_ok=True)
+        return path
+
+    def _keep_head(self, request: GenerationRequest, model_dir: Path) -> list:
+        """An extended body keeps its source character's head layers where they still match."""
+        import re
+        from src.core import heads
+
+        info = request.extension or {}
+        source = str(info.get("source_model") or "")
+        if not re.fullmatch(r"[\w-]+", source) or not (self.output_base_dir / source / "assets").is_dir():
+            return []  # not an extension, the source was deleted, or a crafted project path
+        try:
+            return heads.transfer(self.output_base_dir / source, model_dir, info)
+        except Exception as exc:
+            logger.warning("Could not keep the original head layers, using the new separation: %s", exc)
+            return []
+
+    def _refine(self, request: GenerationRequest, image, staged, output_dir: Path, task_id: Optional[str]) -> Path:
+        """Redraw each box (a hand, the face) in its own tight crop (src/core/refine.py)."""
+        from PIL import Image, ImageDraw
+
+        for i, (x0, y0, x1, y1) in enumerate(request.regions or []):
+            mask = Image.new("L", image.size, 0)
+            ImageDraw.Draw(mask).ellipse((x0, y0, x1, y1), fill=255)
+            image = self.image_generator.inpaint(
+                image, mask, request.edit_prompt or request.prompt, negative=request.negative_prompt,
+                strength=request.strength, seed=None if request.seed is None else request.seed + i,
+                task_id=task_id, context=0.15, feather=10, label=f"Refining {i + 1} of {len(request.regions)}")
+        path = output_dir / "base_image.png"
+        image.save(path)
+        for file in staged:
+            file.unlink(missing_ok=True)
+        return path
+
+    def _review(self, path: Path, info: dict) -> list:
+        """Automatic checks of a drawn full body (src/core/checks.py); [] when they can't run."""
+        from PIL import Image
+        from src.core import checks, outpaint, tagger
+
+        try:
+            with Image.open(path) as img:
+                image = img.convert("RGB")
+            # Never a 378 MB download inside an extension: tag checks only when the tagger is there.
+            tiles = checks.face_tiles(image, info)
+            tagged = None if self.use_dummy_generators else tagger.tag_images([image] + tiles, download=False)
+            tags, tile_tags = (tagged[0], tagged[1:]) if tagged else (None, None)
+            findings = checks.review(image, outpaint.character_mask(image), info, tags, tile_tags)
+        except Exception as exc:
+            logger.warning("Automatic checks failed, continuing without: %s", exc)
+            return []
+        logger.info("Checks for %s: %s", path.parent.name, ", ".join(f["id"] for f in findings) or "all clear")
+        return findings
+
+    def _wants_expressions(self, assets) -> bool:
+        return (not self.use_dummy_generators and config.EXPRESSIONS
+                and any(a.metadata.get("backend") == "see-through" for a in assets)
+                and any(a.layer_type.startswith(("irides", "mouth")) for a in assets))
+
+    def _paint_expressions(self, request: GenerationRequest, model_dir: Path, task_id: Optional[str],
+                           keep: bool = False) -> Dict:
+        """Expression layers, or {} when painting fails (the character is complete without).
+        ``keep``: reuse closed eyes and a mouth already there (carried over with a kept head)."""
+        try:
+            made = expressions.read(model_dir) if keep else {}
+            if not (made.get("eye_close") and (made.get("mouth_open") or made.get("mouth_close"))):
+                self._ensure_generator(request)
+                made = expressions.generate(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            # A brief carries its toggles into an extension; ones carried over with the head stay.
+            toggles = [t for t in request.toggles or [] if t not in made.get("toggles", {})]
+            if toggles:
+                if any(expressions.TOGGLES[t].prompt is not None for t in toggles):
+                    self._ensure_generator(request)
+                made = expressions.paint_toggles(self.image_generator, model_dir, toggles,
+                                                 seed=request.seed, task_id=task_id)
+            if request.visemes and not made.get("visemes"):
+                self._ensure_generator(request)
+                made = expressions.paint_visemes(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            return made
+        except InterruptedError:
+            raise
+        except Exception as exc:
+            logger.warning("Expression painting failed, continuing without: %s", exc, exc_info=True)
+            return {}
+
+    def add_expressions(self, model_id: str, task_id: Optional[str] = None, toggles=None, visemes=False,
+                        variant=None) -> str:
+        """Paint expression layers (or only the given toggles and/or vowel mouths) onto an
+        existing separated character and repackage it."""
+        from src.utils.helpers import load_json
+
+        model_dir = self.output_base_dir / model_id
+        metadata_path = model_dir / "metadata.json"
+        data = load_json(metadata_path)
+        model = VTuberModel.from_dict(data)
+        assets = [a for a in model.assets if not a.metadata.get("expression") and Path(a.file_path).exists()]
+        if not any(a.metadata.get("backend") == "see-through" for a in assets):
+            raise ValueError("Expressions need a character separated by See-through")
+        request = model.request or GenerationRequest(prompt="")
+        if variant:
+            from src.core import variants
+
+            self._enter_stage(task_id, "expressions", "Painting the alternate look...", 0.1)
+            self._ensure_generator(request)
+            made = variants.paint(self.image_generator, model_dir, variant["part"], variant["prompt"],
+                                  seed=request.seed, task_id=task_id, brief=request.prompt)
+        elif toggles or visemes:
+            self._enter_stage(task_id, "expressions", "Painting expression toggles...", 0.1)
+            if visemes or any(expressions.TOGGLES[name].prompt is not None for name in toggles or []):
+                self._ensure_generator(request)  # vector-only emotes need neither weights nor GPU
+            made = expressions.read(model_dir)
+            if toggles:
+                made = expressions.paint_toggles(self.image_generator, model_dir, toggles, seed=request.seed,
+                                                 task_id=task_id)
+            if visemes:
+                made = expressions.paint_visemes(self.image_generator, model_dir, seed=request.seed, task_id=task_id)
+            missing = [expressions.TOGGLES[t].label for t in toggles or [] if t not in made.get("toggles", {})]
+            missing += ["the vowel mouths"] if visemes and len(made.get("visemes", {})) < len(expressions.VISEMES) else []
+            if missing:
+                raise RuntimeError("Could not find where to paint: " + ", ".join(missing))
+        else:
+            self._enter_stage(task_id, "expressions", "Painting closed eyes and mouth...", 0.1)
+            made = self._paint_expressions(request, model_dir, task_id)
+            if not made or not any(k in made for k in ("eye_close", "mouth_open", "mouth_close")):
+                raise RuntimeError("Could not paint expressions for this character (see the log)")
+        self._enter_stage(task_id, "assemble", "Repackaging PSD + Cubism files...", 0.9)
+        assets = assets + expressions.as_assets(model_dir, made, assets)
+        final_model_path = self._assemble_model(assets, model_dir, model.name)
+        # A rename can land while painting/repackaging; preserve the latest owner metadata.
+        data = load_json(metadata_path)
+        data["assets"] = [{"layer_type": a.layer_type, "file_path": str(a.file_path), "metadata": a.metadata}
+                          for a in assets]
+        data.setdefault("metadata", {})["expressions"] = made
+        data["final_model_path"] = str(final_model_path)
+        save_json(data, metadata_path)
+        return model_id
+
+    def make_avatar3d(self, model_id: str, task_id: Optional[str] = None, options: Optional[Dict] = None) -> str:
+        """Build ``<model>/avatar3d/avatar.vrm``: Pixal3D mesh from the artwork, then the rig.
+        Built in a fresh folder that replaces the old avatar only on success."""
+        from PIL import Image
+
+        from src.core import mesh3d, rig3d
+        from src.utils.helpers import load_json
+
+        options = options or {}
+        model_dir = self.output_base_dir / model_id
+        metadata_path = model_dir / "metadata.json"
+        data = load_json(metadata_path)
+        name = data.get("metadata", {}).get("display_name") or data.get("name") or "Ka-myii character"
+        work = model_dir / "avatar3d.new"
+        shutil.rmtree(work, ignore_errors=True)
+        previous = data.get("metadata", {}).get("avatar3d", {})
+        reuse = bool(options.get("reuse_mesh"))
+        seed = previous.get("seed") if reuse else options.get("seed")
+        if seed is None:
+            from secrets import randbits
+            seed = randbits(31)
+        try:
+            if reuse:
+                self._enter_stage(task_id, "rig", "Refreshing the 3D rig and expressions...", 0.92)
+                source = model_dir / "avatar3d"
+                work.mkdir(parents=True)
+                for part in ("mesh.glb", "camera.json", "crop.png"):
+                    shutil.copy2(source / part, work / part)
+                for part in ("crop_mask.png", "engine.log"):
+                    if (source / part).is_file():
+                        shutil.copy2(source / part, work / part)
+                report = rig3d.build(model_dir, work, name)
+            elif self.use_dummy_generators:
+                self._enter_stage(task_id, "mesh", "Building the 3D model...", 0.05)
+                report = rig3d.demo(model_dir, work, name)
+            else:
+                self._enter_stage(task_id, "mesh", "Building the 3D model...", 0.05)
+                # The 3D engine is a separate process that needs the whole GPU.
+                self.image_generator.unload_model()
+                tracker = get_progress_manager().create_tracker(task_id, 100) if task_id else None
+
+                def progress(frac, label):
+                    if tracker and tracker.is_cancelled():   # the engine is killed on the way out
+                        raise InterruptedError("Generation cancelled by user")
+                    if tracker:
+                        tracker.update(int(frac * 100), label)
+
+                from src.core.outpaint import character_mask
+
+                art = Image.open(model_dir / "base_image.png").convert("RGB")
+                mesh3d.generate(art, character_mask(art), work, seed, options.get("quality", "standard"),
+                                progress=progress)
+                self._enter_stage(task_id, "rig", "Rigging the avatar...", 0.92)
+                report = rig3d.build(model_dir, work, name)
+            # The CPU rig can take time too: honour cancellation before replacing an
+            # existing avatar, and keep the old result if Windows refuses a rename.
+            if task_id and get_progress_manager().is_cancelled(task_id):
+                raise InterruptedError("Generation cancelled by user")
+            _replace_avatar(work, model_dir / "avatar3d")
+        except BaseException:
+            if (work / "engine.log").exists():   # keep the engine's account of what went wrong
+                (config.BASE_DIR / "logs").mkdir(exist_ok=True)
+                shutil.copyfile(work / "engine.log", config.BASE_DIR / "logs" / "comfy3d-last-failure.log")
+            shutil.rmtree(work, ignore_errors=True)
+            raise
+        data = load_json(metadata_path)   # a rename can land meanwhile
+        data.setdefault("metadata", {})["avatar3d"] = {
+            "vrm": "avatar3d/avatar.vrm", "quality": previous.get("quality", "standard") if reuse else options.get("quality", "standard"), "seed": seed,
+            "created": time.time(), **{k: v for k, v in report.items() if k != "path"}}
+        data["metadata"].pop("avatar3d_error", None)
+        save_json(data, metadata_path)
+        return model_id
 
     def _generate_image(self, request: GenerationRequest, output_dir: Path, task_id: Optional[str] = None) -> Path:
         """Stage 1: Generate base image"""

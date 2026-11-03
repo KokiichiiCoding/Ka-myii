@@ -4,10 +4,12 @@
 {% block content %}
 <div class="km-wrap">
   <section class="home-layout">
+    <div class="home-sparkles" aria-hidden="true"><span style="--x:6%;--y:12%;--d:0s;--s:14px">✦</span><span style="--x:38%;--y:6%;--d:2.5s;--s:10px">✦</span><span style="--x:52%;--y:78%;--d:1.2s;--s:12px">✦</span><span style="--x:88%;--y:8%;--d:3.4s;--s:16px">✦</span><span style="--x:96%;--y:62%;--d:0.6s;--s:10px">✦</span><span style="--x:30%;--y:92%;--d:4.1s;--s:13px">✦</span><span style="--x:70%;--y:40%;--d:5.0s;--s:9px">✦</span></div>
     <div><span class="eyebrow">AN INDEPENDENT CHARACTER WORKSHOP</span><h1>From a small idea.<br>To a <em>living character.</em></h1><p>A local space to create anime characters, uncover their layers, and try them in motion. Your imagination, your machine, your cast.</p><div class="home-actions"><a class="btn btn-primary" href="/generator">Enter the Studio ↗</a><a class="btn" href="/gallery">Your collection</a></div></div>
-    <div class="home-sheet"><div class="sheet-top"><span>KA-MYII / CHARACTER STUDIES</span><span>No. 01</span></div><div class="sheet-mark" id="homeMonogram">K/m</div><a class="sheet-art" id="homeCharacter" aria-label="Preview the featured character" hidden><img id="homeCharacterImage" alt="A character made in your local workshop"></a><div class="sheet-bottom">A little imagination.<br>A life of its own.<small>DESIGN · DECOMPOSE · ANIMATE</small></div></div>
+    <div class="home-sheet"><div class="sheet-top"><span>KA-MYII / CHARACTER STUDIES</span><span id="homeNumber">No. 01</span></div><div class="sheet-mark" id="homeMonogram">K/m</div><a class="sheet-art" id="homeCharacter" aria-label="Preview the featured character" hidden><img id="homeCharacterImage" alt="A character made in your local workshop"><span class="sheet-name" id="homeName"></span></a><div class="sheet-bottom">A little imagination.<br>A life of its own.<small>DESIGN · DECOMPOSE · ANIMATE</small></div></div>
   </section>
-  <section class="workshop-steps" aria-label="The process"><div><span>01 / DESIGN</span><h2>Find their character.</h2><p>Describe the hair, outfit, expression and details, and generate artwork with any SDXL checkpoint and LoRAs. Or bring artwork you already have.</p></div><div><span>02 / UNCOVER</span><h2>Get beneath the surface.</h2><p>See-through separates aligned character parts. Keep a layered PSD or OpenRaster document for your own finishing touches.</p></div><div><span>03 / BRING TO LIFE</span><h2>Meet them in motion.</h2><p>Try blinking, expressions and local camera tracking in Live Preview. Export the Cubism scaffold to continue rigging in Live2D.</p></div></section>
+  <section class="recent-cast" id="recentCast" hidden aria-labelledby="recentCastTitle"><div class="recent-head"><span class="eyebrow" id="recentCastTitle">RECENT CAST</span><a class="text-link" href="/gallery">See all ↗</a></div><div class="recent-strip" id="recentStrip"></div></section>
+  <section class="workshop-steps" aria-label="The process"><div><span>01 / DESIGN</span><h2><a href="/generator">Find their character.</a></h2><p>Describe the hair, outfit, expression and details, and generate artwork with any SDXL checkpoint and LoRAs. Or bring artwork you already have.</p></div><div><span>02 / UNCOVER</span><h2><a href="/gallery">Get beneath the surface.</a></h2><p>See-through separates aligned character parts. Keep a layered PSD or OpenRaster document for your own finishing touches.</p></div><div><span>03 / BRING TO LIFE</span><h2><a href="/gallery" id="stepMotion">Meet them in motion.</a></h2><p>Try blinking, expressions and local camera tracking in Live Preview. Export the Cubism scaffold to continue rigging in Live2D.</p></div></section>
 </div>
 {% endblock %}
 
@@ -16,16 +18,51 @@
 (async () => {
   try {
     const {data} = await axios.get('/api/generation/list');
-    const completed = (data.models || []).filter(m => m.status === 'completed');
-    const model = completed.find(m => m.assets?.some(a => a.metadata?.backend === 'see-through')) || completed[0];
-    if (!model) return;
-    const image = document.getElementById('homeCharacterImage');
-    image.onload = () => {
-      document.getElementById('homeMonogram').hidden = true;
-      document.getElementById('homeCharacter').hidden = false;
-    };
-    document.getElementById('homeCharacter').href = `/preview/${encodeURIComponent(model.id)}`;
-    image.src = `/api/generation/preview/${encodeURIComponent(model.id)}`;
+    const models = (data.models || []).filter(m => ['completed', 'sketch'].includes(m.status));
+    const name = m => m.display_name || (m.name?.startsWith('model_') ? `Study ${m.name.slice(6).toUpperCase()}` : (m.name || 'Character'));
+    const open = m => m.status === 'completed' && m.assets?.length ? `/preview/${encodeURIComponent(m.id)}` : `/generator?model=${encodeURIComponent(m.id)}`;
+    const art = m => `/api/generation/preview/${encodeURIComponent(m.id)}?size=thumb`;
+    // Separated characters first: they are the ones that move in Live Preview.
+    const featured = models.filter(m => m.status === 'completed' && m.assets?.some(a => a.metadata?.backend === 'see-through')).slice(0, 6);
+    if (!featured.length && models[0]) featured.push(models[0]);
+    if (featured.length) {
+      if (featured[0].status === 'completed') document.getElementById('stepMotion').href = open(featured[0]);
+      const link = document.getElementById('homeCharacter'), image = document.getElementById('homeCharacterImage');
+      let index = 0;
+      const show = () => {
+        const m = featured[index];
+        link.href = open(m); link.setAttribute('aria-label', `Open ${name(m)}`);
+        document.getElementById('homeName').textContent = name(m);
+        document.getElementById('homeNumber').textContent = `No. ${String(index + 1).padStart(2, '0')} / ${String(featured.length).padStart(2, '0')}`;
+        image.src = art(m);
+      };
+      image.onload = () => {
+        document.getElementById('homeMonogram').hidden = true;
+        link.hidden = false; link.classList.remove('fading');
+      };
+      show();
+      if (featured.length > 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        let paused = false;
+        link.addEventListener('mouseenter', () => { paused = true; });
+        link.addEventListener('mouseleave', () => { paused = false; });
+        setInterval(() => {
+          if (paused || document.hidden) return;
+          link.classList.add('fading');
+          setTimeout(() => { index = (index + 1) % featured.length; show(); }, 450);
+        }, 5000);
+      }
+    }
+    const strip = document.getElementById('recentStrip');
+    for (const m of models.slice(0, 8)) {
+      const card = document.createElement('a'); card.className = 'recent-card'; card.href = open(m);
+      card.title = m.notes || m.request?.prompt || '';
+      const img = document.createElement('img'); img.src = art(m); img.alt = ''; img.loading = 'lazy';
+      const label = document.createElement('span'); label.textContent = name(m);
+      const kind = document.createElement('small');
+      kind.textContent = m.metadata?.avatar3d ? '2D + 3D' : m.status === 'sketch' ? 'Sketch' : 'Live 2D';
+      card.append(img, label, kind); strip.append(card);
+    }
+    document.getElementById('recentCast').hidden = !strip.children.length;
   } catch (error) { /* The monogram remains if the collection is unavailable. */ }
 })();
 </script>
